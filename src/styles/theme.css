@@ -141,6 +141,13 @@
 
   html {
     font-size: var(--font-size);
+    min-height: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body,
+  #root {
+    min-height: 100%;
   }
 
   h1 {
@@ -183,5 +190,11 @@
     font-size: var(--text-base);
     font-weight: var(--font-weight-normal);
     line-height: 1.5;
+  }
+
+  body {
+    min-height: 100dvh;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
   }
 }

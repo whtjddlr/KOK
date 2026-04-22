@@ -1,4 +1,4 @@
-import { X, MapPin } from 'lucide-react';
+import { MapPin, X } from 'lucide-react';
 import { Participant } from '../types';
 
 interface ParticipantCardProps {
@@ -34,11 +34,9 @@ export function ParticipantCard({ participant, onRemove, color }: ParticipantCar
             <span className="truncate">{participant.location}</span>
           </div>
 
-          {participant.maxTravelTime && (
-            <div className="mt-2 text-xs text-[#9ca3af]">
-              최대 {participant.maxTravelTime}분 이동 가능
-            </div>
-          )}
+          <div className="mt-2 text-xs text-[#9ca3af]">
+            최대 {participant.maxTravelTime}분까지 이동 가능
+          </div>
         </div>
       </div>
     </div>

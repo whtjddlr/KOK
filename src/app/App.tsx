@@ -29,7 +29,7 @@ export default function App() {
 
   const handleNewDraw = () => {
     setSelectedWinner(null);
-    setCurrentScreen('home');
+    setCurrentScreen('planner');
   };
 
   const handleBack = () => {
@@ -41,7 +41,7 @@ export default function App() {
   };
 
   return (
-    <div className="w-full h-full overflow-hidden bg-[#fafaf8]">
+    <div className="min-h-screen w-full bg-[#fafaf8]">
       {currentScreen === 'home' && <HomeScreen onCreateRoom={handleCreateRoom} />}
 
       {currentScreen === 'planner' && (
