@@ -88,7 +88,7 @@ export interface Candidate {
   categories: MeetCategoryKey[];
 }
 
-export type NearbyPlaceCategory = 'restaurant' | 'cafe' | 'activity';
+export type NearbyPlaceCategory = 'restaurant' | 'cafe' | 'activity' | 'landmark';
 
 export interface NearbyPlace {
   id: string;

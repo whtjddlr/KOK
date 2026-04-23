@@ -124,6 +124,54 @@ function getThrillHint(thrillLevel: number) {
   return 'Focus on realistic, fair midpoint areas for the whole group.';
 }
 
+function inferMetroArea(candidate: any) {
+  const text = `${candidate?.name ?? ''} ${candidate?.district ?? ''} ${Array.isArray(candidate?.tags) ? candidate.tags.join(' ') : ''}`;
+
+  if (
+    ['인천', '송도', '부평', '구월', '청라', '주안', '계양', '연수', '검암', '작전'].some(
+      (keyword) => text.includes(keyword),
+    )
+  ) {
+    return '인천';
+  }
+
+  if (
+    [
+      '수원',
+      '영통',
+      '광교',
+      '부천',
+      '범계',
+      '안양',
+      '평촌',
+      '판교',
+      '서현',
+      '분당',
+      '정발산',
+      '일산',
+      '고양',
+      '광명',
+      '철산',
+      '안산',
+      '중앙',
+      '용인',
+      '죽전',
+      '수지',
+      '동탄',
+      '구리',
+      '남양주',
+      '하남',
+      '의정부',
+      '김포',
+      '시흥',
+    ].some((keyword) => text.includes(keyword))
+  ) {
+    return '경기';
+  }
+
+  return '서울';
+}
+
 function buildSelectionPayload(
   participants: any[],
   insights: any[],
@@ -135,7 +183,7 @@ function buildSelectionPayload(
 ) {
   return {
     selectionGoal:
-      'Select meetup area candidates near the middle of the group so everyone can reach them as fairly as possible.',
+      'Select meetup area candidates across the Seoul Capital Area (Seoul, Gyeonggi, Incheon) near the middle of the group so everyone can reach them as fairly as possible.',
     localModeRule:
       thrillLevel >= 3
         ? 'Do not replace the balanced core with only local picks. Add local wildcard areas on top of the fair midpoint core.'
@@ -155,6 +203,7 @@ function buildSelectionPayload(
       id: insight?.candidate?.id,
       name: insight?.candidate?.name,
       district: insight?.candidate?.district,
+      metroArea: inferMetroArea(insight?.candidate),
       vibe: insight?.candidate?.vibe,
       bestFor: insight?.candidate?.bestFor,
       routeHint: insight?.candidate?.routeHint,
@@ -240,7 +289,7 @@ export async function fetchOpenAiCandidateSelection({
         {
           role: 'system',
           content:
-            'You are selecting meeting area candidates for a Seoul metro meetup app. Return JSON only. Choose only from the allowed candidate ids. Keep a fair midpoint core for the whole group, and only add a few local wildcard picks when the thrill level requests it. Favor fairness across participants, travel plausibility, and category fit.',
+            'You are selecting meeting area candidates for a Seoul Capital Area meetup app covering Seoul, Gyeonggi, and Incheon. Return JSON only. Choose only from the allowed candidate ids. Keep a fair midpoint core for the whole group, avoid over-favoring central Seoul by default, and only add a few local wildcard picks when the thrill level requests it. Favor fairness across participants, travel plausibility, regional balance, and category fit.',
         },
         {
           role: 'user',
@@ -352,7 +401,7 @@ export async function fetchUpstageCandidateSelection({
         {
           role: 'system',
           content:
-            'Return a JSON object with keys candidate_ids and summary. candidate_ids must contain only allowed ids and match the requested targetCount. Always preserve balanced midpoint recommendations, and only add local wildcard picks on top of that core when the thrill level is high.',
+            'Return a JSON object with keys candidate_ids and summary. candidate_ids must contain only allowed ids and match the requested targetCount. This is for the Seoul Capital Area including Seoul, Gyeonggi, and Incheon. Always preserve balanced midpoint recommendations, avoid defaulting to central Seoul only, and only add local wildcard picks on top of that core when the thrill level is high.',
         },
         {
           role: 'user',

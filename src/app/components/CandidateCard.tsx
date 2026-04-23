@@ -1,5 +1,6 @@
 import { Clock3, MapPin, Sparkles, TrainFront } from 'lucide-react';
 import { meetCategories } from '../data/mockData';
+import { inferMetroAreaLabel } from '../lib/meeting';
 import { CandidateInsight, MeetCategoryKey, SelectionModeKey } from '../types';
 
 interface CandidateCardProps {
@@ -23,6 +24,7 @@ export function CandidateCard({
   selectionMode,
 }: CandidateCardProps) {
   const { candidate, travelInfo, averageDuration, allReachable, accessSummary } = insight;
+  const metroAreaLabel = inferMetroAreaLabel(candidate);
 
   return (
     <div
@@ -46,6 +48,9 @@ export function CandidateCard({
             </span>
             <span className="rounded-full bg-[#f5f1eb] px-2.5 py-1 text-xs text-[#2d3561]">
               {candidate.drawMood}
+            </span>
+            <span className="rounded-full bg-[#edf4ff] px-2.5 py-1 text-xs text-[#35548c]">
+              {metroAreaLabel}
             </span>
             <span className="rounded-full bg-[#eef2ff] px-2.5 py-1 text-xs text-[#2d3561]">
               {selectionMode === 'neighborhood' ? '동네 포함' : categoryLabelMap[selectedCategory]}

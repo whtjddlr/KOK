@@ -13,12 +13,62 @@ import {
   TravelInfo,
 } from '../types';
 
+type MetroAreaLabel = '서울' | '경기' | '인천';
+
 const EARTH_RADIUS_KM = 6371;
 const TRANSIT_SPEED_KM_PER_MIN = 0.45;
 const BASE_FARE = 1500;
 const FARE_PER_KM = 110;
 const MIN_TRAVEL_MINUTES = 12;
 const MAX_SETTLEMENT_ADJUSTMENT = 3000;
+const INCHEON_KEYWORDS = [
+  '인천',
+  '송도',
+  '부평',
+  '구월',
+  '청라',
+  '주안',
+  '계양',
+  '연수',
+  '검암',
+  '작전',
+  '동인천',
+  '인하',
+  '월미',
+];
+const GYEONGGI_KEYWORDS = [
+  '수원',
+  '영통',
+  '광교',
+  '부천',
+  '범계',
+  '안양',
+  '평촌',
+  '판교',
+  '서현',
+  '분당',
+  '정발산',
+  '일산',
+  '고양',
+  '광명',
+  '철산',
+  '안산',
+  '중앙',
+  '용인',
+  '죽전',
+  '수지',
+  '동탄',
+  '구리',
+  '남양주',
+  '하남',
+  '의정부',
+  '김포',
+  '구래',
+  '시흥',
+  '산본',
+  '군포',
+];
+
 
 function getCandidateScopeBonus(candidateScope: CandidateScopeKey = 'standard') {
   if (candidateScope === 'max') {
@@ -66,6 +116,113 @@ function mergeUniqueInsights(
   }
 
   return merged.slice(0, limit);
+}
+
+function inferMetroAreaFromText(text: string) {
+  const normalized = text.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (INCHEON_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+    return '인천' as MetroAreaLabel;
+  }
+
+  if (GYEONGGI_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+    return '경기' as MetroAreaLabel;
+  }
+
+  return null;
+}
+
+function inferMetroAreaFromCoordinates(coordinates: Coordinates): MetroAreaLabel {
+  if (coordinates.lng < 126.72 && coordinates.lat >= 37.28 && coordinates.lat <= 37.68) {
+    return '인천';
+  }
+
+  if (
+    coordinates.lat >= 37.42 &&
+    coordinates.lat <= 37.70 &&
+    coordinates.lng >= 126.77 &&
+    coordinates.lng <= 127.18
+  ) {
+    return '서울';
+  }
+
+  return '경기';
+}
+
+export function inferMetroAreaLabel(candidate: Candidate) {
+  return (
+    inferMetroAreaFromText(`${candidate.name} ${candidate.district} ${candidate.tags.join(' ')}`) ??
+    inferMetroAreaFromCoordinates(candidate.coordinates)
+  );
+}
+
+function inferParticipantMetroArea(participant: Participant) {
+  return (
+    inferMetroAreaFromText(participant.location) ??
+    inferMetroAreaFromCoordinates(participant.coordinates)
+  );
+}
+
+function getParticipantMetroAreas(participants: Participant[]) {
+  return [...new Set(participants.map((participant) => inferParticipantMetroArea(participant)))];
+}
+
+function ensureMetroAreaCoverage(
+  rankedInsights: CandidateInsight[],
+  baseInsights: CandidateInsight[],
+  requiredAreas: MetroAreaLabel[],
+  limit: number,
+) {
+  if (!requiredAreas.length) {
+    return baseInsights.slice(0, limit);
+  }
+
+  const nextInsights: CandidateInsight[] = [];
+  const usedCandidateIds = new Set<string>();
+
+  for (const area of requiredAreas) {
+    const areaInsight = rankedInsights.find(
+      (insight) =>
+        inferMetroAreaLabel(insight.candidate) === area &&
+        !usedCandidateIds.has(insight.candidate.id),
+    );
+
+    if (!areaInsight) {
+      continue;
+    }
+
+    nextInsights.push(areaInsight);
+    usedCandidateIds.add(areaInsight.candidate.id);
+  }
+
+  for (const insight of [...baseInsights, ...rankedInsights]) {
+    if (usedCandidateIds.has(insight.candidate.id)) {
+      continue;
+    }
+
+    nextInsights.push(insight);
+    usedCandidateIds.add(insight.candidate.id);
+
+    if (nextInsights.length >= limit) {
+      break;
+    }
+  }
+
+  const rankedIndex = new Map(
+    rankedInsights.map((insight, index) => [insight.candidate.id, index]),
+  );
+
+  return nextInsights
+    .sort(
+      (left, right) =>
+        (rankedIndex.get(left.candidate.id) ?? Number.MAX_SAFE_INTEGER) -
+        (rankedIndex.get(right.candidate.id) ?? Number.MAX_SAFE_INTEGER),
+    )
+    .slice(0, limit);
 }
 
 function toRadians(value: number) {
@@ -346,6 +503,7 @@ export function getDynamicCandidateInsights(
 
   const center = getParticipantCenter(participants);
   const dynamicAxisRadius = getDynamicAxisRadiusKm(participants, center);
+  const participantMetroAreas = getParticipantMetroAreas(participants);
   const thrillBias = thrillLevel - 1;
   const scopeBonus = getCandidateScopeBonus(candidateScope);
   const targetCount =
@@ -420,11 +578,22 @@ export function getDynamicCandidateInsights(
     const baseRecommendations = insights.slice(0, Math.min(baseCoreCount, insights.length));
     const localRecommendations = localAnchors.map(({ insight }) => insight);
 
-    return mergeUniqueInsights(
+    const neighborhoodInsights = mergeUniqueInsights(
       baseRecommendations,
       localRecommendations,
       Math.min(targetCount, insights.length),
     );
+
+    if (participantMetroAreas.some((area) => area !== '서울')) {
+      return ensureMetroAreaCoverage(
+        insights,
+        neighborhoodInsights,
+        participantMetroAreas,
+        Math.min(targetCount, insights.length),
+      );
+    }
+
+    return neighborhoodInsights;
   }
 
   const categoryFirst = ranked.filter(({ insight }) => insight.categoryMatched);
@@ -438,7 +607,20 @@ export function getDynamicCandidateInsights(
   const finalSource =
     dynamicMiddleBand.length >= Math.min(targetCount, 6) ? dynamicMiddleBand : rankedSource;
 
-  return finalSource.slice(0, Math.min(targetCount, finalSource.length)).map(({ insight }) => insight);
+  const dynamicInsights = finalSource
+    .slice(0, Math.min(targetCount, finalSource.length))
+    .map(({ insight }) => insight);
+
+  if (participantMetroAreas.some((area) => area !== '서울')) {
+    return ensureMetroAreaCoverage(
+      insights,
+      dynamicInsights,
+      participantMetroAreas,
+      Math.min(targetCount, insights.length),
+    );
+  }
+
+  return dynamicInsights;
 }
 
 export function getDrawPool(

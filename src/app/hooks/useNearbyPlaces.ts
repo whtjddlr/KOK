@@ -24,30 +24,36 @@ const nearbySearchPresets: Record<MeetCategoryKey, NearbySearchDefinition[]> = {
   dining: [
     { key: 'restaurant', label: '맛집', query: '맛집' },
     { key: 'cafe', label: '카페', query: '카페' },
+    { key: 'landmark', label: '동네명소', query: '명소' },
     { key: 'activity', label: '놀거리', query: '놀거리' },
   ],
   cafe: [
     { key: 'cafe', label: '카페', query: '카페' },
+    { key: 'landmark', label: '동네명소', query: '가볼만한곳' },
     { key: 'restaurant', label: '브런치', query: '브런치' },
     { key: 'activity', label: '산책', query: '산책' },
   ],
   drink: [
     { key: 'restaurant', label: '술집', query: '술집' },
+    { key: 'landmark', label: '동네명소', query: '핫플' },
     { key: 'cafe', label: '카페', query: '카페' },
     { key: 'activity', label: '2차', query: '놀거리' },
   ],
   date: [
+    { key: 'landmark', label: '동네명소', query: '가볼만한곳' },
     { key: 'restaurant', label: '분위기 맛집', query: '맛집' },
     { key: 'cafe', label: '데이트 카페', query: '카페' },
     { key: 'activity', label: '데이트 코스', query: '놀거리' },
   ],
   culture: [
+    { key: 'landmark', label: '동네명소', query: '명소' },
     { key: 'activity', label: '전시·산책', query: '전시' },
     { key: 'cafe', label: '카페', query: '카페' },
     { key: 'restaurant', label: '맛집', query: '맛집' },
   ],
   activity: [
     { key: 'activity', label: '놀거리', query: '놀거리' },
+    { key: 'landmark', label: '동네명소', query: '가볼만한곳' },
     { key: 'restaurant', label: '맛집', query: '맛집' },
     { key: 'cafe', label: '카페', query: '카페' },
   ],
@@ -81,7 +87,10 @@ async function buildNearbySections(candidate: Candidate, selectedCategory: MeetC
   const sections = await Promise.all(
     definitions.map(async (definition) => {
       const searchQuery = `${candidate.name} ${definition.query}`;
-      const results = await fetchNearbySearchResults(searchQuery, 4);
+      const results = await fetchNearbySearchResults(
+        searchQuery,
+        definition.key === 'landmark' ? 5 : 4,
+      );
 
       const items = await Promise.all(
         results.slice(0, 3).map(async (result, index) => {
@@ -172,7 +181,7 @@ export function useNearbyPlaces(
         }
 
         const nextMessage = nextSections.length
-          ? `${candidate.name} 근처에서 바로 볼 수 있는 곳을 묶어왔어요.`
+          ? `${candidate.name} 근처 맛집이랑 동네명소까지 같이 묶어왔어요.`
           : `${candidate.name} 근처에서 바로 보여줄 정보를 아직 찾지 못했어요.`;
 
         nearbyPlacesCache.set(cacheKey, {

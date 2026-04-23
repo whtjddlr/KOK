@@ -41,7 +41,7 @@ export function NearbyPlacesPanel({
           </p>
         </div>
         <div className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs text-[#44505b]">
-          자동 검색
+          인기순 자동 검색
         </div>
       </div>
 
