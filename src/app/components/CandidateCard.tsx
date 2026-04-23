@@ -1,91 +1,110 @@
 import { Clock3, MapPin, Sparkles, TrainFront } from 'lucide-react';
-import { CandidateInsight } from '../types';
+import { meetCategories } from '../data/mockData';
+import { CandidateInsight, MeetCategoryKey, SelectionModeKey } from '../types';
 
 interface CandidateCardProps {
   insight: CandidateInsight;
   onClick?: () => void;
   selected?: boolean;
+  selectedCategory: MeetCategoryKey;
+  selectionMode: SelectionModeKey;
 }
 
-export function CandidateCard({ insight, onClick, selected }: CandidateCardProps) {
+const categoryLabelMap = meetCategories.reduce<Record<string, string>>((acc, category) => {
+  acc[category.key] = category.label;
+  return acc;
+}, {});
+
+export function CandidateCard({
+  insight,
+  onClick,
+  selected,
+  selectedCategory,
+  selectionMode,
+}: CandidateCardProps) {
   const { candidate, travelInfo, averageDuration, allReachable, accessSummary } = insight;
 
   return (
     <div
       onClick={onClick}
-      className={`bg-white rounded-2xl p-4 transition-all cursor-pointer ${
+      className={`cursor-pointer rounded-2xl border bg-white p-4 transition-all ${
         selected
-          ? 'ring-2 ring-[#ff7b6b] shadow-xl scale-[1.01]'
-          : 'shadow-sm hover:shadow-md border border-transparent'
+          ? 'scale-[1.01] border-[#ff7b6b] shadow-xl ring-2 ring-[#ff7b6b]'
+          : 'border-transparent shadow-sm hover:shadow-md'
       }`}
     >
-      <div className="flex items-start justify-between gap-3 mb-3">
+      <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <div className="mb-1 flex flex-wrap items-center gap-2">
             <h3 className="text-lg text-[#1a1a2e]">{candidate.name}</h3>
             <span
-              className={`px-2.5 py-1 rounded-full text-xs ${
+              className={`rounded-full px-2.5 py-1 text-xs ${
                 allReachable ? 'bg-[#e8faf7] text-[#128075]' : 'bg-[#fff5ef] text-[#cc6b36]'
               }`}
             >
               {allReachable ? '모두 이동 가능' : '근접 후보'}
             </span>
-            <span className="px-2.5 py-1 rounded-full text-xs bg-[#f5f1eb] text-[#2d3561]">
+            <span className="rounded-full bg-[#f5f1eb] px-2.5 py-1 text-xs text-[#2d3561]">
               {candidate.drawMood}
+            </span>
+            <span className="rounded-full bg-[#eef2ff] px-2.5 py-1 text-xs text-[#2d3561]">
+              {selectionMode === 'neighborhood' ? '동네 포함' : categoryLabelMap[selectedCategory]}
             </span>
           </div>
           <p className="text-sm text-[#6b7280]">{candidate.district}</p>
         </div>
-        <div className="flex items-center gap-1 text-xs text-[#9ca3af] whitespace-nowrap">
-          <Clock3 className="w-3 h-3" />
+
+        <div className="flex items-center gap-1 whitespace-nowrap text-xs text-[#9ca3af]">
+          <Clock3 className="h-3 w-3" />
           <span>평균 {averageDuration}분</span>
         </div>
       </div>
 
-      <p className="text-sm text-[#6b7280] leading-relaxed mb-4">{candidate.description}</p>
+      <p className="mb-4 text-sm leading-relaxed text-[#6b7280]">{candidate.description}</p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-2xl bg-[#faf7f2] p-3">
-          <div className="flex items-center gap-2 text-xs text-[#9ca3af] mb-1">
-            <Sparkles className="w-3.5 h-3.5" />
+          <div className="mb-1 flex items-center gap-2 text-xs text-[#9ca3af]">
+            <Sparkles className="h-3.5 w-3.5" />
             <span>분위기</span>
           </div>
-          <div className="text-sm text-[#1a1a2e] leading-relaxed">{candidate.vibe}</div>
+          <div className="text-sm leading-relaxed text-[#1a1a2e]">{candidate.vibe}</div>
         </div>
+
         <div className="rounded-2xl bg-[#faf7f2] p-3">
-          <div className="flex items-center gap-2 text-xs text-[#9ca3af] mb-1">
-            <MapPin className="w-3.5 h-3.5" />
+          <div className="mb-1 flex items-center gap-2 text-xs text-[#9ca3af]">
+            <MapPin className="h-3.5 w-3.5" />
             <span>추천 모임</span>
           </div>
-          <div className="text-sm text-[#1a1a2e] leading-relaxed">{candidate.bestFor}</div>
+          <div className="text-sm leading-relaxed text-[#1a1a2e]">{candidate.bestFor}</div>
         </div>
       </div>
 
-      <div className="rounded-2xl bg-[#f8fbfd] border border-[#edf2f5] p-3 mb-4">
-        <div className="flex items-center gap-2 text-xs text-[#6b7280] mb-2">
-          <TrainFront className="w-3.5 h-3.5" />
+      <div className="mb-4 rounded-2xl border border-[#edf2f5] bg-[#f8fbfd] p-3">
+        <div className="mb-2 flex items-center gap-2 text-xs text-[#6b7280]">
+          <TrainFront className="h-3.5 w-3.5" />
           <span>왜 후보로 떴는지</span>
         </div>
-        <p className="text-sm text-[#1a1a2e] leading-relaxed mb-2">{candidate.whyItWorks}</p>
+        <p className="mb-2 text-sm leading-relaxed text-[#1a1a2e]">{candidate.whyItWorks}</p>
         <p className="text-xs text-[#6b7280]">{accessSummary}</p>
       </div>
 
-      <div className="flex gap-2 flex-wrap mb-4">
+      <div className="mb-4 flex flex-wrap gap-2">
         {travelInfo.map((info) => (
           <span
             key={info.participantId}
-            className="px-3 py-1 bg-[#f5f1eb] text-[#2d3561] text-xs rounded-full"
+            className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs text-[#2d3561]"
           >
             {info.participantName} {info.duration}분
           </span>
         ))}
       </div>
 
-      <div className="flex gap-2 flex-wrap">
+      <div className="flex flex-wrap gap-2">
         {candidate.tags.map((tag) => (
           <span
             key={tag}
-            className="px-3 py-1 bg-[#f5f1eb] text-[#2d3561] text-xs rounded-full"
+            className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs text-[#2d3561]"
           >
             #{tag}
           </span>

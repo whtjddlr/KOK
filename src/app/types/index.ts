@@ -3,12 +3,72 @@ export interface Coordinates {
   lng: number;
 }
 
+export type AiProvider = 'upstage' | 'openai';
+
+export interface RuntimeAiConfig {
+  provider: AiProvider;
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
+}
+
+export type LocationSource = 'station' | 'current' | 'address' | 'map';
+
 export interface Participant {
   id: string;
   name: string;
   location: string;
   coordinates: Coordinates;
   maxTravelTime: number;
+  locationSource?: LocationSource;
+  savedFriendId?: string;
+}
+
+export interface SavedFriend {
+  id: string;
+  name: string;
+  location: string;
+  coordinates: Coordinates;
+  maxTravelTime: number;
+  locationSource?: LocationSource;
+}
+
+export type MeetCategoryKey =
+  | 'dining'
+  | 'cafe'
+  | 'drink'
+  | 'date'
+  | 'culture'
+  | 'activity';
+
+export interface MeetCategory {
+  key: MeetCategoryKey;
+  label: string;
+  cue: string;
+  accent: string;
+  beats: [string, string, string];
+}
+
+export type SelectionModeKey = 'balance' | 'neighborhood';
+
+export type CandidateScopeKey = 'standard' | 'wide' | 'max';
+
+export interface SelectionMode {
+  key: SelectionModeKey;
+  label: string;
+  shortLabel: string;
+  description: string;
+  accent: string;
+}
+
+export type ThrillLevel = 1 | 2 | 3 | 4;
+
+export interface ThrillStage {
+  level: ThrillLevel;
+  label: string;
+  shortLabel: string;
+  description: string;
+  accent: string;
 }
 
 export type DrawMood = '안정 픽' | '반전 픽' | '무드 픽';
@@ -25,6 +85,30 @@ export interface Candidate {
   whyItWorks: string;
   routeHint: string;
   drawMood: DrawMood;
+  categories: MeetCategoryKey[];
+}
+
+export type NearbyPlaceCategory = 'restaurant' | 'cafe' | 'activity';
+
+export interface NearbyPlace {
+  id: string;
+  name: string;
+  category: NearbyPlaceCategory;
+  label: string;
+  query: string;
+  description: string;
+  categoryPath: string;
+  address: string;
+  roadAddress: string;
+  link: string;
+  coordinates: Coordinates | null;
+}
+
+export interface NearbyPlaceSection {
+  key: NearbyPlaceCategory;
+  label: string;
+  query: string;
+  items: NearbyPlace[];
 }
 
 export type TravelInfoSource = 'estimated' | 'directions';
@@ -47,8 +131,15 @@ export interface CandidateInsight {
   averageDistance: number;
   averageDuration: number;
   maxDuration: number;
+  spreadDuration: number;
   allReachable: boolean;
   accessSummary: string;
+  categoryMatched: boolean;
+  centerDistance: number;
+  nearestParticipantName: string;
+  nearestDuration: number;
+  farthestParticipantName: string;
+  farthestDuration: number;
 }
 
 export interface Settlement {
@@ -70,4 +161,17 @@ export interface DrawPlan {
   finalists: CandidateInsight[];
   sequence: CandidateInsight[];
   fallbackNotice: string | null;
+}
+
+export type VenueCategoryKey = 'restaurant' | 'cafe' | 'activity';
+
+export interface VenueOption {
+  id: string;
+  category: VenueCategoryKey;
+  areaId: string;
+  name: string;
+  subtitle: string;
+  description: string;
+  tags: string[];
+  walkMinutes: number;
 }

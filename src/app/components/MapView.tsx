@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Crosshair, Minus, Plus } from 'lucide-react';
-import { Candidate, Coordinates, Participant } from '../types';
+import { Crosshair, ExternalLink, MapPin, Minus, Plus, Search, X } from 'lucide-react';
+import { Candidate, Coordinates, NearbyPlace, Participant } from '../types';
 import { getDistanceKm, getTravelDistanceFromMinutes } from '../lib/meeting';
 import { loadNaverMapSdk } from '../lib/naver-map';
 
@@ -9,8 +9,16 @@ interface MapViewProps {
   candidates?: Candidate[];
   selectedCandidate?: Candidate;
   reachableCandidateIds?: string[];
+  nearbyPlaces?: NearbyPlace[];
+  onCandidateSelect?: (candidateId: string) => void;
+  locationPickerEnabled?: boolean;
+  locationPickerHintVisible?: boolean;
+  pickedLocationPreview?: Coordinates | null;
+  onLocationPick?: (coordinates: Coordinates) => void;
   colors: string[];
 }
+
+type ActiveMapDetail = { kind: 'nearby'; id: string };
 
 function getCoverageCenter(points: Coordinates[]) {
   if (!points.length) {
@@ -69,20 +77,110 @@ function createCoverageIcon() {
   };
 }
 
+function createNearbyPlaceIcon(label: string, category: NearbyPlace['category']) {
+  const palette =
+    category === 'restaurant'
+      ? { background: '#ff7b6b', text: '#ffffff' }
+      : category === 'cafe'
+        ? { background: '#4ecdc4', text: '#10373b' }
+        : { background: '#ffd166', text: '#5b4300' };
+
+  return {
+    content: `
+      <div style="display:flex;align-items:center;gap:6px;transform:translateY(-6px);">
+        <div style="width:14px;height:14px;border-radius:9999px;background:${palette.background};box-shadow:0 8px 16px rgba(18,28,45,0.16);border:2px solid rgba(255,255,255,0.95);"></div>
+        <div style="max-width:124px;padding:4px 8px;border-radius:9999px;background:rgba(255,255,255,0.96);font-size:11px;color:#44505b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 8px 16px rgba(18,28,45,0.08);">
+          ${label}
+        </div>
+      </div>
+    `,
+    size: new window.naver.maps.Size(144, 32),
+    anchor: new window.naver.maps.Point(14, 14),
+  };
+}
+
+function createPickedLocationIcon() {
+  return {
+    content: `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:6px;transform:translateY(-8px);">
+        <div style="width:18px;height:18px;transform:rotate(45deg);background:#1f2a44;border:2px solid rgba(255,255,255,0.96);border-radius:6px;box-shadow:0 10px 18px rgba(18,28,45,0.18);"></div>
+        <div style="padding:4px 9px;border-radius:9999px;background:rgba(31,42,68,0.94);color:#fff;font-size:11px;white-space:nowrap;box-shadow:0 10px 20px rgba(18,28,45,0.12);">
+          새 출발지
+        </div>
+      </div>
+    `,
+    size: new window.naver.maps.Size(96, 42),
+    anchor: new window.naver.maps.Point(18, 18),
+  };
+}
+
+function getNearbyCategoryLabel(category: NearbyPlace['category']) {
+  if (category === 'restaurant') {
+    return '맛집';
+  }
+
+  if (category === 'cafe') {
+    return '카페';
+  }
+
+  return '놀거리';
+}
+
+function buildNaverSearchLink(keyword: string) {
+  return `https://search.naver.com/search.naver?query=${encodeURIComponent(keyword)}`;
+}
+
+function buildViewportSignature(
+  participants: Participant[],
+  candidates: Candidate[],
+  nearbyPlaces: NearbyPlace[],
+  pickedLocationPreview: Coordinates | null,
+  coverageCenter: Coordinates | null,
+) {
+  return JSON.stringify({
+    participants: participants.map((participant) => [
+      participant.id,
+      participant.coordinates.lat,
+      participant.coordinates.lng,
+    ]),
+    candidates: candidates.map((candidate) => [
+      candidate.id,
+      candidate.coordinates.lat,
+      candidate.coordinates.lng,
+    ]),
+    nearbyPlaces: nearbyPlaces
+      .filter((place) => place.coordinates)
+      .map((place) => [place.id, place.coordinates?.lat, place.coordinates?.lng]),
+    pickedLocationPreview: pickedLocationPreview
+      ? [pickedLocationPreview.lat, pickedLocationPreview.lng]
+      : null,
+    coverageCenter: coverageCenter ? [coverageCenter.lat, coverageCenter.lng] : null,
+  });
+}
+
 export function MapView({
   participants,
   candidates = [],
   selectedCandidate,
   reachableCandidateIds = [],
+  nearbyPlaces = [],
+  onCandidateSelect,
+  locationPickerEnabled = false,
+  locationPickerHintVisible = false,
+  pickedLocationPreview = null,
+  onLocationPick,
   colors,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
   const fitViewRef = useRef<(() => void) | null>(null);
+  const mapListenersRef = useRef<any[]>([]);
+  const lastViewportSignatureRef = useRef<string>('');
   const [sdkReady, setSdkReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number | null>(null);
+  const [activeDetail, setActiveDetail] = useState<ActiveMapDetail | null>(null);
 
   const reachableCandidates = useMemo(
     () => candidates.filter((candidate) => reachableCandidateIds.includes(candidate.id)),
@@ -105,6 +203,41 @@ export function MapView({
 
     return candidates.slice(0, Math.min(5, candidates.length));
   }, [candidates, reachableCandidates, selectedCandidate]);
+
+  const nearbyPlacesWithCoordinates = useMemo(
+    () => nearbyPlaces.filter((place) => place.coordinates),
+    [nearbyPlaces],
+  );
+  const viewportSignature = useMemo(
+    () =>
+      buildViewportSignature(
+        participants,
+        candidates,
+        nearbyPlacesWithCoordinates,
+        pickedLocationPreview,
+        coverageCenter,
+      ),
+    [participants, candidates, nearbyPlacesWithCoordinates, pickedLocationPreview, coverageCenter],
+  );
+
+  const activeCandidateDetail = null;
+  const activeNearbyPlaceDetail =
+    activeDetail?.kind === 'nearby'
+      ? nearbyPlacesWithCoordinates.find((place) => place.id === activeDetail.id) ?? null
+      : null;
+
+  useEffect(() => {
+    if (!activeDetail) {
+      return;
+    }
+
+    if (
+      activeDetail.kind === 'nearby' &&
+      !nearbyPlacesWithCoordinates.some((place) => place.id === activeDetail.id)
+    ) {
+      setActiveDetail(null);
+    }
+  }, [activeDetail, candidates, nearbyPlacesWithCoordinates]);
 
   useEffect(() => {
     let mounted = true;
@@ -211,6 +344,16 @@ export function MapView({
       pointsToFit.push(candidate.coordinates);
     });
 
+    nearbyPlacesWithCoordinates.forEach((place) => {
+      if (place.coordinates) {
+        pointsToFit.push(place.coordinates);
+      }
+    });
+
+    if (pickedLocationPreview) {
+      pointsToFit.push(pickedLocationPreview);
+    }
+
     if (coverageCenter) {
       pointsToFit.push(coverageCenter);
     }
@@ -297,15 +440,71 @@ export function MapView({
     candidates.forEach((candidate) => {
       const isSelected = selectedCandidate?.id === candidate.id;
       const isReachable = reachableCandidateIds.includes(candidate.id);
+      const candidatePosition = new maps.LatLng(candidate.coordinates.lat, candidate.coordinates.lng);
       const marker = new maps.Marker({
         map,
-        position: new maps.LatLng(candidate.coordinates.lat, candidate.coordinates.lng),
+        position: candidatePosition,
         title: candidate.name,
         icon: createCandidateIcon(candidate.name, Boolean(isSelected), isReachable),
       });
 
+      if (onCandidateSelect) {
+        maps.Event.addListener(marker, 'click', () => {
+          onCandidateSelect(candidate.id);
+          setActiveDetail(null);
+          map.panTo(candidatePosition);
+          if ((map.getZoom?.() ?? 0) < 12) {
+            map.setZoom(12, true);
+          }
+        });
+      } else {
+        maps.Event.addListener(marker, 'click', () => {
+          setActiveDetail(null);
+          map.panTo(candidatePosition);
+        });
+      }
+
       overlaysRef.current.push(marker);
     });
+
+    nearbyPlacesWithCoordinates.forEach((place) => {
+      if (!place.coordinates) {
+        return;
+      }
+
+      const placePosition = new maps.LatLng(place.coordinates.lat, place.coordinates.lng);
+      const marker = new maps.Marker({
+        map,
+        position: placePosition,
+        title: place.name,
+        icon: createNearbyPlaceIcon(place.name, place.category),
+      });
+
+      maps.Event.addListener(marker, 'click', () => {
+        map.panTo(placePosition);
+        if ((map.getZoom?.() ?? 0) < 13) {
+          map.setZoom(13, true);
+        }
+        setActiveDetail((current) =>
+          current?.kind === 'nearby' && current.id === place.id
+            ? null
+            : { kind: 'nearby', id: place.id },
+        );
+      });
+
+      overlaysRef.current.push(marker);
+    });
+
+    if (pickedLocationPreview) {
+      const marker = new maps.Marker({
+        map,
+        position: new maps.LatLng(pickedLocationPreview.lat, pickedLocationPreview.lng),
+        title: '새 출발지',
+        icon: createPickedLocationIcon(),
+      });
+
+      overlaysRef.current.push(marker);
+    }
 
     if (selectedCandidate) {
       participants.forEach((participant, index) => {
@@ -349,14 +548,93 @@ export function MapView({
     };
 
     fitViewRef.current = fitMapToData;
-    fitMapToData();
+
+    if (lastViewportSignatureRef.current !== viewportSignature) {
+      fitMapToData();
+      lastViewportSignatureRef.current = viewportSignature;
+    }
 
     return () => {
       fitViewRef.current = null;
       overlaysRef.current.forEach((overlay) => overlay.setMap(null));
       overlaysRef.current = [];
     };
-  }, [sdkReady, participants, candidates, colors, coverageCenter, focusCandidates, reachableCandidateIds, reachableCandidates, selectedCandidate]);
+  }, [
+    sdkReady,
+    participants,
+    candidates,
+    colors,
+    coverageCenter,
+    focusCandidates,
+    nearbyPlacesWithCoordinates,
+    onCandidateSelect,
+    reachableCandidateIds,
+    reachableCandidates,
+    selectedCandidate,
+    pickedLocationPreview,
+    viewportSignature,
+  ]);
+
+  useEffect(() => {
+    if (!sdkReady || !mapRef.current || !window.naver?.maps) {
+      return;
+    }
+
+    const maps = window.naver.maps;
+    const map = mapRef.current;
+
+    mapListenersRef.current.forEach((listener) => maps.Event.removeListener(listener));
+    mapListenersRef.current = [];
+
+    if (!locationPickerEnabled || !onLocationPick) {
+      return;
+    }
+
+    const handlePick = (event: any) => {
+      if (typeof event?.pointerEvent?.preventDefault === 'function') {
+        event.pointerEvent.preventDefault();
+      }
+
+      const coord = event?.coord;
+
+      if (!coord) {
+        return;
+      }
+
+      const lat =
+        typeof coord.y === 'number'
+          ? coord.y
+          : typeof coord.lat === 'function'
+            ? coord.lat()
+            : typeof coord.lat === 'number'
+              ? coord.lat
+              : null;
+      const lng =
+        typeof coord.x === 'number'
+          ? coord.x
+          : typeof coord.lng === 'function'
+            ? coord.lng()
+            : typeof coord.lng === 'number'
+              ? coord.lng
+              : null;
+
+      if (typeof lat !== 'number' || typeof lng !== 'number') {
+        return;
+      }
+
+      onLocationPick({ lat, lng });
+    };
+
+    mapListenersRef.current.push(
+      maps.Event.addListener(map, 'rightclick', handlePick),
+      maps.Event.addListener(map, 'longtap', handlePick),
+    );
+
+    return () => {
+      mapListenersRef.current.forEach((listener) => maps.Event.removeListener(listener));
+      mapListenersRef.current = [];
+    };
+  }, [locationPickerEnabled, onLocationPick, sdkReady]);
 
   const handleZoom = (delta: number) => {
     if (!mapRef.current) {
@@ -384,7 +662,7 @@ export function MapView({
   }
 
   return (
-    <div className="relative w-full h-[22rem] md:h-[28rem] rounded-3xl overflow-hidden shadow-inner border border-[#e7edf2] bg-[#eef3f7]">
+    <div className="relative h-[22rem] w-full overflow-hidden rounded-3xl border border-[#e7edf2] bg-[#eef3f7] shadow-inner md:h-[28rem]">
       <div ref={containerRef} className="absolute inset-0 h-full w-full" />
 
       {!sdkReady && (
@@ -395,16 +673,107 @@ export function MapView({
         </div>
       )}
 
-      <div className="pointer-events-none absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs text-[#6b7280] shadow-sm">
+      {locationPickerHintVisible && (
+        <div className="pointer-events-none absolute left-4 top-4 rounded-full bg-[#1f2a44]/92 px-4 py-2 text-xs text-white shadow-lg backdrop-blur-sm">
+          지도에서 우클릭하거나 길게 눌러 출발지를 찍어주세요
+        </div>
+      )}
+
+      {activeNearbyPlaceDetail && (
+        <div className="absolute inset-x-4 bottom-16 z-10 md:right-20 md:left-4">
+          <div className="rounded-[1.4rem] border border-white/80 bg-white/96 p-4 shadow-[0_18px_40px_rgba(18,28,45,0.16)] backdrop-blur-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {false ? (
+                    <span className="rounded-full bg-[#fff2ee] px-3 py-1 text-[11px] text-[#ff7b6b]">
+                      후보 지역
+                    </span>
+                  ) : null}
+                  {activeNearbyPlaceDetail ? (
+                    <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-[11px] text-[#2d5aa7]">
+                      {getNearbyCategoryLabel(activeNearbyPlaceDetail.category)}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="truncate text-base text-[#1a1a2e]">
+                  {activeNearbyPlaceDetail?.name}
+                </div>
+                <div className="mt-1 text-sm leading-relaxed text-[#6b7280]">
+                  {activeNearbyPlaceDetail?.categoryPath ??
+                    activeNearbyPlaceDetail?.description}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveDetail(null)}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-[#f5f1eb] text-[#6b7280] transition-transform active:scale-95"
+                aria-label="상세 정보 닫기"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {activeCandidateDetail ? (
+              <>
+                <p className="mt-3 text-sm leading-relaxed text-[#44505b]">
+                  {activeCandidateDetail.description}
+                </p>
+                <div className="mt-3 flex items-start gap-2 text-xs text-[#6b7280]">
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#ff7b6b]" />
+                  <span>{activeCandidateDetail.routeHint}</span>
+                </div>
+              </>
+            ) : null}
+
+            {activeNearbyPlaceDetail ? (
+              <>
+                <div className="mt-3 flex items-start gap-2 text-xs text-[#6b7280]">
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#ff7b6b]" />
+                  <span>
+                    {activeNearbyPlaceDetail.roadAddress ||
+                      activeNearbyPlaceDetail.address ||
+                      `${activeNearbyPlaceDetail.name} 근처`}
+                  </span>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <a
+                    href={
+                      activeNearbyPlaceDetail.link ||
+                      buildNaverSearchLink(activeNearbyPlaceDetail.name)
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-4 text-xs text-white transition-transform active:scale-95"
+                  >
+                    네이버 보기
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                  <a
+                    href={buildNaverSearchLink(`${activeNearbyPlaceDetail.name} 예약`)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#f5f1eb] px-4 text-xs text-[#1a1a2e] transition-transform active:scale-95"
+                  >
+                    예약 검색
+                    <Search className="h-3.5 w-3.5" />
+                  </a>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+      )}
+      <div className="pointer-events-none hidden absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs text-[#6b7280] shadow-sm">
         수도권 연결 지도
       </div>
 
-      <div className="pointer-events-none absolute top-4 right-4 flex gap-2 text-[11px] text-[#4f5b66]">
+      <div className="pointer-events-none hidden absolute top-4 right-4 flex gap-2 text-[11px] text-[#4f5b66]">
         <div className="bg-white/85 px-3 py-1.5 rounded-full shadow-sm">반투명 원: 이동 반경</div>
         <div className="bg-white/85 px-3 py-1.5 rounded-full shadow-sm">민트 영역: 공통 접근권</div>
       </div>
 
-      <div className="pointer-events-none absolute left-4 bottom-4 bg-[#1f2a44]/82 text-white text-[11px] px-3 py-2 rounded-full shadow-lg backdrop-blur-sm">
+      <div className="pointer-events-none hidden absolute left-4 bottom-4 bg-[#1f2a44]/82 text-white text-[11px] px-3 py-2 rounded-full shadow-lg backdrop-blur-sm">
         드래그로 이동 · 핀치나 버튼으로 확대/축소
       </div>
 
@@ -412,29 +781,35 @@ export function MapView({
         <button
           type="button"
           onClick={() => handleZoom(1)}
-          className="w-11 h-11 rounded-2xl bg-white/94 text-[#1f2a44] shadow-lg border border-white/80 backdrop-blur-sm flex items-center justify-center active:scale-95 transition-transform"
+          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/80 bg-white/94 text-[#1f2a44] shadow-lg backdrop-blur-sm transition-transform active:scale-95"
           aria-label="지도 확대"
         >
-          <Plus className="w-5 h-5" />
+          <Plus className="h-5 w-5" />
         </button>
         <button
           type="button"
           onClick={() => handleZoom(-1)}
-          className="w-11 h-11 rounded-2xl bg-white/94 text-[#1f2a44] shadow-lg border border-white/80 backdrop-blur-sm flex items-center justify-center active:scale-95 transition-transform"
+          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/80 bg-white/94 text-[#1f2a44] shadow-lg backdrop-blur-sm transition-transform active:scale-95"
           aria-label="지도 축소"
         >
-          <Minus className="w-5 h-5" />
+          <Minus className="h-5 w-5" />
         </button>
         <button
           type="button"
           onClick={handleResetView}
-          className="min-w-[7rem] h-11 px-3 rounded-2xl bg-[#1f2a44]/92 text-white shadow-lg border border-[#314062] backdrop-blur-sm flex items-center justify-center gap-2 active:scale-95 transition-transform"
+          className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl border border-[#314062] bg-[#1f2a44]/92 text-white shadow-lg backdrop-blur-sm transition-transform active:scale-95"
           aria-label="전체 범위 보기"
         >
-          <Crosshair className="w-4 h-4" />
+          <Crosshair className="h-4 w-4" />
           <span className="text-xs">전체 보기{zoomLevel ? ` · 줌 ${zoomLevel}` : ''}</span>
         </button>
       </div>
+
+      {zoomLevel !== null && !activeNearbyPlaceDetail && (
+        <div className="pointer-events-none absolute bottom-4 left-4 rounded-full bg-white/88 px-3 py-1.5 text-[11px] text-[#6b7280] shadow-sm backdrop-blur-sm">
+          Zoom {zoomLevel}
+        </div>
+      )}
     </div>
   );
 }

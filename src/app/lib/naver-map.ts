@@ -1,5 +1,21 @@
 let naverMapPromise: Promise<any> | null = null;
 
+export interface AddressSearchResult {
+  roadAddress: string;
+  jibunAddress: string;
+  title: string;
+  coordinates: {
+    lat: number;
+    lng: number;
+  };
+}
+
+export interface ReverseGeocodeResult {
+  roadAddress: string;
+  jibunAddress: string;
+  title: string;
+}
+
 function getScriptUrl() {
   const keyId = import.meta.env.VITE_NAVER_MAP_KEY_ID;
   const submodules = import.meta.env.VITE_NAVER_MAP_SUBMODULES?.trim();
@@ -136,4 +152,111 @@ export function loadNaverMapSdk() {
   });
 
   return naverMapPromise;
+}
+
+export async function searchAddress(query: string) {
+  const maps = await loadNaverMapSdk();
+
+  if (!window.naver?.maps?.Service?.geocode) {
+    throw new Error('주소 검색 모듈을 아직 사용할 수 없어요. geocoder 설정을 확인해 주세요.');
+  }
+
+  const trimmedQuery = query.trim();
+
+  if (!trimmedQuery) {
+    return [] as AddressSearchResult[];
+  }
+
+  return new Promise<AddressSearchResult[]>((resolve, reject) => {
+    window.naver.maps.Service.geocode(
+      {
+        query: trimmedQuery,
+      },
+      (status: string, response: any) => {
+        if (status !== maps.Service.Status.OK) {
+          reject(new Error('주소를 찾지 못했어요. 다른 주소로 다시 검색해 주세요.'));
+          return;
+        }
+
+        const addresses = Array.isArray(response?.v2?.addresses) ? response.v2.addresses : [];
+
+        resolve(
+          addresses
+            .map((item: any) => ({
+              roadAddress: item?.roadAddress ?? '',
+              jibunAddress: item?.jibunAddress ?? '',
+              title: item?.roadAddress || item?.jibunAddress || trimmedQuery,
+              coordinates: {
+                lat: Number(item?.y),
+                lng: Number(item?.x),
+              },
+            }))
+            .filter(
+              (item: AddressSearchResult) =>
+                Number.isFinite(item.coordinates.lat) && Number.isFinite(item.coordinates.lng),
+            ),
+        );
+      },
+    );
+  });
+}
+
+export async function reverseGeocodeCoordinates(lat: number, lng: number) {
+  const maps = await loadNaverMapSdk();
+
+  if (!window.naver?.maps?.Service?.reverseGeocode) {
+    throw new Error('좌표를 주소로 바꾸는 기능을 아직 사용할 수 없어요.');
+  }
+
+  return new Promise<ReverseGeocodeResult>((resolve, reject) => {
+    window.naver.maps.Service.reverseGeocode(
+      {
+        location: new maps.LatLng(lat, lng),
+      },
+      (status: string, response: any) => {
+        if (status !== maps.Service.Status.OK) {
+          reject(new Error('선택한 위치의 주소를 찾지 못했어요.'));
+          return;
+        }
+
+        const addresses = Array.isArray(response?.v2?.results)
+          ? response.v2.results
+          : Array.isArray(response?.result?.items)
+            ? response.result.items
+            : [];
+        const roadResult = addresses.find((item: any) => item?.name === 'roadaddr');
+        const jibunResult = addresses.find((item: any) => item?.name === 'addr');
+
+        const roadAddress = [
+          roadResult?.region?.area1?.name,
+          roadResult?.region?.area2?.name,
+          roadResult?.region?.area3?.name,
+          roadResult?.land?.name,
+          roadResult?.land?.number1,
+          roadResult?.land?.number2,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+
+        const jibunAddress = [
+          jibunResult?.region?.area1?.name,
+          jibunResult?.region?.area2?.name,
+          jibunResult?.region?.area3?.name,
+          jibunResult?.land?.name,
+          jibunResult?.land?.number1,
+          jibunResult?.land?.number2,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+
+        resolve({
+          roadAddress,
+          jibunAddress,
+          title: roadAddress || jibunAddress || `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+        });
+      },
+    );
+  });
 }
