@@ -16,6 +16,7 @@ interface LiveCandidateRequest {
   selectionMode: SelectionModeKey;
   thrillLevel: ThrillLevel;
   candidateScope: CandidateScopeKey;
+  candidateTargetCount: number;
   runtimeAiConfig?: RuntimeAiConfig | null;
 }
 
@@ -33,6 +34,7 @@ export async function fetchLiveCandidates({
   selectionMode,
   thrillLevel,
   candidateScope,
+  candidateTargetCount,
   runtimeAiConfig,
 }: LiveCandidateRequest): Promise<LiveCandidateResponse> {
   const response = await fetch('/api/live-candidates', {
@@ -48,6 +50,7 @@ export async function fetchLiveCandidates({
       selectionMode,
       thrillLevel,
       candidateScope,
+      candidateTargetCount,
       runtimeAiConfig,
     }),
   });

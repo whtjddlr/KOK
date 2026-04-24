@@ -36,6 +36,7 @@ function getCacheKey(
   thrillLevel: ThrillLevel,
   candidateScope: CandidateScopeKey,
   aiConfigSignature: string,
+  candidateTargetCount: number,
 ) {
   const participantKey = participants
     .map(
@@ -45,7 +46,7 @@ function getCacheKey(
     .join('|');
   const insightKey = insights.map((insight) => insight.candidate.id).join(',');
 
-  return `${selectedCategory}:${selectionMode}:${thrillLevel}:${candidateScope}:${aiConfigSignature}:${participantKey}:${insightKey}`;
+  return `${selectedCategory}:${selectionMode}:${thrillLevel}:${candidateScope}:${candidateTargetCount}:${aiConfigSignature}:${participantKey}:${insightKey}`;
 }
 
 export function useLiveCandidateSearch(
@@ -58,10 +59,11 @@ export function useLiveCandidateSearch(
   candidateScope: CandidateScopeKey,
   runtimeAiConfig: RuntimeAiConfig | null,
   aiConfigSignature: string,
+  candidateTargetCount: number,
 ): LiveCandidateSearchResult {
   const normalizedInsights = useMemo(
-    () => insights.slice(0, Math.min(16, insights.length)),
-    [insights],
+    () => insights.slice(0, Math.min(Math.max(24, candidateTargetCount + 6), insights.length)),
+    [candidateTargetCount, insights],
   );
   const cacheKey = useMemo(
     () =>
@@ -73,6 +75,7 @@ export function useLiveCandidateSearch(
         thrillLevel,
         candidateScope,
         aiConfigSignature,
+        candidateTargetCount,
       ),
     [
       participants,
@@ -82,6 +85,7 @@ export function useLiveCandidateSearch(
       thrillLevel,
       candidateScope,
       aiConfigSignature,
+      candidateTargetCount,
     ],
   );
 
@@ -139,6 +143,7 @@ export function useLiveCandidateSearch(
       thrillLevel,
       candidateScope,
       runtimeAiConfig,
+      candidateTargetCount,
     })
       .then((result) => {
         if (!active) {
@@ -196,6 +201,7 @@ export function useLiveCandidateSearch(
     thrillLevel,
     candidateScope,
     runtimeAiConfig,
+    candidateTargetCount,
   ]);
 
   return {

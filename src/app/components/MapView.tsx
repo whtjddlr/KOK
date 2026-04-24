@@ -662,7 +662,7 @@ export function MapView({
   }
 
   return (
-    <div className="relative h-[22rem] w-full overflow-hidden rounded-3xl border border-[#e7edf2] bg-[#eef3f7] shadow-inner md:h-[28rem]">
+    <div className="relative h-[19rem] w-full overflow-hidden rounded-2xl border border-[#e7edf2] bg-[#eef3f7] shadow-inner sm:h-[22rem] md:h-[28rem]">
       <div ref={containerRef} className="absolute inset-0 h-full w-full" />
 
       {!sdkReady && (
@@ -777,11 +777,11 @@ export function MapView({
         드래그로 이동 · 핀치나 버튼으로 확대/축소
       </div>
 
-      <div className="absolute right-4 bottom-4 flex flex-col gap-2">
+      <div className="absolute right-3 bottom-3 flex flex-col gap-2 sm:right-4 sm:bottom-4">
         <button
           type="button"
           onClick={() => handleZoom(1)}
-          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/80 bg-white/94 text-[#1f2a44] shadow-lg backdrop-blur-sm transition-transform active:scale-95"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/80 bg-white/94 text-[#1f2a44] shadow-lg backdrop-blur-sm transition-transform active:scale-95"
           aria-label="지도 확대"
         >
           <Plus className="h-5 w-5" />
@@ -789,7 +789,7 @@ export function MapView({
         <button
           type="button"
           onClick={() => handleZoom(-1)}
-          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/80 bg-white/94 text-[#1f2a44] shadow-lg backdrop-blur-sm transition-transform active:scale-95"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/80 bg-white/94 text-[#1f2a44] shadow-lg backdrop-blur-sm transition-transform active:scale-95"
           aria-label="지도 축소"
         >
           <Minus className="h-5 w-5" />
@@ -797,11 +797,10 @@ export function MapView({
         <button
           type="button"
           onClick={handleResetView}
-          className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl border border-[#314062] bg-[#1f2a44]/92 text-white shadow-lg backdrop-blur-sm transition-transform active:scale-95"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#314062] bg-[#1f2a44]/92 text-white shadow-lg backdrop-blur-sm transition-transform active:scale-95"
           aria-label="전체 범위 보기"
         >
           <Crosshair className="h-4 w-4" />
-          <span className="text-xs">전체 보기{zoomLevel ? ` · 줌 ${zoomLevel}` : ''}</span>
         </button>
       </div>
 

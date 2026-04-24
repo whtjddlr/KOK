@@ -54,7 +54,12 @@ export function pickTargetCount(
   selectionMode: string,
   thrillLevel: number,
   candidateScope: string,
+  requestedTargetCount?: number,
 ) {
+  if (typeof requestedTargetCount === 'number' && Number.isFinite(requestedTargetCount)) {
+    return Math.max(1, Math.min(Math.round(requestedTargetCount), total));
+  }
+
   const baseCount = selectionMode === 'neighborhood' ? 7 : 6;
   const thrillBonus = thrillLevel >= 4 ? 2 : thrillLevel >= 3 ? 1 : 0;
   const scopeBonus = getCandidateScopeBonus(candidateScope);
@@ -67,6 +72,7 @@ export function buildFallbackCandidateIds(
   selectionMode: string,
   thrillLevel: number,
   candidateScope: string,
+  requestedTargetCount?: number,
 ) {
   const seen = new Set<string>();
   const orderedIds = [...fallbackCandidateIds, ...insights.map((insight) => insight?.candidate?.id)]
@@ -82,7 +88,7 @@ export function buildFallbackCandidateIds(
 
   return orderedIds.slice(
     0,
-    pickTargetCount(orderedIds.length, selectionMode, thrillLevel, candidateScope),
+    pickTargetCount(orderedIds.length, selectionMode, thrillLevel, candidateScope, requestedTargetCount),
   );
 }
 
@@ -184,6 +190,8 @@ function buildSelectionPayload(
   return {
     selectionGoal:
       'Select meetup area candidates across the Seoul Capital Area (Seoul, Gyeonggi, Incheon) near the middle of the group so everyone can reach them as fairly as possible.',
+    granularityRule:
+      '수도권 약속 장소 후보를 고를 때는 시/구 단위가 아니라 실제 사람들이 약속을 잡는 동네/상권 단위로만 반환해라. 예: 수원 -> 수원역, 행궁동, 인계동. 예: 인천 -> 부평 문화의거리, 구월 로데오, 송도 센트럴파크. 예: 부천 -> 부천역, 상동, 중동. 너무 넓은 지역명(예: 부천, 수원, 인천, 성남)만 단독으로 반환하지 마라. 모든 후보는 네이버 지역 검색으로 바로 검색 가능한 이름이어야 한다.',
     localModeRule:
       thrillLevel >= 3
         ? 'Do not replace the balanced core with only local picks. Add local wildcard areas on top of the fair midpoint core.'
@@ -261,6 +269,7 @@ export async function fetchOpenAiCandidateSelection({
   selectionMode,
   thrillLevel,
   candidateScope,
+  requestedTargetCount,
 }: {
   apiKey: string;
   model: string;
@@ -270,11 +279,18 @@ export async function fetchOpenAiCandidateSelection({
   selectionMode: string;
   thrillLevel: number;
   candidateScope: string;
+  requestedTargetCount?: number;
 }) {
   const allowedIds = insights
     .map((insight) => insight?.candidate?.id)
     .filter((candidateId): candidateId is string => typeof candidateId === 'string' && candidateId.length > 0);
-  const targetCount = pickTargetCount(allowedIds.length, selectionMode, thrillLevel, candidateScope);
+  const targetCount = pickTargetCount(
+    allowedIds.length,
+    selectionMode,
+    thrillLevel,
+    candidateScope,
+    requestedTargetCount,
+  );
 
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
@@ -289,7 +305,7 @@ export async function fetchOpenAiCandidateSelection({
         {
           role: 'system',
           content:
-            'You are selecting meeting area candidates for a Seoul Capital Area meetup app covering Seoul, Gyeonggi, and Incheon. Return JSON only. Choose only from the allowed candidate ids. Keep a fair midpoint core for the whole group, avoid over-favoring central Seoul by default, and only add a few local wildcard picks when the thrill level requests it. Favor fairness across participants, travel plausibility, regional balance, and category fit.',
+            'You are selecting meeting area candidates for a Seoul Capital Area meetup app covering Seoul, Gyeonggi, and Incheon. Return JSON only. Choose only from the allowed candidate ids. Keep a fair midpoint core for the whole group, avoid over-favoring central Seoul by default, and only add a few local wildcard picks when the thrill level requests it. Favor fairness across participants, travel plausibility, regional balance, and category fit. Candidates must be actual neighborhood/commercial-area names, not broad city/district names. Do not select broad names alone such as 부천, 수원, 인천, or 성남 when a more specific 상권/동네 candidate exists. Prefer Naver-searchable names like 수원역, 행궁동, 인계동, 부평 문화의거리, 구월 로데오, 송도 센트럴파크, 부천역, 상동, 중동.',
         },
         {
           role: 'user',
@@ -368,6 +384,7 @@ export async function fetchUpstageCandidateSelection({
   selectionMode,
   thrillLevel,
   candidateScope,
+  requestedTargetCount,
 }: {
   apiKey: string;
   model: string;
@@ -378,11 +395,18 @@ export async function fetchUpstageCandidateSelection({
   selectionMode: string;
   thrillLevel: number;
   candidateScope: string;
+  requestedTargetCount?: number;
 }) {
   const allowedIds = insights
     .map((insight) => insight?.candidate?.id)
     .filter((candidateId): candidateId is string => typeof candidateId === 'string' && candidateId.length > 0);
-  const targetCount = pickTargetCount(allowedIds.length, selectionMode, thrillLevel, candidateScope);
+  const targetCount = pickTargetCount(
+    allowedIds.length,
+    selectionMode,
+    thrillLevel,
+    candidateScope,
+    requestedTargetCount,
+  );
   const apiBase = baseUrl.replace(/\/$/, '');
 
   const response = await fetch(`${apiBase}/chat/completions`, {
@@ -401,7 +425,7 @@ export async function fetchUpstageCandidateSelection({
         {
           role: 'system',
           content:
-            'Return a JSON object with keys candidate_ids and summary. candidate_ids must contain only allowed ids and match the requested targetCount. This is for the Seoul Capital Area including Seoul, Gyeonggi, and Incheon. Always preserve balanced midpoint recommendations, avoid defaulting to central Seoul only, and only add local wildcard picks on top of that core when the thrill level is high.',
+            'Return a JSON object with keys candidate_ids and summary. candidate_ids must contain only allowed ids and match the requested targetCount. This is for the Seoul Capital Area including Seoul, Gyeonggi, and Incheon. Always preserve balanced midpoint recommendations, avoid defaulting to central Seoul only, and only add local wildcard picks on top of that core when the thrill level is high. Candidates must be actual neighborhood/commercial-area names, not broad city/district names. Do not select broad names alone such as 부천, 수원, 인천, or 성남 when a more specific 상권/동네 candidate exists. Prefer Naver-searchable names like 수원역, 행궁동, 인계동, 부평 문화의거리, 구월 로데오, 송도 센트럴파크, 부천역, 상동, 중동.',
         },
         {
           role: 'user',

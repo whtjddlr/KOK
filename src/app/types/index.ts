@@ -22,6 +22,7 @@ export interface Participant {
   maxTravelTime: number;
   locationSource?: LocationSource;
   savedFriendId?: string;
+  createdBy?: string | null;
 }
 
 export interface SavedFriend {
@@ -31,6 +32,17 @@ export interface SavedFriend {
   coordinates: Coordinates;
   maxTravelTime: number;
   locationSource?: LocationSource;
+}
+
+export interface MeetingRoom {
+  id: string;
+  code: string;
+  ownerId: string | null;
+  selectedCategory: MeetCategoryKey;
+  selectedCandidate: Candidate | null;
+  status: 'planning' | 'decided';
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type MeetCategoryKey =

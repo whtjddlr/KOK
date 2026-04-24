@@ -30,6 +30,10 @@ export default async function handler(req: any, res: any) {
       typeof body?.thrillLevel === 'number' ? body.thrillLevel : 1;
     const candidateScope =
       typeof body?.candidateScope === 'string' ? body.candidateScope : 'standard';
+    const candidateTargetCount =
+      typeof body?.candidateTargetCount === 'number' && Number.isFinite(body.candidateTargetCount)
+        ? body.candidateTargetCount
+        : undefined;
 
     if (!insights.length) {
       json(res, 400, { candidateIds: [], message: 'Candidate insights are required.' });
@@ -75,6 +79,7 @@ export default async function handler(req: any, res: any) {
       selectionMode,
       thrillLevel,
       candidateScope,
+      candidateTargetCount,
     );
 
     if (!effectiveOpenAiApiKey && !effectiveUpstageApiKey) {
@@ -98,6 +103,7 @@ export default async function handler(req: any, res: any) {
             selectionMode,
             thrillLevel,
             candidateScope,
+            requestedTargetCount: candidateTargetCount,
           })
         : await fetchOpenAiCandidateSelection({
             apiKey: effectiveOpenAiApiKey,
@@ -108,6 +114,7 @@ export default async function handler(req: any, res: any) {
             selectionMode,
             thrillLevel,
             candidateScope,
+            requestedTargetCount: candidateTargetCount,
           });
 
       const allowedIds = new Set(
@@ -117,7 +124,16 @@ export default async function handler(req: any, res: any) {
       );
       const candidateIds = aiSelection.candidateIds
         .filter((candidateId) => allowedIds.has(candidateId))
-        .slice(0, pickTargetCount(allowedIds.size, selectionMode, thrillLevel, candidateScope));
+        .slice(
+          0,
+          pickTargetCount(
+            allowedIds.size,
+            selectionMode,
+            thrillLevel,
+            candidateScope,
+            candidateTargetCount,
+          ),
+        );
 
       json(res, 200, {
         candidateIds: candidateIds.length ? candidateIds : safeFallbackIds,

@@ -1,3 +1,5 @@
+import { fetchNearbySearchResults } from './naver-local-search';
+
 let naverMapPromise: Promise<any> | null = null;
 
 export interface AddressSearchResult {
@@ -167,14 +169,24 @@ export async function searchAddress(query: string) {
     return [] as AddressSearchResult[];
   }
 
+  const geocodeResults = await geocodeQuery(maps, trimmedQuery);
+
+  if (geocodeResults.length) {
+    return geocodeResults;
+  }
+
+  return searchPlaceNameAsAddress(maps, trimmedQuery);
+}
+
+function geocodeQuery(maps: any, query: string) {
   return new Promise<AddressSearchResult[]>((resolve, reject) => {
     window.naver.maps.Service.geocode(
       {
-        query: trimmedQuery,
+        query,
       },
       (status: string, response: any) => {
         if (status !== maps.Service.Status.OK) {
-          reject(new Error('주소를 찾지 못했어요. 다른 주소로 다시 검색해 주세요.'));
+          resolve([]);
           return;
         }
 
@@ -199,6 +211,50 @@ export async function searchAddress(query: string) {
       },
     );
   });
+}
+
+async function searchPlaceNameAsAddress(maps: any, query: string) {
+  try {
+    const places = await fetchNearbySearchResults(query, 5, 'random');
+    const mappedResults = await Promise.all(
+      places.map(async (place) => {
+        const addressQuery = place.roadAddress || place.address || place.name;
+
+        if (!addressQuery) {
+          return null;
+        }
+
+        const geocoded = await geocodeQuery(maps, addressQuery);
+        const first = geocoded[0];
+
+        if (!first) {
+          return null;
+        }
+
+        return {
+          roadAddress: place.roadAddress || first.roadAddress,
+          jibunAddress: place.address || first.jibunAddress,
+          title: place.name || first.title,
+          coordinates: first.coordinates,
+        } satisfies AddressSearchResult;
+      }),
+    );
+
+    const deduped = new Map<string, AddressSearchResult>();
+
+    mappedResults.forEach((result) => {
+      if (!result) {
+        return;
+      }
+
+      const key = `${result.title}-${result.coordinates.lat.toFixed(6)}-${result.coordinates.lng.toFixed(6)}`;
+      deduped.set(key, result);
+    });
+
+    return [...deduped.values()];
+  } catch {
+    return [] as AddressSearchResult[];
+  }
 }
 
 export async function reverseGeocodeCoordinates(lat: number, lng: number) {

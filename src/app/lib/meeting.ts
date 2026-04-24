@@ -94,6 +94,14 @@ function getDrawPoolExtra(candidateScope: CandidateScopeKey = 'standard') {
   return 0;
 }
 
+function normalizeTargetCount(total: number, requestedTargetCount?: number) {
+  if (typeof requestedTargetCount !== 'number' || Number.isNaN(requestedTargetCount)) {
+    return null;
+  }
+
+  return Math.max(1, Math.min(Math.round(requestedTargetCount), total));
+}
+
 function mergeUniqueInsights(
   primary: CandidateInsight[],
   secondary: CandidateInsight[],
@@ -494,6 +502,7 @@ export function getDynamicCandidateInsights(
   selectionMode: SelectionModeKey = 'balance',
   thrillLevel: ThrillLevel = 1,
   candidateScope: CandidateScopeKey = 'standard',
+  requestedTargetCount?: number,
 ) {
   const insights = getCandidateInsights(participants, candidates, selectedCategory);
 
@@ -507,7 +516,8 @@ export function getDynamicCandidateInsights(
   const thrillBias = thrillLevel - 1;
   const scopeBonus = getCandidateScopeBonus(candidateScope);
   const targetCount =
-    (selectionMode === 'neighborhood'
+    normalizeTargetCount(insights.length, requestedTargetCount) ??
+    ((selectionMode === 'neighborhood'
       ? participants.length >= 5
         ? 14
         : participants.length >= 3
@@ -518,8 +528,8 @@ export function getDynamicCandidateInsights(
         : participants.length >= 3
           ? 10
           : 8) +
-    thrillBias +
-    scopeBonus;
+      thrillBias +
+      scopeBonus);
 
   const ranked = insights
     .map((insight, index) => {
@@ -628,6 +638,7 @@ export function getDrawPool(
   selectionMode: SelectionModeKey = 'balance',
   thrillLevel: ThrillLevel = 1,
   candidateScope: CandidateScopeKey = 'standard',
+  requestedTargetCount?: number,
 ) {
   if (insights.length <= 4) {
     return {
@@ -637,6 +648,7 @@ export function getDrawPool(
   }
 
   const drawPoolExtra = getDrawPoolExtra(candidateScope);
+  const explicitTargetCount = normalizeTargetCount(insights.length, requestedTargetCount);
 
   if (selectionMode === 'neighborhood') {
     const localAnchors = insights.filter(
@@ -644,7 +656,8 @@ export function getDrawPool(
         insight.nearestDuration <= (thrillLevel >= 4 ? 12 : thrillLevel >= 3 ? 18 : 24) ||
         insight.centerDistance >= (thrillLevel >= 4 ? 2.5 : 4.5),
     );
-    const targetSize = Math.min((thrillLevel >= 4 ? 8 : 7) + drawPoolExtra, insights.length);
+    const targetSize =
+      explicitTargetCount ?? Math.min((thrillLevel >= 4 ? 8 : 7) + drawPoolExtra, insights.length);
     const baseCoreSize = Math.max(4, targetSize - (thrillLevel >= 4 ? 3 : 2));
     const reachableBase = insights.filter((insight) => insight.allReachable);
     const basePool = (reachableBase.length >= 3 ? reachableBase : insights).slice(
@@ -689,7 +702,7 @@ export function getDrawPool(
     const thrillPool = insights.filter(
       (insight) => insight.nearestDuration <= 18 || insight.centerDistance <= 2.5,
     );
-    const targetSize = Math.min(8 + drawPoolExtra, insights.length);
+    const targetSize = explicitTargetCount ?? Math.min(8 + drawPoolExtra, insights.length);
     const baseCore = (reachable.length >= 4 ? reachable : insights).slice(
       0,
       Math.min(Math.max(5, targetSize - 2), insights.length),
@@ -713,20 +726,20 @@ export function getDrawPool(
 
   if (reachable.length >= 4) {
     return {
-      pool: reachable.slice(0, (thrillLevel >= 3 ? 7 : 6) + drawPoolExtra),
+      pool: reachable.slice(0, explicitTargetCount ?? (thrillLevel >= 3 ? 7 : 6) + drawPoolExtra),
       fallbackNotice: null,
     };
   }
 
   if (reachable.length > 0) {
     return {
-      pool: insights.slice(0, (thrillLevel >= 3 ? 7 : 6) + drawPoolExtra),
+      pool: insights.slice(0, explicitTargetCount ?? (thrillLevel >= 3 ? 7 : 6) + drawPoolExtra),
       fallbackNotice: '완벽한 교집합이 좁아서 가장 덜 무리한 후보까지 같이 추첨 풀에 넣었어요.',
     };
   }
 
   return {
-    pool: insights.slice(0, (thrillLevel >= 4 ? 6 : 5) + drawPoolExtra),
+    pool: insights.slice(0, explicitTargetCount ?? (thrillLevel >= 4 ? 6 : 5) + drawPoolExtra),
     fallbackNotice: '모두가 여유롭게 만나는 교집합이 없어, 가장 현실적인 후보들로 추첨 범위를 압축했어요.',
   };
 }

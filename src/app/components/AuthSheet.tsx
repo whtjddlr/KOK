@@ -24,6 +24,21 @@ interface AuthSheetProps {
 const DEFAULT_SIGNUP_CATEGORIES: UserPreferenceCategory[] = ['restaurant', 'cafe'];
 const DEFAULT_SIGNUP_KEYWORDS = ['맛집', '카페'];
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+
+    promise
+      .then(resolve)
+      .catch(reject)
+      .finally(() => {
+        window.clearTimeout(timeoutId);
+      });
+  });
+}
+
 export function AuthSheet({
   open,
   mode,
@@ -91,28 +106,39 @@ export function AuthSheet({
     setIsSubmitting(true);
     setError(null);
 
-    const result =
-      mode === 'signup'
-        ? await signUp({
-            name,
-            email,
-            password,
-            preferences: {
-              favoriteCategories,
-              favoriteKeywords,
-              vibe,
-            },
-          })
-        : await signIn({ email, password });
+    try {
+      const result = await withTimeout(
+        mode === 'signup'
+          ? signUp({
+              name,
+              email,
+              password,
+              preferences: {
+                favoriteCategories,
+                favoriteKeywords,
+                vibe,
+              },
+            })
+          : signIn({ email, password }),
+        8000,
+        '인증 서버 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.',
+      );
 
-    if (result.error || !result.user) {
-      setError(result.error ?? '다시 시도해 주세요.');
+      if (result.error || !result.user) {
+        setError(result.error ?? '다시 시도해 주세요.');
+        return;
+      }
+
+      onSuccess(result.user);
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : '인증 요청을 완료하지 못했어요.',
+      );
+    } finally {
       setIsSubmitting(false);
-      return;
     }
-
-    onSuccess(result.user);
-    setIsSubmitting(false);
   };
 
   return (

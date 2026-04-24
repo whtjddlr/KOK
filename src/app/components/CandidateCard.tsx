@@ -1,120 +1,95 @@
-import { Clock3, MapPin, Sparkles, TrainFront } from 'lucide-react';
-import { meetCategories } from '../data/mockData';
+import { Clock3, Minus } from 'lucide-react';
+import { NearbyPlacesPanel } from './NearbyPlacesPanel';
 import { inferMetroAreaLabel } from '../lib/meeting';
-import { CandidateInsight, MeetCategoryKey, SelectionModeKey } from '../types';
+import { CandidateInsight, NearbyPlaceCategory, NearbyPlaceSection } from '../types';
 
 interface CandidateCardProps {
   insight: CandidateInsight;
   onClick?: () => void;
+  onExclude?: () => void;
   selected?: boolean;
-  selectedCategory: MeetCategoryKey;
-  selectionMode: SelectionModeKey;
+  nearbySections?: NearbyPlaceSection[];
+  activeNearbyCategory?: NearbyPlaceCategory;
+  onNearbyCategoryChange?: (category: NearbyPlaceCategory) => void;
+  nearbyStatus?: 'idle' | 'loading' | 'ready' | 'error';
+  nearbyMessage?: string | null;
+  nearbyError?: string | null;
 }
-
-const categoryLabelMap = meetCategories.reduce<Record<string, string>>((acc, category) => {
-  acc[category.key] = category.label;
-  return acc;
-}, {});
 
 export function CandidateCard({
   insight,
   onClick,
+  onExclude,
   selected,
-  selectedCategory,
-  selectionMode,
+  nearbySections = [],
+  activeNearbyCategory = 'restaurant',
+  onNearbyCategoryChange,
+  nearbyStatus = 'idle',
+  nearbyMessage = null,
+  nearbyError = null,
 }: CandidateCardProps) {
-  const { candidate, travelInfo, averageDuration, allReachable, accessSummary } = insight;
+  const { candidate, averageDuration, allReachable } = insight;
   const metroAreaLabel = inferMetroAreaLabel(candidate);
 
   return (
     <div
-      onClick={onClick}
-      className={`cursor-pointer rounded-2xl border bg-white p-4 transition-all ${
+      className={`rounded-xl border bg-white shadow-sm transition-all ${
         selected
-          ? 'scale-[1.01] border-[#ff7b6b] shadow-xl ring-2 ring-[#ff7b6b]'
-          : 'border-transparent shadow-sm hover:shadow-md'
+          ? 'border-[#ff7b6b] ring-2 ring-[#ff7b6b]/20'
+          : 'border-[#e8edf3] hover:border-[#d7e0e8]'
       }`}
     >
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="mb-1 flex flex-wrap items-center gap-2">
-            <h3 className="text-lg text-[#1a1a2e]">{candidate.name}</h3>
-            <span
-              className={`rounded-full px-2.5 py-1 text-xs ${
-                allReachable ? 'bg-[#e8faf7] text-[#128075]' : 'bg-[#fff5ef] text-[#cc6b36]'
-              }`}
-            >
-              {allReachable ? '모두 이동 가능' : '근접 후보'}
-            </span>
-            <span className="rounded-full bg-[#f5f1eb] px-2.5 py-1 text-xs text-[#2d3561]">
-              {candidate.drawMood}
-            </span>
-            <span className="rounded-full bg-[#edf4ff] px-2.5 py-1 text-xs text-[#35548c]">
+      <div
+        onClick={onClick}
+        className="group flex cursor-pointer items-center gap-3 px-3 py-3"
+      >
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onExclude?.();
+          }}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f5f1eb] text-[#6b7280] transition-colors hover:bg-[#ffe7e2] hover:text-[#d95f4d]"
+          aria-label={`${candidate.name} 후보 제외`}
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="truncate text-base font-medium text-[#1a1a2e]">{candidate.name}</div>
+            <span className="shrink-0 rounded-full bg-[#eef4ff] px-2 py-0.5 text-[11px] text-[#35548c]">
               {metroAreaLabel}
             </span>
-            <span className="rounded-full bg-[#eef2ff] px-2.5 py-1 text-xs text-[#2d3561]">
-              {selectionMode === 'neighborhood' ? '동네 포함' : categoryLabelMap[selectedCategory]}
-            </span>
+            {allReachable && (
+              <span className="hidden shrink-0 rounded-full bg-[#e8faf7] px-2 py-0.5 text-[11px] text-[#128075] sm:inline-flex">
+                가능
+              </span>
+            )}
           </div>
-          <p className="text-sm text-[#6b7280]">{candidate.district}</p>
+          <div className="mt-1 truncate text-sm text-[#7a8491]">{candidate.district}</div>
         </div>
 
-        <div className="flex items-center gap-1 whitespace-nowrap text-xs text-[#9ca3af]">
-          <Clock3 className="h-3 w-3" />
-          <span>평균 {averageDuration}분</span>
-        </div>
-      </div>
-
-      <p className="mb-4 text-sm leading-relaxed text-[#6b7280]">{candidate.description}</p>
-
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl bg-[#faf7f2] p-3">
-          <div className="mb-1 flex items-center gap-2 text-xs text-[#9ca3af]">
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>분위기</span>
-          </div>
-          <div className="text-sm leading-relaxed text-[#1a1a2e]">{candidate.vibe}</div>
-        </div>
-
-        <div className="rounded-2xl bg-[#faf7f2] p-3">
-          <div className="mb-1 flex items-center gap-2 text-xs text-[#9ca3af]">
-            <MapPin className="h-3.5 w-3.5" />
-            <span>추천 모임</span>
-          </div>
-          <div className="text-sm leading-relaxed text-[#1a1a2e]">{candidate.bestFor}</div>
+        <div className="flex shrink-0 items-center gap-1 text-xs text-[#8a94a2]">
+          <Clock3 className="h-3.5 w-3.5" />
+          {averageDuration}분
         </div>
       </div>
 
-      <div className="mb-4 rounded-2xl border border-[#edf2f5] bg-[#f8fbfd] p-3">
-        <div className="mb-2 flex items-center gap-2 text-xs text-[#6b7280]">
-          <TrainFront className="h-3.5 w-3.5" />
-          <span>왜 후보로 떴는지</span>
+      {selected && (
+        <div className="border-t border-[#edf1f4] px-3 pb-3 pt-3">
+          <NearbyPlacesPanel
+            candidate={candidate}
+            sections={nearbySections}
+            activeCategory={activeNearbyCategory}
+            onCategoryChange={onNearbyCategoryChange ?? (() => undefined)}
+            status={nearbyStatus}
+            message={nearbyMessage}
+            error={nearbyError}
+            compact
+          />
         </div>
-        <p className="mb-2 text-sm leading-relaxed text-[#1a1a2e]">{candidate.whyItWorks}</p>
-        <p className="text-xs text-[#6b7280]">{accessSummary}</p>
-      </div>
-
-      <div className="mb-4 flex flex-wrap gap-2">
-        {travelInfo.map((info) => (
-          <span
-            key={info.participantId}
-            className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs text-[#2d3561]"
-          >
-            {info.participantName} {info.duration}분
-          </span>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {candidate.tags.map((tag) => (
-          <span
-            key={tag}
-            className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs text-[#2d3561]"
-          >
-            #{tag}
-          </span>
-        ))}
-      </div>
+      )}
     </div>
   );
 }

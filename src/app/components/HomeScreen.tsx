@@ -1,139 +1,138 @@
-import { ReactNode } from 'react';
-import { LogOut, MapPin, ShieldCheck, Sparkles, Users } from 'lucide-react';
+import { useState } from 'react';
+import { LoaderCircle, LogOut, Sparkles } from 'lucide-react';
 import { AuthUser } from '../lib/auth';
 import { AuthMode } from './AuthSheet';
 
 interface HomeScreenProps {
   currentUser: AuthUser | null;
-  onCreateRoom: () => void;
+  onCreateRoom: () => void | Promise<void>;
   onContinueAsGuest: () => void;
+  onJoinRoom: (code: string) => void | Promise<void>;
   onOpenAuth: (mode: AuthMode) => void;
   onSignOut: () => void;
+  isOpeningRoom?: boolean;
+  roomError?: string | null;
 }
 
 export function HomeScreen({
   currentUser,
   onCreateRoom,
   onContinueAsGuest,
+  onJoinRoom,
   onOpenAuth,
   onSignOut,
+  isOpeningRoom = false,
+  roomError = null,
 }: HomeScreenProps) {
+  const [roomCode, setRoomCode] = useState('');
+
   return (
-    <div className="flex min-h-screen flex-col bg-gradient-to-br from-[#fafaf8] via-[#f5f1eb] to-[#e8dfd0]">
-      <div className="flex items-center justify-end px-6 py-5">
+    <div className="flex min-h-screen flex-col bg-[#fafaf8]">
+      <header className="flex items-center justify-end px-5 py-4">
         {currentUser ? (
           <div className="flex items-center gap-2">
-            <div className="rounded-full bg-white/90 px-4 py-2 text-sm text-[#1a1a2e] shadow-sm">
-              {currentUser.name}님
+            <div className="rounded-full bg-white px-4 py-2 text-sm text-[#1a1a2e] shadow-sm">
+              {currentUser.name}
             </div>
             <button
+              type="button"
               onClick={onSignOut}
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-[#6b7280] shadow-sm"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#6b7280] shadow-sm"
+              aria-label="로그아웃"
             >
               <LogOut className="h-4 w-4" />
             </button>
           </div>
         ) : (
-          <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => onOpenAuth('login')}
+            className="h-10 rounded-full bg-white px-4 text-sm text-[#1a1a2e] shadow-sm"
+          >
+            로그인
+          </button>
+        )}
+      </header>
+
+      <main className="mx-auto flex w-full max-w-[560px] flex-1 flex-col justify-center px-5 py-8">
+        <div className="mb-8">
+          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#ff7b6b] shadow-sm">
+            <Sparkles className="h-7 w-7 text-white" />
+          </div>
+          <h1 className="text-4xl font-semibold tracking-normal text-[#161a24]">랜덤밋</h1>
+          <p className="mt-3 text-base leading-relaxed text-[#667085]">
+            방을 만들고 위치를 넣으면 바로 시작합니다. 혼자 먼저 돌려봐도 되고,
+            코드를 공유해서 친구를 초대해도 됩니다.
+          </p>
+        </div>
+
+        <section className="rounded-2xl border border-[#e8edf3] bg-white p-4 shadow-sm">
+          <button
+            type="button"
+            onClick={() => {
+              void onCreateRoom();
+            }}
+            disabled={isOpeningRoom}
+            className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-[#1f2a44] px-5 text-white shadow-sm transition-transform active:scale-95 disabled:opacity-60"
+          >
+            {isOpeningRoom ? <LoaderCircle className="h-5 w-5 animate-spin" /> : null}
+            방 만들기
+          </button>
+
+          <div className="my-4 flex items-center gap-3">
+            <div className="h-px flex-1 bg-[#edf1f4]" />
+            <span className="text-xs text-[#9ca3af]">또는</span>
+            <div className="h-px flex-1 bg-[#edf1f4]" />
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              value={roomCode}
+              onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void onJoinRoom(roomCode);
+                }
+              }}
+              placeholder="방 코드 입력"
+              className="h-12 flex-1 rounded-xl border border-[#e6ebf0] bg-[#fbfaf8] px-4 text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:border-[#cbd5e1] focus:ring-2 focus:ring-[#1f2a44]/10"
+            />
             <button
-              onClick={() => onOpenAuth('login')}
-              className="h-10 rounded-full bg-white/90 px-4 text-sm text-[#1a1a2e] shadow-sm"
+              type="button"
+              onClick={() => {
+                void onJoinRoom(roomCode);
+              }}
+              disabled={isOpeningRoom}
+              className="h-12 rounded-xl bg-[#eef4ff] px-5 text-sm text-[#2d5aa7] transition-transform active:scale-95 disabled:opacity-60"
             >
-              로그인
+              참여
             </button>
+          </div>
+
+          {roomError && (
+            <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#fff5f2] px-4 py-3 text-sm text-[#c15b3d]">
+              {roomError}
+            </div>
+          )}
+        </section>
+
+        {!currentUser && (
+          <div className="mt-5 flex items-center justify-center gap-3 text-sm text-[#6b7280]">
             <button
+              type="button"
               onClick={() => onOpenAuth('signup')}
-              className="h-10 rounded-full bg-[#1f2a44] px-4 text-sm text-white shadow-sm"
+              className="text-[#1f2a44]"
             >
               회원가입
             </button>
+            <span>·</span>
+            <button type="button" onClick={onContinueAsGuest}>
+              임시로 시작
+            </button>
           </div>
         )}
-      </div>
-
-      <div className="flex flex-1 flex-col items-center justify-center px-6 py-10">
-        <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-3xl bg-gradient-to-br from-[#ff7b6b] to-[#ff9b8b] shadow-lg">
-          <Sparkles className="h-12 w-12 text-white" />
-        </div>
-
-        <h1 className="mb-3 text-center text-4xl text-[#1a1a2e]">랜덤밋</h1>
-        <p className="mb-10 max-w-sm text-center text-lg text-[#6b7280]">
-          약속 장소 정하기 어려울 때,
-          <br />
-          후보를 먼저 고르고 랜덤으로 확정해요.
-        </p>
-
-        <div className="mb-10 w-full max-w-md space-y-4">
-          <FeatureCard
-            icon={<MapPin className="h-6 w-6 text-[#4ecdc4]" />}
-            title="공통 범위 안에서만 추리기"
-            description="위치와 이동 가능 범위를 보고 갈 수 있는 지역만 먼저 남겨요."
-          />
-          <FeatureCard
-            icon={<Sparkles className="h-6 w-6 text-[#ff7b6b]" />}
-            title="마지막까지 긴장감 있는 랜덤"
-            description="후보를 압축한 뒤 마지막에 확정되는 랜덤 뽑기 흐름이에요."
-          />
-          <FeatureCard
-            icon={<Users className="h-6 w-6 text-[#ffd166]" />}
-            title="회원가입하면 친구 저장"
-            description="자주 만나는 친구 위치를 저장해 두고 다음엔 바로 추가할 수 있어요."
-          />
-        </div>
-
-        <button
-          onClick={currentUser ? onCreateRoom : onContinueAsGuest}
-          className="h-14 w-full max-w-md rounded-2xl bg-gradient-to-r from-[#2d3561] to-[#3d4575] text-white shadow-lg transition-transform active:scale-95"
-        >
-          {currentUser ? '방 만들기' : '게스트로 시작'}
-        </button>
-
-        {!currentUser && (
-          <>
-            <button
-              onClick={() => onOpenAuth('signup')}
-              className="mt-4 h-12 w-full max-w-md rounded-2xl bg-white/85 text-sm text-[#1a1a2e] shadow-sm transition-transform active:scale-95"
-            >
-              회원가입하고 친구 저장
-            </button>
-            <button
-              onClick={() => onOpenAuth('login')}
-              className="mt-4 text-sm text-[#6b7280]"
-            >
-              이미 계정이 있나요? 로그인
-            </button>
-          </>
-        )}
-
-        {currentUser && (
-          <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-white/80 px-4 py-2 text-xs text-[#44505b] shadow-sm">
-            <ShieldCheck className="h-4 w-4 text-[#22c55e]" />
-            저장 친구와 설정이 이 계정 기준으로 유지돼요.
-          </div>
-        )}
-      </div>
-
-      <div className="p-6 text-center text-xs text-[#9ca3af]">v1.3.0 · 게스트 모드 지원</div>
-    </div>
-  );
-}
-
-interface FeatureCardProps {
-  icon: ReactNode;
-  title: string;
-  description: string;
-}
-
-function FeatureCard({ icon, title, description }: FeatureCardProps) {
-  return (
-    <div className="flex gap-4 rounded-2xl bg-white/80 p-4 shadow-sm backdrop-blur-sm">
-      <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-[#fafaf8]">
-        {icon}
-      </div>
-      <div className="flex-1">
-        <h3 className="mb-1 text-[#1a1a2e]">{title}</h3>
-        <p className="text-sm text-[#6b7280]">{description}</p>
-      </div>
+      </main>
     </div>
   );
 }

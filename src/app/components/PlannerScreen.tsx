@@ -3,6 +3,7 @@ import {
   Bot,
   BookmarkPlus,
   ChevronLeft,
+  Copy,
   LoaderCircle,
   LocateFixed,
   Plus,
@@ -11,12 +12,14 @@ import {
   Shuffle,
   Sparkles,
   Users,
+  Wifi,
 } from 'lucide-react';
 import {
   Candidate,
   CandidateInsight,
   CandidateScopeKey,
   Coordinates,
+  MeetingRoom,
   MeetCategoryKey,
   NearbyPlaceCategory,
   Participant,
@@ -59,10 +62,24 @@ import {
   persistSavedFriends,
   upsertSavedFriend,
 } from '../lib/friends';
+import {
+  addRoomParticipant,
+  getRoomShareUrl,
+  loadRoomParticipants,
+  removeRoomParticipant,
+  subscribeToRoomParticipants,
+  subscribeToRoomState,
+  updateRoomSelection,
+} from '../lib/rooms';
 import { NearbyPlacesPanel } from './NearbyPlacesPanel';
 
 interface PlannerScreenProps {
   currentUserId: string;
+  currentUserName: string;
+  onlineRoom: MeetingRoom | null;
+  isOpeningRoom?: boolean;
+  roomError?: string | null;
+  onCreateOnlineRoom?: (participants: Participant[]) => Promise<void>;
   initialParticipants: Participant[];
   selectedCategory: MeetCategoryKey;
   onCategoryChange: (category: MeetCategoryKey) => void;
@@ -72,6 +89,8 @@ interface PlannerScreenProps {
   onThrillLevelChange: (level: ThrillLevel) => void;
   candidateScope: CandidateScopeKey;
   onCandidateScopeChange: (scope: CandidateScopeKey) => void;
+  candidateTargetCount: number;
+  onCandidateTargetCountChange: (count: number) => void;
   onBack: () => void;
   onComplete: (winner: Candidate, participants: Participant[], category: MeetCategoryKey) => void;
 }
@@ -104,23 +123,32 @@ const candidateScopeOptions: Array<{
   },
 ];
 
-const candidateScopeSliderOptions: Array<{
-  key: CandidateScopeKey;
-  label: string;
-  targetCount: number;
-}> = [
-  { key: 'standard', label: '적게', targetCount: 6 },
-  { key: 'wide', label: '보통', targetCount: 8 },
-  { key: 'max', label: '많게', targetCount: 10 },
-];
+const MIN_CANDIDATE_TARGET_COUNT = 4;
+const MAX_CANDIDATE_TARGET_COUNT = 20;
+const thrillButtonLabels: Record<ThrillLevel, string> = {
+  1: 'Lv.1',
+  2: 'Lv.2',
+  3: 'Lv.3',
+  4: 'Lv.4',
+};
 
-function getCandidateScopeSliderValue(scope: CandidateScopeKey) {
-  const index = candidateScopeSliderOptions.findIndex((option) => option.key === scope);
-  return index >= 0 ? index : 1;
+function clampCandidateTargetCount(count: number) {
+  return Math.max(
+    MIN_CANDIDATE_TARGET_COUNT,
+    Math.min(MAX_CANDIDATE_TARGET_COUNT, Math.round(count)),
+  );
 }
 
-function getCandidateScopeKeyFromSlider(value: number): CandidateScopeKey {
-  return candidateScopeSliderOptions[value]?.key ?? 'wide';
+function getCandidateScopeFromTargetCount(count: number): CandidateScopeKey {
+  if (count >= 14) {
+    return 'max';
+  }
+
+  if (count >= 9) {
+    return 'wide';
+  }
+
+  return 'standard';
 }
 
 function formatCoordinatePreview(coordinates: Coordinates) {
@@ -160,6 +188,11 @@ function isFriendAlreadyAdded(participants: Participant[], friend: SavedFriend) 
 
 export function PlannerScreen({
   currentUserId,
+  currentUserName,
+  onlineRoom,
+  isOpeningRoom = false,
+  roomError: externalRoomError = null,
+  onCreateOnlineRoom,
   initialParticipants,
   selectedCategory,
   onCategoryChange,
@@ -169,10 +202,14 @@ export function PlannerScreen({
   onThrillLevelChange,
   candidateScope,
   onCandidateScopeChange,
+  candidateTargetCount,
+  onCandidateTargetCountChange,
   onBack,
   onComplete,
 }: PlannerScreenProps) {
   const participantSectionRef = useRef<HTMLElement | null>(null);
+  const participantsRef = useRef<Participant[]>(initialParticipants);
+  const seenRoomWinnerRef = useRef<string | null>(null);
 
   const [participants, setParticipants] = useState<Participant[]>(initialParticipants);
   const [savedFriends, setSavedFriends] = useState<SavedFriend[]>([]);
@@ -192,11 +229,112 @@ export function PlannerScreen({
   const [newCoordinates, setNewCoordinates] = useState<Coordinates | null>(null);
   const newTravelTime = DEFAULT_MAX_TRAVEL_TIME;
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [excludedCandidateIds, setExcludedCandidateIds] = useState<string[]>([]);
   const [activeNearbyCategory, setActiveNearbyCategory] = useState<NearbyPlaceCategory>(
     getDefaultNearbyCategory(selectedCategory),
   );
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [roomSyncStatus, setRoomSyncStatus] = useState<'idle' | 'loading' | 'connected' | 'error'>(
+    onlineRoom ? 'loading' : 'idle',
+  );
+  const [roomMessage, setRoomMessage] = useState<string | null>(null);
+  const [copiedRoomLink, setCopiedRoomLink] = useState(false);
+  const [isCreatingRoomFromPlanner, setIsCreatingRoomFromPlanner] = useState(false);
+
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
+
+  useEffect(() => {
+    if (onlineRoom) {
+      return;
+    }
+
+    setParticipants(initialParticipants);
+    setRoomSyncStatus('idle');
+    setRoomMessage(null);
+  }, [initialParticipants, onlineRoom]);
+
+  useEffect(() => {
+    if (!onlineRoom) {
+      return;
+    }
+
+    let active = true;
+    setRoomSyncStatus('loading');
+    setRoomMessage(null);
+
+    loadRoomParticipants(onlineRoom.id)
+      .then((nextParticipants) => {
+        if (!active) {
+          return;
+        }
+
+        setParticipants(nextParticipants);
+        setRoomSyncStatus('connected');
+      })
+      .catch((error: Error) => {
+        if (!active) {
+          return;
+        }
+
+        setRoomSyncStatus('error');
+        setRoomMessage(error.message);
+      });
+
+    const unsubscribeParticipants = subscribeToRoomParticipants(
+      onlineRoom.id,
+      (nextParticipants) => {
+        if (!active) {
+          return;
+        }
+
+        setParticipants(nextParticipants);
+        setRoomSyncStatus('connected');
+      },
+      (message) => {
+        if (!active) {
+          return;
+        }
+
+        setRoomSyncStatus('error');
+        setRoomMessage(message);
+      },
+    );
+
+    const unsubscribeRoom = subscribeToRoomState(
+      onlineRoom.id,
+      (room) => {
+        if (!active || room.status !== 'decided' || !room.selectedCandidate) {
+          return;
+        }
+
+        const winnerKey = `${room.selectedCandidate.id}-${room.updatedAt}`;
+
+        if (seenRoomWinnerRef.current === winnerKey) {
+          return;
+        }
+
+        seenRoomWinnerRef.current = winnerKey;
+        onCategoryChange(room.selectedCategory);
+        onComplete(room.selectedCandidate, participantsRef.current, room.selectedCategory);
+      },
+      (message) => {
+        if (!active) {
+          return;
+        }
+
+        setRoomMessage(message);
+      },
+    );
+
+    return () => {
+      active = false;
+      unsubscribeParticipants();
+      unsubscribeRoom();
+    };
+  }, [onlineRoom, onCategoryChange, onComplete]);
 
   useEffect(() => {
     let active = true;
@@ -229,28 +367,38 @@ export function PlannerScreen({
     meetCategories.find((category) => category.key === selectedCategory) ?? meetCategories[0];
   const activeMode =
     selectionModes.find((mode) => mode.key === selectionMode) ?? selectionModes[0];
+  const effectiveThrillLevel: ThrillLevel =
+    selectionMode === 'balance' ? 1 : thrillLevel >= 3 ? thrillLevel : 3;
   const activeThrill =
-    thrillStages.find((stage) => stage.level === thrillLevel) ?? thrillStages[0];
+    thrillStages.find((stage) => stage.level === effectiveThrillLevel) ?? thrillStages[0];
+  const visibleThrillStages = thrillStages.filter((stage) => stage.level >= 3);
   const activeScope =
     candidateScopeOptions.find((scope) => scope.key === candidateScope) ?? candidateScopeOptions[0];
-  const activeSliderScope =
-    candidateScopeSliderOptions.find((scope) => scope.key === candidateScope) ??
-    candidateScopeSliderOptions[1];
+  const activeCandidateTargetCount = clampCandidateTargetCount(candidateTargetCount);
 
   const candidateUniverse = buildCandidateUniverse(
     participants,
     mockCandidates,
     selectedCategory,
-    thrillLevel,
+    effectiveThrillLevel,
   );
   const allCandidateInsights = getCandidateInsights(participants, candidateUniverse, selectedCategory);
+  const effectiveCandidateTargetCount = allCandidateInsights.length
+    ? Math.min(activeCandidateTargetCount, allCandidateInsights.length)
+    : activeCandidateTargetCount;
+  const candidateCountLimited =
+    allCandidateInsights.length > 0 && activeCandidateTargetCount > allCandidateInsights.length;
+  const candidateSliderMax = allCandidateInsights.length
+    ? Math.max(MIN_CANDIDATE_TARGET_COUNT, Math.min(MAX_CANDIDATE_TARGET_COUNT, allCandidateInsights.length))
+    : MAX_CANDIDATE_TARGET_COUNT;
   const seedCandidateInsights = getDynamicCandidateInsights(
     participants,
     candidateUniverse,
     selectedCategory,
     selectionMode,
-    thrillLevel,
+    effectiveThrillLevel,
     candidateScope,
+    effectiveCandidateTargetCount,
   );
 
   const {
@@ -265,19 +413,24 @@ export function PlannerScreen({
     seedCandidateInsights.map((insight) => insight.candidate.id),
     selectedCategory,
     selectionMode,
-    thrillLevel,
+    effectiveThrillLevel,
     candidateScope,
     effectiveRuntimeAiConfig,
     aiConfigSignature,
+    effectiveCandidateTargetCount,
   );
 
   const aiCandidateInsights = sortInsightsByCandidateIds(allCandidateInsights, aiCandidateIds);
-  const candidateInsights = aiCandidateInsights.length ? aiCandidateInsights : seedCandidateInsights;
+  const rawCandidateInsights = aiCandidateInsights.length ? aiCandidateInsights : seedCandidateInsights;
+  const candidateInsights = rawCandidateInsights.filter(
+    (insight) => !excludedCandidateIds.includes(insight.candidate.id),
+  );
   const { pool: drawPool, fallbackNotice } = getDrawPool(
     candidateInsights,
     selectionMode,
-    thrillLevel,
+    effectiveThrillLevel,
     candidateScope,
+    effectiveCandidateTargetCount,
   );
 
   const selectedInsight =
@@ -292,6 +445,15 @@ export function PlannerScreen({
   } = useNearbyPlaces(selectedInsight?.candidate ?? null, selectedCategory);
   const nearbyMapPlaces =
     nearbySections.find((section) => section.key === activeNearbyCategory)?.items ?? [];
+
+  useEffect(() => {
+    const availableCandidateIds = new Set(rawCandidateInsights.map((insight) => insight.candidate.id));
+
+    setExcludedCandidateIds((current) => {
+      const next = current.filter((candidateId) => availableCandidateIds.has(candidateId));
+      return next.length === current.length ? current : next;
+    });
+  }, [rawCandidateInsights]);
 
   useEffect(() => {
     if (!candidateInsights.length) {
@@ -335,6 +497,39 @@ export function PlannerScreen({
   const persistFriends = (nextFriends: SavedFriend[]) => {
     setSavedFriends(nextFriends);
     void persistSavedFriends(currentUserId, nextFriends);
+  };
+
+  const handleCopyRoomLink = async () => {
+    if (!onlineRoom) {
+      return;
+    }
+
+    const shareUrl = getRoomShareUrl(onlineRoom.code);
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopiedRoomLink(true);
+      window.setTimeout(() => setCopiedRoomLink(false), 1600);
+    } catch {
+      setRoomMessage(shareUrl);
+    }
+  };
+
+  const handleCreateShareRoom = async () => {
+    if (!onCreateOnlineRoom) {
+      return;
+    }
+
+    setIsCreatingRoomFromPlanner(true);
+    setRoomMessage(null);
+
+    try {
+      await onCreateOnlineRoom(participants);
+    } catch (error) {
+      setRoomMessage(error instanceof Error ? error.message : '공유 방을 만들지 못했어요.');
+    } finally {
+      setIsCreatingRoomFromPlanner(false);
+    }
   };
 
   const resetLocationDraft = () => {
@@ -448,7 +643,21 @@ export function PlannerScreen({
       return;
     }
 
-    setParticipants((current) => [...current, createParticipantFromSavedFriend(friend)]);
+    const nextParticipant = createParticipantFromSavedFriend(friend);
+    setParticipants((current) => [...current, nextParticipant]);
+
+    if (onlineRoom) {
+      void addRoomParticipant({
+        roomId: onlineRoom.id,
+        participant: nextParticipant,
+        userId: currentUserId || null,
+      }).catch((error: Error) => {
+        setRoomMessage(error.message);
+        setParticipants((current) =>
+          current.filter((participant) => participant.id !== nextParticipant.id),
+        );
+      });
+    }
   };
 
   const handleSaveParticipantFriend = (participantId: string) => {
@@ -488,16 +697,30 @@ export function PlannerScreen({
     const shouldSaveNewFriend = !isGuestMode && saveNewFriend;
     const savedFriendId = shouldSaveNewFriend ? `friend-${Date.now()}` : undefined;
     const newParticipant: Participant = {
-      id: `${Date.now()}`,
+      id: `participant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: newName.trim(),
       location: locationMode === 'current' ? '현재 위치 기준' : newLocation,
       coordinates: newCoordinates,
       maxTravelTime: DEFAULT_MAX_TRAVEL_TIME,
       locationSource: locationMode,
       savedFriendId,
+      createdBy: currentUserId || null,
     };
 
     setParticipants((current) => [...current, newParticipant]);
+
+    if (onlineRoom) {
+      void addRoomParticipant({
+        roomId: onlineRoom.id,
+        participant: newParticipant,
+        userId: currentUserId || null,
+      }).catch((error: Error) => {
+        setRoomMessage(error.message);
+        setParticipants((current) =>
+          current.filter((participant) => participant.id !== newParticipant.id),
+        );
+      });
+    }
 
     if (shouldSaveNewFriend) {
       const nextSavedFriend = buildSavedFriendFromParticipant(newParticipant);
@@ -513,22 +736,67 @@ export function PlannerScreen({
 
   const handleRemoveParticipant = (id: string) => {
     setParticipants((current) => current.filter((participant) => participant.id !== id));
+
+    if (onlineRoom) {
+      void removeRoomParticipant(onlineRoom.id, id).catch((error: Error) => {
+        setRoomMessage(error.message);
+      });
+    }
+  };
+
+  const handleSelectionModeSelect = (mode: SelectionModeKey) => {
+    onSelectionModeChange(mode);
+
+    if (mode === 'balance') {
+      onThrillLevelChange(1);
+      return;
+    }
+
+    if (thrillLevel < 3) {
+      onThrillLevelChange(3);
+    }
+  };
+
+  const handleThrillLevelSelect = (level: ThrillLevel) => {
+    if (selectionMode === 'balance') {
+      return;
+    }
+
+    onThrillLevelChange(level < 3 ? 3 : level);
+  };
+
+  const handleExcludeCandidate = (candidateId: string) => {
+    setExcludedCandidateIds((current) =>
+      current.includes(candidateId) ? current : [...current, candidateId],
+    );
+
+    if (selectedCandidateId === candidateId) {
+      const nextInsight = candidateInsights.find((insight) => insight.candidate.id !== candidateId);
+      setSelectedCandidateId(nextInsight?.candidate.id ?? null);
+    }
+  };
+
+  const handleCandidateTargetCountChange = (count: number) => {
+    const nextCount = clampCandidateTargetCount(count);
+
+    onCandidateTargetCountChange(nextCount);
+    onCandidateScopeChange(getCandidateScopeFromTargetCount(nextCount));
   };
 
   const handleDrawComplete = (winner: Candidate) => {
     setShowDrawer(false);
-    onComplete(winner, participants, selectedCategory);
-  };
 
-  const handleOpenParticipantForm = () => {
-    setShowAddForm(true);
-
-    window.requestAnimationFrame(() => {
-      participantSectionRef.current?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
+    if (onlineRoom) {
+      void updateRoomSelection({
+        roomId: onlineRoom.id,
+        selectedCategory,
+        selectedCandidate: winner,
+      }).catch((error: Error) => {
+        setRoomMessage(error.message);
       });
-    });
+    }
+
+    onComplete(winner, participants, selectedCategory);
   };
 
   const handleSaveAiConfig = (config: RuntimeAiConfig) => {
@@ -566,8 +834,66 @@ export function PlannerScreen({
         <div className="w-10" />
       </div>
 
-      <div className="space-y-6 px-4 py-6">
-        <section className="space-y-3">
+      <div className="mx-auto flex max-w-[1040px] flex-col gap-5 px-4 py-5 sm:gap-6 sm:py-6">
+        {onlineRoom ? (
+          <section className="rounded-2xl border border-[#e8edf3] bg-white px-4 py-3 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm text-[#1a1a2e]">
+                  <Wifi className="h-4 w-4 shrink-0 text-[#22c55e]" />
+                  <span className="shrink-0">방 코드</span>
+                  <span className="rounded-full bg-[#eef4ff] px-2.5 py-1 text-xs text-[#2d5aa7]">
+                    {onlineRoom.code}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-[#8a94a2]">
+                  {participants.length}명 참여
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCopyRoomLink}
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-4 text-sm text-white transition-transform active:scale-95"
+              >
+                <Copy className="h-4 w-4" />
+                {copiedRoomLink ? '복사됨' : '공유'}
+              </button>
+            </div>
+
+            {(roomMessage || roomSyncStatus === 'error') && (
+              <div className="mt-3 rounded-xl bg-[#fff8e8] px-3 py-2 text-xs text-[#8a621c]">
+                {roomMessage || '방 동기화를 확인해 주세요.'}
+              </div>
+            )}
+          </section>
+        ) : (
+          <section className="relative flex items-center justify-between gap-3 rounded-2xl border border-[#e8edf3] bg-white px-4 py-3 shadow-sm">
+            <div className="min-w-0 text-sm text-[#667085]">
+              혼자 쓰는 중
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void handleCreateShareRoom();
+              }}
+              disabled={isOpeningRoom || isCreatingRoomFromPlanner}
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-4 text-sm text-white transition-transform active:scale-95 disabled:opacity-60"
+            >
+              {(isOpeningRoom || isCreatingRoomFromPlanner) && (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              )}
+              공유 방 만들기
+            </button>
+            {(roomMessage || externalRoomError) && (
+              <div className="absolute left-4 right-4 top-full mt-2 rounded-xl bg-[#fff8e8] px-3 py-2 text-xs text-[#8a621c]">
+                {roomMessage || externalRoomError}
+              </div>
+            )}
+          </section>
+        )}
+
+        <section className="order-1 space-y-3">
           <MapView
             participants={participants}
             candidates={candidateInsights.map((insight) => insight.candidate)}
@@ -581,37 +907,28 @@ export function PlannerScreen({
             onLocationPick={handleMapLocationPick}
             colors={PARTICIPANT_COLORS}
           />
-
-          <div className="flex items-center justify-between gap-3">
-            <div className="rounded-full bg-white px-4 py-2 text-xs text-[#44505b] shadow-sm">
-              {participants.length}명 입력됨
-            </div>
-
-            <button
-              type="button"
-              onClick={handleOpenParticipantForm}
-              className="inline-flex h-11 items-center justify-center rounded-full bg-[#1f2a44] px-5 text-sm text-white shadow-sm transition-transform active:scale-95"
-            >
-              사람 추가
-            </button>
-          </div>
         </section>
 
-        <div className="flex items-center justify-between gap-3 rounded-3xl border border-[#ece4d8] bg-[#f5f1eb] px-4 py-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[#1a1a2e]">
-              <Sparkles className="h-4 w-4 text-[#ff7b6b]" />
-              <span className="text-sm">핵심 옵션만 보고 바로 시작</span>
-            </div>
-            <p className="mt-1 text-xs leading-relaxed text-[#6b7280]">
-              세부 설정은 필요할 때만 펼쳐서 볼 수 있어요.
-            </p>
+        <div className="order-3 flex flex-col gap-3 rounded-2xl border border-[#ece4d8] bg-[#f5f1eb] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Sparkles className="h-4 w-4 text-[#ff7b6b]" />
+            <span className="rounded-full bg-white px-3 py-1 text-xs text-[#1a1a2e] shadow-sm">
+              {activeCategory.label}
+            </span>
+            <span className="rounded-full bg-white px-3 py-1 text-xs text-[#1a1a2e] shadow-sm">
+              {activeMode.shortLabel}
+            </span>
+            {selectionMode === 'neighborhood' && (
+              <span className="rounded-full bg-white px-3 py-1 text-xs text-[#1a1a2e] shadow-sm">
+                강도 {effectiveThrillLevel}
+              </span>
+            )}
           </div>
 
           <button
             type="button"
             onClick={() => setShowAdvancedOptions((current) => !current)}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-white px-4 text-sm text-[#1a1a2e] shadow-sm transition-transform active:scale-95"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-white px-4 text-sm text-[#1a1a2e] shadow-sm transition-transform active:scale-95 sm:self-auto"
           >
             <Settings2 className="h-4 w-4" />
             {showAdvancedOptions ? '옵션 숨기기' : '옵션 보기'}
@@ -619,14 +936,10 @@ export function PlannerScreen({
         </div>
 
         {showAdvancedOptions && (
-          <div className="space-y-6">
+          <div className="order-3 space-y-4 rounded-2xl border border-[#e8edf3] bg-white p-4 shadow-sm">
             <section>
-              <div className="mb-4">
-                <h3 className="mb-1 text-lg text-[#1a1a2e]">오늘의 모임</h3>
-                <p className="text-sm text-[#6b7280]">분위기만 고르면 후보가 바로 달라집니다.</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              <div className="mb-2 text-sm font-medium text-[#1a1a2e]">오늘의 모임</div>
+              <div className="flex flex-wrap gap-2">
                 {meetCategories.map((category) => {
                   const active = category.key === selectedCategory;
 
@@ -635,14 +948,13 @@ export function PlannerScreen({
                       key={category.key}
                       type="button"
                       onClick={() => onCategoryChange(category.key)}
-                      className={`rounded-2xl border p-4 text-left transition-all ${
+                      className={`h-10 rounded-full px-4 text-sm transition-all ${
                         active
-                          ? 'scale-[1.01] border-[#2d3561] bg-white shadow-lg'
-                          : 'border-[#eceff3] bg-white/75 shadow-sm'
+                          ? 'bg-[#1f2a44] text-white shadow-sm'
+                          : 'bg-[#f5f1eb] text-[#44505b]'
                       }`}
                     >
-                      <div className="mb-2 text-base text-[#1a1a2e]">{category.label}</div>
-                      <p className="text-xs leading-relaxed text-[#6b7280]">{category.cue}</p>
+                      {category.label}
                     </button>
                   );
                 })}
@@ -650,12 +962,8 @@ export function PlannerScreen({
             </section>
 
             <section>
-              <div className="mb-4">
-                <h3 className="mb-1 text-lg text-[#1a1a2e]">선정 방식</h3>
-                <p className="text-sm text-[#6b7280]">안정적으로 고를지, 동네까지 섞을지 정해 주세요.</p>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="mb-2 text-sm font-medium text-[#1a1a2e]">선정 방식</div>
+              <div className="grid grid-cols-2 gap-2">
                 {selectionModes.map((mode) => {
                   const active = mode.key === selectionMode;
 
@@ -663,78 +971,53 @@ export function PlannerScreen({
                     <button
                       key={mode.key}
                       type="button"
-                      onClick={() => onSelectionModeChange(mode.key)}
-                      className={`rounded-2xl border p-4 text-left transition-all ${
+                      onClick={() => handleSelectionModeSelect(mode.key)}
+                      className={`h-10 rounded-full px-4 text-sm transition-all ${
                         active
-                          ? 'scale-[1.01] border-[#2d3561] bg-white shadow-lg'
-                          : 'border-[#eceff3] bg-white/75 shadow-sm'
+                          ? 'bg-[#1f2a44] text-white shadow-sm'
+                          : 'bg-[#f5f1eb] text-[#44505b]'
                       }`}
                     >
-                      <div className="mb-2 text-base text-[#1a1a2e]">{mode.label}</div>
-                      <p className="text-xs leading-relaxed text-[#6b7280]">{mode.description}</p>
+                      {mode.shortLabel}
                     </button>
                   );
                 })}
               </div>
             </section>
 
-            <section>
-              <div className="mb-4">
-                <h3 className="mb-1 text-lg text-[#1a1a2e]">스릴 단계</h3>
-                <p className="text-sm text-[#6b7280]">강하게 갈수록 더 의외의 장소가 섞입니다.</p>
-              </div>
+            {selectionMode === 'neighborhood' && (
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="text-sm font-medium text-[#1a1a2e]">랜덤 강도</div>
+                  <div className="text-xs text-[#8a94a2]">
+                    {activeThrill.shortLabel}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {visibleThrillStages.map((stage) => {
+                    const active = stage.level === effectiveThrillLevel;
 
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                {thrillStages.map((stage) => {
-                  const active = stage.level === thrillLevel;
-
-                  return (
-                    <button
-                      key={stage.level}
-                      type="button"
-                      onClick={() => onThrillLevelChange(stage.level)}
-                      className={`rounded-2xl border p-4 text-left transition-all ${
-                        active
-                          ? 'scale-[1.01] border-[#2d3561] bg-white shadow-lg'
-                          : 'border-[#eceff3] bg-white/75 shadow-sm'
-                      }`}
-                    >
-                      <div className="mb-2 text-base text-[#1a1a2e]">{stage.label}</div>
-                      <p className="text-xs leading-relaxed text-[#6b7280]">{stage.description}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section>
-              <div className="mb-4">
-                <h3 className="mb-1 text-lg text-[#1a1a2e]">후보 범위</h3>
-                <p className="text-sm text-[#6b7280]">보여줄 후보 수를 더 넓히거나 좁힐 수 있어요.</p>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                {candidateScopeOptions.map((scope) => {
-                  const active = scope.key === candidateScope;
-
-                  return (
-                    <button
-                      key={scope.key}
-                      type="button"
-                      onClick={() => onCandidateScopeChange(scope.key)}
-                      className={`rounded-2xl border p-4 text-left transition-all ${
-                        active
-                          ? 'scale-[1.01] border-[#2d3561] bg-white shadow-lg'
-                          : 'border-[#eceff3] bg-white/75 shadow-sm'
-                      }`}
-                    >
-                      <div className="mb-2 text-base text-[#1a1a2e]">{scope.label}</div>
-                      <p className="text-xs leading-relaxed text-[#6b7280]">{scope.description}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
+                    return (
+                      <button
+                        key={stage.level}
+                        type="button"
+                        onClick={() => handleThrillLevelSelect(stage.level)}
+                        className={`h-10 rounded-full text-sm transition-all ${
+                          active
+                            ? 'bg-[#ff7b6b] text-white shadow-sm'
+                            : 'bg-[#f5f1eb] text-[#44505b]'
+                        }`}
+                      >
+                        {thrillButtonLabels[stage.level]}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 truncate text-xs text-[#8a94a2]">
+                  {activeThrill.description}
+                </p>
+              </section>
+            )}
 
             {!runtimeCapabilities.ai.connected && (
               <div className="rounded-3xl border border-[#e6ebf0] bg-white p-4 shadow-sm">
@@ -766,19 +1049,23 @@ export function PlannerScreen({
           </div>
         )}
 
-        <section ref={participantSectionRef}>
-          <div className="mb-4 flex items-center justify-between">
+        <section ref={participantSectionRef} className="order-2">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-lg text-[#1a1a2e]">참여자 ({participants.length})</h3>
-              <p className="text-sm text-[#6b7280]">주소 검색이나 현재 위치로 한 명씩 추가해 주세요.</p>
+              <h3 className="text-lg text-[#1a1a2e]">사람 추가</h3>
+              <p className="text-sm text-[#6b7280]">주소나 지도에서 출발 위치를 정해 주세요.</p>
             </div>
 
             <button
               type="button"
               onClick={() => setShowAddForm((current) => !current)}
-              className="flex items-center gap-1 text-sm text-[#2d3561]"
+              className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-full border px-4 text-sm font-medium shadow-sm transition-all active:scale-95 ${
+                showAddForm
+                  ? 'border-[#1f2a44] bg-[#1f2a44] text-white'
+                  : 'border-[#dfe5eb] bg-white text-[#2d3561] hover:bg-[#f8fbfd]'
+              }`}
             >
-              <Plus className="h-4 w-4" />
+              <Plus className={`h-4 w-4 transition-transform ${showAddForm ? 'rotate-45' : ''}`} />
               {showAddForm ? '닫기' : '추가'}
             </button>
           </div>
@@ -1070,52 +1357,70 @@ export function PlannerScreen({
               </div>
             </div>
           )}
-
-          {participants.length === 0 && !showAddForm && (
-            <div className="mb-3 rounded-3xl border border-dashed border-[#d9e0e7] bg-white/80 px-5 py-8 text-center">
-              <div className="text-base text-[#1a1a2e]">아직 추가된 사람이 없어요</div>
-              <p className="mt-2 text-sm leading-relaxed text-[#6b7280]">
-                한 명씩 추가하면서 출발 위치를 잡아두면 바로 후보군을 만들 수 있어요.
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowAddForm(true)}
-                className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-[#2d3561] px-5 text-sm text-white transition-transform active:scale-95"
-              >
-                첫 사람 추가
-              </button>
-            </div>
-          )}
-
-          <div className="space-y-3">
-            {participants.map((participant, index) => (
-              <ParticipantCard
-                key={participant.id}
-                participant={participant}
-                onRemove={handleRemoveParticipant}
-                onSaveFriend={isGuestMode ? undefined : handleSaveParticipantFriend}
-                isSavedFriend={Boolean(
-                  participant.savedFriendId && savedFriendIds.has(participant.savedFriendId),
-                )}
-                color={PARTICIPANT_COLORS[index % PARTICIPANT_COLORS.length]}
-              />
-            ))}
-          </div>
         </section>
 
-        <section>
-          <div className="mb-4">
-            <h3 className="mb-1 text-lg text-[#1a1a2e]">
-              {activeCategory.label} 후보 지역 ({candidateInsights.length})
-            </h3>
-            <p className="text-sm text-[#6b7280]">{resolvedCandidateGuideText}</p>
-            <button
-              type="button"
-              onClick={() => setShowCandidateList((current) => !current)}
-              className="mt-3 inline-flex h-10 items-center justify-center rounded-full bg-[#f5f1eb] px-4 text-sm text-[#1a1a2e] transition-transform active:scale-95"
-            >
-              {showCandidateList ? '후보 숨기기' : '후보 보기'}
-            </button>
+        {participants.length > 0 && (
+          <section className="order-4 rounded-[1.75rem] border border-[#eceff3] bg-white/90 p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base text-[#1a1a2e]">참여자 목록</h3>
+                <p className="text-xs text-[#8a94a2]">원하지 않는 사람은 여기서 바로 뺄 수 있어요.</p>
+              </div>
+              <span className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs text-[#44505b]">
+                {participants.length}명
+              </span>
+            </div>
+
+            <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
+              {participants.map((participant, index) => (
+                <ParticipantCard
+                  key={participant.id}
+                  participant={participant}
+                  onRemove={handleRemoveParticipant}
+                  onSaveFriend={isGuestMode ? undefined : handleSaveParticipantFriend}
+                  isSavedFriend={Boolean(
+                    participant.savedFriendId && savedFriendIds.has(participant.savedFriendId),
+                  )}
+                  color={PARTICIPANT_COLORS[index % PARTICIPANT_COLORS.length]}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="order-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-lg text-[#1a1a2e]">
+                후보 {candidateInsights.length}곳
+              </h3>
+              <p className="mt-1 truncate text-sm text-[#8a94a2]">
+                {aiCandidateStatus === 'loading'
+                  ? '후보 정리 중'
+                  : excludedCandidateIds.length
+                    ? `${excludedCandidateIds.length}곳 제외됨`
+                    : `${activeCategory.label} 기준`}
+              </p>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              {excludedCandidateIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setExcludedCandidateIds([])}
+                  className="h-10 rounded-full bg-white px-3 text-sm text-[#6b7280] shadow-sm transition-transform active:scale-95"
+                >
+                  되돌리기
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowCandidateList((current) => !current)}
+                className="h-10 rounded-full bg-[#f5f1eb] px-4 text-sm text-[#1a1a2e] transition-transform active:scale-95"
+              >
+                {showCandidateList ? '접기' : '보기'}
+              </button>
+            </div>
           </div>
 
           {showCandidateList && (
@@ -1126,69 +1431,72 @@ export function PlannerScreen({
                   insight={insight}
                   selected={selectedInsight?.candidate.id === insight.candidate.id}
                   onClick={() => setSelectedCandidateId(insight.candidate.id)}
-                  selectedCategory={selectedCategory}
-                  selectionMode={selectionMode}
+                  onExclude={() => handleExcludeCandidate(insight.candidate.id)}
+                  nearbySections={selectedInsight?.candidate.id === insight.candidate.id ? nearbySections : []}
+                  activeNearbyCategory={activeNearbyCategory}
+                  onNearbyCategoryChange={setActiveNearbyCategory}
+                  nearbyStatus={nearbyPlacesStatus}
+                  nearbyMessage={nearbyPlacesMessage}
+                  nearbyError={nearbyPlacesError}
                 />
               ))}
+
+              {!candidateInsights.length && (
+                <div className="rounded-2xl border border-dashed border-[#d9e0e7] bg-white/80 px-5 py-8 text-center text-sm text-[#6b7280]">
+                  남은 후보가 없어요. 되돌리기를 눌러 다시 볼 수 있습니다.
+                </div>
+              )}
             </div>
           )}
 
-          {selectedInsight && (
-            <div className="mt-4">
-              <NearbyPlacesPanel
-                candidate={selectedInsight.candidate}
-                sections={nearbySections}
-                activeCategory={activeNearbyCategory}
-                onCategoryChange={setActiveNearbyCategory}
-                status={nearbyPlacesStatus}
-                message={nearbyPlacesMessage}
-                error={nearbyPlacesError}
-              />
-            </div>
-          )}
         </section>
       </div>
 
-      <div className="px-4 pb-8">
-        <div className="rounded-[1.75rem] border border-[#eceff3] bg-white/92 p-3 shadow-[0_18px_40px_rgba(18,28,45,0.12)] backdrop-blur-xl">
-          <div className="mb-3 rounded-2xl bg-[#faf7f2] px-4 py-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm text-[#1a1a2e]">후보군 개수</div>
-                <div className="mt-1 text-xs text-[#6b7280]">
-                  지금은 {drawPool.length}개 후보로 랜덤을 돌려요.
+      <div className="mx-auto max-w-[1040px] px-4 pb-8">
+        <div className="rounded-[1.25rem] border border-[#eceff3] bg-white/94 p-3 shadow-[0_18px_40px_rgba(18,28,45,0.12)] backdrop-blur-xl">
+          <div className="mb-3 space-y-3">
+            <div className="rounded-xl bg-[#faf7f2] px-4 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-[#1a1a2e]">후보군 개수</div>
+                  <div className="mt-1 text-xs text-[#6b7280]">
+                    {candidateCountLimited
+                      ? `가능 ${effectiveCandidateTargetCount}개 · 요청 ${activeCandidateTargetCount}개`
+                      : `최대 ${activeCandidateTargetCount}개 · 현재 ${drawPool.length}개`}
+                  </div>
+                </div>
+                <div className="rounded-full bg-white px-3 py-1 text-xs text-[#44505b] shadow-sm">
+                  {effectiveCandidateTargetCount}개
                 </div>
               </div>
-              <div className="rounded-full bg-white px-3 py-1 text-xs text-[#44505b] shadow-sm">
-                {activeSliderScope.targetCount}개 기준
+
+              <input
+                type="range"
+                min={MIN_CANDIDATE_TARGET_COUNT}
+                max={candidateSliderMax}
+                step={1}
+                value={Math.min(activeCandidateTargetCount, candidateSliderMax)}
+                onChange={(event) =>
+                  handleCandidateTargetCountChange(Number(event.target.value))
+                }
+                className="mt-4 h-2 w-full cursor-pointer appearance-none rounded-full bg-[#e7ded2] accent-[#ff7b6b]"
+              />
+
+              <div className="mt-3 grid grid-cols-5 gap-2 text-xs text-[#6b7280]">
+                {[4, 8, 12, 16, 20].map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    onClick={() => handleCandidateTargetCountChange(count)}
+                    disabled={count > candidateSliderMax}
+                    className={`rounded-full px-2 py-2 transition-colors ${
+                      count === activeCandidateTargetCount ? 'bg-white text-[#1a1a2e] shadow-sm' : ''
+                    } disabled:opacity-35`}
+                  >
+                    {count}
+                  </button>
+                ))}
               </div>
-            </div>
-
-            <input
-              type="range"
-              min={0}
-              max={candidateScopeSliderOptions.length - 1}
-              step={1}
-              value={getCandidateScopeSliderValue(candidateScope)}
-              onChange={(event) =>
-                onCandidateScopeChange(getCandidateScopeKeyFromSlider(Number(event.target.value)))
-              }
-              className="mt-4 h-2 w-full cursor-pointer appearance-none rounded-full bg-[#e7ded2] accent-[#ff7b6b]"
-            />
-
-            <div className="mt-3 flex items-center justify-between text-xs text-[#6b7280]">
-              {candidateScopeSliderOptions.map((scope) => (
-                <button
-                  key={scope.key}
-                  type="button"
-                  onClick={() => onCandidateScopeChange(scope.key)}
-                  className={`rounded-full px-2 py-1 transition-colors ${
-                    scope.key === candidateScope ? 'bg-white text-[#1a1a2e] shadow-sm' : ''
-                  }`}
-                >
-                  {scope.label}
-                </button>
-              ))}
             </div>
           </div>
 
@@ -1222,9 +1530,13 @@ export function PlannerScreen({
         <RandomDrawer
           candidateInsights={drawPool}
           categoryLabel={activeCategory.label}
-          modeLabel={`${activeMode.shortLabel} · ${activeThrill.label} · ${activeScope.label}`}
+          modeLabel={
+            selectionMode === 'neighborhood'
+              ? `${activeMode.shortLabel} · ${activeThrill.label} · ${activeScope.label}`
+              : `${activeMode.shortLabel} · ${activeScope.label}`
+          }
           selectionMode={selectionMode}
-          thrillLevel={thrillLevel}
+          thrillLevel={effectiveThrillLevel}
           candidateScope={candidateScope}
           onComplete={handleDrawComplete}
           onClose={() => setShowDrawer(false)}

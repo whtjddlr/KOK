@@ -9,6 +9,7 @@ interface NearbyPlacesPanelProps {
   status: 'idle' | 'loading' | 'ready' | 'error';
   message: string | null;
   error: string | null;
+  compact?: boolean;
 }
 
 export function NearbyPlacesPanel({
@@ -19,6 +20,7 @@ export function NearbyPlacesPanel({
   status,
   message,
   error,
+  compact = false,
 }: NearbyPlacesPanelProps) {
   if (!candidate) {
     return null;
@@ -29,18 +31,26 @@ export function NearbyPlacesPanel({
     visibleSections.find((section) => section.key === activeCategory) ?? visibleSections[0] ?? null;
 
   return (
-    <section className="rounded-3xl border border-[#eceff3] bg-white p-4 shadow-sm">
+    <section
+      className={
+        compact
+          ? 'rounded-xl bg-[#f8fbfd] p-3'
+          : 'rounded-3xl border border-[#eceff3] bg-white p-4 shadow-sm'
+      }
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-[#1a1a2e]">
             <Sparkles className="h-4 w-4 text-[#ff7b6b]" />
-            <h3 className="text-base">{candidate.name} 근처 정보</h3>
+            <h3 className={compact ? 'text-sm font-medium' : 'text-base'}>
+              {candidate.name} 근처 정보
+            </h3>
           </div>
-          <p className="mt-1 text-sm leading-relaxed text-[#6b7280]">
+          <p className={`${compact ? 'text-xs' : 'text-sm'} mt-1 leading-relaxed text-[#6b7280]`}>
             {error ?? message ?? `${candidate.name} 주변 정보를 자동으로 찾고 있어요.`}
           </p>
         </div>
-        <div className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs text-[#44505b]">
+        <div className="hidden rounded-full bg-[#f5f1eb] px-3 py-1 text-xs text-[#44505b] sm:block">
           인기순 자동 검색
         </div>
       </div>
@@ -63,7 +73,7 @@ export function NearbyPlacesPanel({
                   key={section.key}
                   type="button"
                   onClick={() => onCategoryChange(section.key)}
-                  className={`rounded-full px-4 py-2 text-sm transition-all ${
+                  className={`rounded-full px-3 py-1.5 text-sm transition-all ${
                     active
                       ? 'bg-[#1f2a44] text-white shadow-sm'
                       : 'bg-[#f5f1eb] text-[#44505b]'
@@ -76,11 +86,11 @@ export function NearbyPlacesPanel({
           </div>
 
           {activeSection && (
-            <div className="mt-4 space-y-3">
-              {activeSection.items.map((place) => (
+            <div className="mt-4 space-y-2">
+              {activeSection.items.slice(0, compact ? 3 : activeSection.items.length).map((place) => (
                 <div
                   key={place.id}
-                  className="rounded-2xl border border-[#edf2f5] bg-[#f8fbfd] p-4"
+                  className="rounded-xl border border-[#edf2f5] bg-white p-3"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
