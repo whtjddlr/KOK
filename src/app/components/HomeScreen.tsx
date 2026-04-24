@@ -1,5 +1,14 @@
 import { useState } from 'react';
-import { LoaderCircle, LogOut, Sparkles } from 'lucide-react';
+import {
+  ArrowRight,
+  Compass,
+  LoaderCircle,
+  LogOut,
+  MapPin,
+  User,
+  UserRound,
+  Users,
+} from 'lucide-react';
 import { AuthUser } from '../lib/auth';
 import { AuthMode } from './AuthSheet';
 
@@ -9,6 +18,7 @@ interface HomeScreenProps {
   onContinueAsGuest: () => void;
   onJoinRoom: (code: string) => void | Promise<void>;
   onOpenAuth: (mode: AuthMode) => void;
+  onOpenProfile: () => void;
   onSignOut: () => void;
   isOpeningRoom?: boolean;
   roomError?: string | null;
@@ -20,6 +30,7 @@ export function HomeScreen({
   onContinueAsGuest,
   onJoinRoom,
   onOpenAuth,
+  onOpenProfile,
   onSignOut,
   isOpeningRoom = false,
   roomError = null,
@@ -27,17 +38,35 @@ export function HomeScreen({
   const [roomCode, setRoomCode] = useState('');
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#fafaf8]">
-      <header className="flex items-center justify-end px-5 py-4">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#f5f1eb] pb-28">
+      <div className="pointer-events-none absolute left-1/2 top-28 h-96 w-96 -translate-x-1/2 rounded-full bg-[#ff7b6b]/10 blur-3xl" />
+      <div className="pointer-events-none absolute -right-24 bottom-20 h-80 w-80 rounded-full bg-[#5dd9d0]/12 blur-3xl" />
+
+      <header className="fixed left-0 top-0 z-30 flex w-full items-center justify-between rounded-b-[2rem] bg-[#f5f1eb]/88 px-6 py-4 shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-md">
+        <button
+          type="button"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1f2a44] text-white shadow-sm"
+          aria-label="Drop"
+        >
+          <Compass className="h-5 w-5" />
+        </button>
+        <div className="absolute left-1/2 -translate-x-1/2 text-2xl font-black tracking-[-0.06em] text-[#1f2a44]">
+          Drop
+        </div>
         {currentUser ? (
           <div className="flex items-center gap-2">
-            <div className="rounded-full bg-white px-4 py-2 text-sm text-[#1a1a2e] shadow-sm">
-              {currentUser.name}
-            </div>
+            <button
+              type="button"
+              onClick={onOpenProfile}
+              className="inline-flex h-10 max-w-[116px] items-center gap-2 rounded-full bg-white px-3 text-sm text-[#1f2a44] shadow-sm transition-transform active:scale-95"
+            >
+              <UserRound className="h-4 w-4 shrink-0 text-[#76777e]" />
+              <span className="truncate">{currentUser.name}</span>
+            </button>
             <button
               type="button"
               onClick={onSignOut}
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#6b7280] shadow-sm"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#76777e] shadow-sm"
               aria-label="로그아웃"
             >
               <LogOut className="h-4 w-4" />
@@ -47,45 +76,54 @@ export function HomeScreen({
           <button
             type="button"
             onClick={() => onOpenAuth('login')}
-            className="h-10 rounded-full bg-white px-4 text-sm text-[#1a1a2e] shadow-sm"
+            className="h-10 rounded-full bg-white px-4 text-sm text-[#1f2a44] shadow-sm transition-transform active:scale-95"
           >
             로그인
           </button>
         )}
       </header>
 
-      <main className="mx-auto flex w-full max-w-[560px] flex-1 flex-col justify-center px-5 py-8">
-        <div className="mb-8">
-          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#ff7b6b] shadow-sm">
-            <Sparkles className="h-7 w-7 text-white" />
+      <main className="relative z-10 mx-auto flex w-full max-w-[560px] flex-1 flex-col justify-center px-6 pt-28">
+        <div className="mb-12 text-center">
+          <div className="mx-auto mb-8 flex h-32 w-32 items-center justify-center rounded-full border-4 border-white bg-[#ffc9c1] text-[#7a130f] shadow-[0_20px_55px_rgba(26,26,46,0.12)]">
+            <MapPin className="h-16 w-16 fill-current" />
           </div>
-          <h1 className="text-4xl font-semibold tracking-normal text-[#161a24]">랜덤밋</h1>
-          <p className="mt-3 text-base leading-relaxed text-[#667085]">
-            방을 만들고 위치를 넣으면 바로 시작합니다. 혼자 먼저 돌려봐도 되고,
-            코드를 공유해서 친구를 초대해도 됩니다.
+          <h1 className="text-5xl font-black tracking-[-0.08em] text-[#1f2a44]">Drop</h1>
+          <p className="mt-4 text-2xl font-bold tracking-[-0.06em] text-[#76777e]">
+            어디서 볼지, 이제 뽑자.
           </p>
         </div>
 
-        <section className="rounded-2xl border border-[#e8edf3] bg-white p-4 shadow-sm">
+        <section className="space-y-5">
+          <button
+            type="button"
+            onClick={onContinueAsGuest}
+            className="flex h-[72px] w-full items-center justify-center gap-4 rounded-[1.5rem] bg-[#1f2a44] px-5 text-xl font-extrabold tracking-[-0.04em] text-white shadow-[0_10px_30px_rgba(26,26,46,0.08)] transition-transform active:scale-95"
+          >
+            <User className="h-7 w-7 fill-current" />
+            혼자 정하기
+          </button>
+
           <button
             type="button"
             onClick={() => {
               void onCreateRoom();
             }}
             disabled={isOpeningRoom}
-            className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-[#1f2a44] px-5 text-white shadow-sm transition-transform active:scale-95 disabled:opacity-60"
+            className="flex h-[72px] w-full items-center justify-center gap-4 rounded-[1.5rem] bg-[#1f2a44] px-5 text-xl font-extrabold tracking-[-0.04em] text-white shadow-[0_10px_30px_rgba(26,26,46,0.08)] transition-transform active:scale-95 disabled:opacity-60"
           >
             {isOpeningRoom ? <LoaderCircle className="h-5 w-5 animate-spin" /> : null}
+            {!isOpeningRoom ? <Users className="h-7 w-7 fill-current" /> : null}
             방 만들기
           </button>
 
-          <div className="my-4 flex items-center gap-3">
-            <div className="h-px flex-1 bg-[#edf1f4]" />
-            <span className="text-xs text-[#9ca3af]">또는</span>
-            <div className="h-px flex-1 bg-[#edf1f4]" />
+          <div className="flex items-center gap-4 py-1 opacity-55">
+            <div className="h-px flex-1 bg-[#c6c6ce]" />
+            <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[#76777e]">or</span>
+            <div className="h-px flex-1 bg-[#c6c6ce]" />
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="relative rounded-[1.5rem] border border-[#e4e2e4]/70 bg-white p-2 shadow-[0_10px_30px_rgba(26,26,46,0.04)]">
             <input
               value={roomCode}
               onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
@@ -95,8 +133,8 @@ export function HomeScreen({
                   void onJoinRoom(roomCode);
                 }
               }}
-              placeholder="방 코드 입력"
-              className="h-12 flex-1 rounded-xl border border-[#e6ebf0] bg-[#fbfaf8] px-4 text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:border-[#cbd5e1] focus:ring-2 focus:ring-[#1f2a44]/10"
+              placeholder="방 코드로 입장하기"
+              className="h-14 w-full rounded-[1.15rem] border-0 bg-transparent pl-5 pr-16 text-lg text-[#1f2a44] outline-none placeholder:text-[#a3a6ad] focus:ring-0"
             />
             <button
               type="button"
@@ -104,35 +142,37 @@ export function HomeScreen({
                 void onJoinRoom(roomCode);
               }}
               disabled={isOpeningRoom}
-              className="h-12 rounded-xl bg-[#eef4ff] px-5 text-sm text-[#2d5aa7] transition-transform active:scale-95 disabled:opacity-60"
+              className="absolute bottom-2 right-2 top-2 flex w-14 items-center justify-center rounded-[1.1rem] bg-[#f0edf0] text-[#1f2a44] shadow-sm transition-transform active:scale-95 disabled:opacity-60"
+              aria-label="방 코드 입장"
             >
-              참여
+              <ArrowRight className="h-6 w-6" />
             </button>
           </div>
 
           {roomError && (
-            <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#fff5f2] px-4 py-3 text-sm text-[#c15b3d]">
+            <div className="rounded-[1.25rem] border border-[#ffdad6] bg-[#fff5f2] px-4 py-3 text-sm text-[#a6392e]">
               {roomError}
             </div>
           )}
         </section>
 
         {!currentUser && (
-          <div className="mt-5 flex items-center justify-center gap-3 text-sm text-[#6b7280]">
+          <div className="mt-6 flex items-center justify-center gap-3 text-sm text-[#76777e]">
             <button
               type="button"
               onClick={() => onOpenAuth('signup')}
-              className="text-[#1f2a44]"
+              className="font-semibold text-[#1f2a44]"
             >
               회원가입
             </button>
-            <span>·</span>
+            <span className="text-[#c6c6ce]">·</span>
             <button type="button" onClick={onContinueAsGuest}>
               임시로 시작
             </button>
           </div>
         )}
       </main>
+
     </div>
   );
 }

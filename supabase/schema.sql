@@ -13,6 +13,12 @@ create table if not exists public.profiles (
 
 create index if not exists profiles_email_idx on public.profiles (email);
 
+alter table public.profiles
+add column if not exists home_location text,
+add column if not exists home_latitude double precision,
+add column if not exists home_longitude double precision,
+add column if not exists home_location_source text;
+
 alter table public.profiles enable row level security;
 
 drop policy if exists "profiles_select_own" on public.profiles;
@@ -48,9 +54,13 @@ create table if not exists public.saved_friends (
   latitude double precision not null,
   longitude double precision not null,
   max_travel_time integer not null default 45,
+  travel_mode text not null default 'transit',
   location_source text,
   created_at timestamptz not null default now()
 );
+
+alter table public.saved_friends
+add column if not exists travel_mode text not null default 'transit';
 
 create index if not exists saved_friends_user_id_idx on public.saved_friends (user_id);
 
@@ -85,6 +95,9 @@ create table if not exists public.meeting_rooms (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
   owner_id uuid references auth.users(id) on delete set null,
+  draw_controller_id text,
+  redraw_votes jsonb not null default '[]'::jsonb,
+  redraw_requested_at timestamptz,
   selected_category text not null default 'dining',
   selected_candidate jsonb,
   status text not null default 'planning',
@@ -93,6 +106,11 @@ create table if not exists public.meeting_rooms (
 );
 
 create index if not exists meeting_rooms_code_idx on public.meeting_rooms (code);
+
+alter table public.meeting_rooms
+add column if not exists draw_controller_id text,
+add column if not exists redraw_votes jsonb not null default '[]'::jsonb,
+add column if not exists redraw_requested_at timestamptz;
 
 alter table public.meeting_rooms enable row level security;
 
@@ -124,10 +142,14 @@ create table if not exists public.meeting_room_participants (
   latitude double precision not null,
   longitude double precision not null,
   max_travel_time integer not null default 45,
+  travel_mode text not null default 'transit',
   location_source text,
   saved_friend_id text,
   created_at timestamptz not null default now()
 );
+
+alter table public.meeting_room_participants
+add column if not exists travel_mode text not null default 'transit';
 
 create index if not exists meeting_room_participants_room_id_idx
 on public.meeting_room_participants (room_id, created_at);

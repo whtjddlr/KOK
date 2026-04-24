@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchLiveCandidates } from '../lib/live-candidates';
+import { ensureParticipantLocalCoverage } from '../lib/meeting';
 import {
   CandidateInsight,
   CandidateScopeKey,
@@ -62,24 +63,55 @@ export function useLiveCandidateSearch(
   candidateTargetCount: number,
 ): LiveCandidateSearchResult {
   const normalizedInsights = useMemo(
-    () => insights.slice(0, Math.min(Math.max(24, candidateTargetCount + 6), insights.length)),
-    [candidateTargetCount, insights],
+    () => {
+      const isLocalHeavyMode = selectionMode === 'neighborhood' && thrillLevel >= 4;
+      const isHouseFrontMode = selectionMode === 'neighborhood' && thrillLevel >= 5;
+      const baseLimit = Math.min(
+        Math.max(isHouseFrontMode ? 34 : isLocalHeavyMode ? 30 : 24, candidateTargetCount + (isLocalHeavyMode ? participants.length * 5 : 6)),
+        insights.length,
+      );
+      const baseInsights = insights.slice(0, baseLimit);
+      const localWildcardInsights = isLocalHeavyMode
+        ? insights.filter(
+            (insight) =>
+              (isHouseFrontMode && insight.candidate.id.startsWith('thrill-hyper-')) ||
+              insight.candidate.id.startsWith('thrill-local-') ||
+              insight.candidate.id.startsWith('participant-near-'),
+          )
+        : [];
+
+      return ensureParticipantLocalCoverage(
+        insights,
+        [...baseInsights, ...localWildcardInsights],
+        participants,
+        Math.min(insights.length, baseLimit + localWildcardInsights.length + participants.length),
+      );
+    },
+    [candidateTargetCount, insights, participants, selectionMode, thrillLevel],
+  );
+  const fallbackCandidateKey = useMemo(
+    () => fallbackCandidateIds.join(','),
+    [fallbackCandidateIds],
   );
   const cacheKey = useMemo(
     () =>
-      getCacheKey(
-        participants,
-        normalizedInsights,
-        selectedCategory,
-        selectionMode,
-        thrillLevel,
-        candidateScope,
-        aiConfigSignature,
-        candidateTargetCount,
-      ),
+      [
+        getCacheKey(
+          participants,
+          normalizedInsights,
+          selectedCategory,
+          selectionMode,
+          thrillLevel,
+          candidateScope,
+          aiConfigSignature,
+          candidateTargetCount,
+        ),
+        fallbackCandidateKey,
+      ].join(':fallback:'),
     [
       participants,
       normalizedInsights,
+      fallbackCandidateKey,
       selectedCategory,
       selectionMode,
       thrillLevel,
@@ -193,15 +225,6 @@ export function useLiveCandidateSearch(
     };
   }, [
     cacheKey,
-    fallbackCandidateIds,
-    normalizedInsights,
-    participants,
-    selectedCategory,
-    selectionMode,
-    thrillLevel,
-    candidateScope,
-    runtimeAiConfig,
-    candidateTargetCount,
   ]);
 
   return {

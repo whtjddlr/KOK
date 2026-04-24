@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ChevronLeft,
   Coffee,
+  Compass,
   ExternalLink,
   Gamepad2,
   MapPin,
@@ -32,8 +33,12 @@ import {
   NearbyPlaceCategory,
   Participant,
   SelectionModeKey,
+  TravelInfo,
+  TravelMode,
 } from '../types';
 import { MapView } from './MapView';
+import { useWinnerTravelInfo } from '../hooks/useWinnerTravelInfo';
+import { buildNaverMapReservationLink, buildNaverMapSearchLink } from '../lib/naver-links';
 
 interface ResultScreenProps {
   winner: Candidate;
@@ -41,11 +46,26 @@ interface ResultScreenProps {
   selectedCategory: MeetCategoryKey;
   selectionMode: SelectionModeKey;
   currentUser?: AuthUser | null;
+  redrawControl?: {
+    isOnlineRoom: boolean;
+    voteCount: number;
+    requiredVotes: number;
+    hasRequested: boolean;
+    hasMajority: boolean;
+    canReset: boolean;
+    isBusy: boolean;
+    message: string | null;
+    onRequest: () => void;
+  } | null;
   onBack: () => void;
   onNewDraw: () => void;
 }
 
 const PARTICIPANT_COLORS = ['#ff7b6b', '#4ecdc4', '#ffd166', '#a78bfa', '#f59e0b', '#ec4899'];
+
+function getNaverMapKeyword(place: ContentRecommendationItem) {
+  return [place.name, place.roadAddress || place.address].filter(Boolean).join(' ');
+}
 
 const contentCategoryIcons = {
   restaurant: UtensilsCrossed,
@@ -117,12 +137,52 @@ function buildNearbyPlaces(
     }));
 }
 
+function getTravelSummary(travelInfo: TravelInfo[]) {
+  if (!travelInfo.length) {
+    return {
+      averageDuration: 0,
+      averageDistance: 0,
+      spreadDuration: 0,
+      maxDuration: 0,
+    };
+  }
+
+  const durations = travelInfo.map((item) => item.duration);
+  const averageDuration = Math.round(
+    durations.reduce((sum, duration) => sum + duration, 0) / travelInfo.length,
+  );
+  const averageDistance =
+    Math.round(
+      (travelInfo.reduce((sum, item) => sum + item.distance, 0) / travelInfo.length) * 10,
+    ) / 10;
+
+  return {
+    averageDuration,
+    averageDistance,
+    spreadDuration: Math.max(...durations) - Math.min(...durations),
+    maxDuration: Math.max(...durations),
+  };
+}
+
+function getTravelSourceLabel(mode: TravelMode, travelInfo: TravelInfo[]) {
+  if (mode === 'transit') {
+    return travelInfo.every((item) => item.source === 'transit') ? 'ODsay' : '예상 포함';
+  }
+
+  return travelInfo.every((item) => item.source === 'directions') ? '네이버 길찾기' : '예상 포함';
+}
+
+function getInitialTravelMode(participants: Participant[]): TravelMode {
+  return participants.some((participant) => participant.travelMode === 'car') ? 'car' : 'transit';
+}
+
 export function ResultScreen({
   winner,
   participants,
   selectedCategory,
   selectionMode: _selectionMode,
   currentUser = null,
+  redrawControl = null,
   onBack,
   onNewDraw,
 }: ResultScreenProps) {
@@ -132,6 +192,7 @@ export function ResultScreen({
   );
   const activeMeetCategory =
     meetCategories.find((category) => category.key === selectedCategory) ?? meetCategories[0];
+  const initialTravelMode = useMemo(() => getInitialTravelMode(participants), [participants]);
   const [showMap, setShowMap] = useState(true);
   const [contentCategory, setContentCategory] = useState<ContentCategoryKey>(initialCategory);
   const [detailQuery, setDetailQuery] = useState(() =>
@@ -139,6 +200,15 @@ export function ResultScreen({
   );
   const [searchInput, setSearchInput] = useState(detailQuery);
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
+  const [travelMode, setTravelMode] = useState<TravelMode>(initialTravelMode);
+  const {
+    transitTravelInfo,
+    carTravelInfo,
+    status: carTravelStatus,
+    error: carTravelError,
+    transitStatus,
+    transitError,
+  } = useWinnerTravelInfo(participants, winner);
 
   const contentMeta = contentCategoryDefinitions[contentCategory];
   const {
@@ -153,11 +223,43 @@ export function ResultScreen({
     recommendationItems.find((item) => item.id === selectedPlaceId) ??
     recommendationItems[0] ??
     null;
+  const redrawButtonLabel = !redrawControl
+    ? '지역 다시 뽑기'
+    : redrawControl.canReset
+      ? '지역 다시 뽑기'
+      : redrawControl.hasMajority
+        ? '담당자 대기'
+        : redrawControl.hasRequested
+          ? `동의 완료 ${redrawControl.voteCount}/${redrawControl.requiredVotes}`
+          : `다시뽑기 동의 ${redrawControl.voteCount}/${redrawControl.requiredVotes}`;
+  const redrawButtonDisabled = Boolean(
+    redrawControl?.isBusy ||
+      (redrawControl &&
+        !redrawControl.canReset &&
+        (redrawControl.hasRequested || redrawControl.hasMajority)),
+  );
+
+  const handleRedrawClick = () => {
+    if (!redrawControl || redrawControl.canReset) {
+      onNewDraw();
+      return;
+    }
+
+    redrawControl.onRequest();
+  };
 
   const rankedMapPlaces = useMemo(
     () => buildNearbyPlaces(contentCategory, query, recommendationItems),
     [contentCategory, query, recommendationItems],
   );
+  const transitSummary = useMemo(
+    () => getTravelSummary(transitTravelInfo),
+    [transitTravelInfo],
+  );
+  const carSummary = useMemo(() => getTravelSummary(carTravelInfo), [carTravelInfo]);
+  const selectedTravelInfo = travelMode === 'transit' ? transitTravelInfo : carTravelInfo;
+  const selectedTravelSummary = travelMode === 'transit' ? transitSummary : carSummary;
+  const selectedTravelSourceLabel = getTravelSourceLabel(travelMode, selectedTravelInfo);
 
   const recommendedDetailButtons = useMemo(() => {
     const preferred = currentUser?.preferences.favoriteKeywords ?? [];
@@ -198,7 +300,8 @@ export function ResultScreen({
     setSearchInput(nextDetail);
     setSelectedPlaceId(null);
     setShowMap(true);
-  }, [winner.id, selectedCategory, currentUser]);
+    setTravelMode(initialTravelMode);
+  }, [winner.id, selectedCategory, currentUser, initialTravelMode]);
 
   useEffect(() => {
     setSearchInput(detailQuery);
@@ -246,17 +349,43 @@ export function ResultScreen({
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#fafaf8] via-[#f5f1eb] to-[#e8dfd0]">
-      <div className="mx-auto max-w-5xl px-4 py-8">
-        <button
-          onClick={onBack}
-          className="mb-6 inline-flex h-11 items-center gap-2 rounded-full bg-white/90 px-4 text-sm text-[#1a1a2e] shadow-sm"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          다시 고르기
+    <div className="min-h-screen bg-[#fbf8fb] pb-28 text-[#1f2a44]">
+      <header className="sticky top-0 z-30 flex items-center justify-between rounded-b-[2rem] bg-[#f5f1eb]/88 px-6 py-4 shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-md">
+        <button className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1f2a44] text-white shadow-sm">
+          <Compass className="h-5 w-5" />
         </button>
+        <h1 className="absolute left-1/2 -translate-x-1/2 text-2xl font-black tracking-[-0.06em] text-[#1f2a44]">
+          Drop
+        </h1>
+        <button className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f0edf0] text-[#1f2a44] shadow-sm">
+          <MapPin className="h-5 w-5 fill-current" />
+        </button>
+      </header>
 
-        <div className="mb-6 rounded-[28px] bg-white p-6 shadow-sm">
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        {!redrawControl?.isOnlineRoom && (
+          <button
+            onClick={onBack}
+            className="mb-6 inline-flex h-11 items-center gap-2 rounded-full bg-white/90 px-4 text-sm text-[#1f2a44] shadow-sm"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            다시 고르기
+          </button>
+        )}
+
+        <div className="mb-8 rounded-[2rem] bg-transparent p-4 text-center">
+          <div className="mb-3 flex justify-center">
+            <Sparkles className="h-16 w-16 rotate-12 text-[#c6c6ce]" />
+          </div>
+          <div className="text-sm font-semibold tracking-[-0.02em] text-[#45464d]">오늘의 약속 지역</div>
+          <div className="mt-2 flex items-center justify-center gap-2 text-4xl font-black tracking-[-0.07em] text-[#1f2a44]">
+            {winner.name}
+            <MapPin className="h-7 w-7 fill-[#ff7b6b] text-[#ff7b6b]" />
+          </div>
+          <div className="mt-2 text-sm text-[#76777e]">{winner.district}</div>
+        </div>
+
+        <div className="mb-6 rounded-[1.75rem] bg-white p-5 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
           <div className="mb-4 flex flex-wrap gap-2">
             <div
               className="inline-flex items-center rounded-full px-4 py-2 text-sm"
@@ -279,9 +408,9 @@ export function ResultScreen({
 
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
-              <div className="mb-2 text-sm text-[#6b7280]">오늘의 약속 지역</div>
-              <div className="text-3xl text-[#1a1a2e]">{winner.name}</div>
-              <div className="mt-1 text-sm text-[#6b7280]">{winner.district}</div>
+              <div className="mb-2 text-sm text-[#76777e]">확정된 장소</div>
+              <div className="text-2xl font-bold tracking-[-0.05em] text-[#1f2a44]">{winner.name}</div>
+              <div className="mt-1 text-sm text-[#76777e]">{winner.district}</div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -292,14 +421,28 @@ export function ResultScreen({
                 {showMap ? '지도 접기' : '지도 보기'}
               </button>
               <button
-                onClick={onNewDraw}
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#1f2a44] px-5 text-sm text-white transition-transform active:scale-95"
+                onClick={handleRedrawClick}
+                disabled={redrawButtonDisabled}
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#1f2a44] px-5 text-sm text-white transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-55"
               >
-                지역 다시 뽑기
+                {redrawButtonLabel}
                 <RefreshCcw className="h-4 w-4" />
               </button>
             </div>
           </div>
+
+          {redrawControl?.isOnlineRoom && (
+            <div className="mt-4 rounded-2xl bg-[#f8fafc] px-4 py-3 text-sm text-[#667085]">
+              {redrawControl.canReset
+                ? '과반 동의 완료. 추첨 담당자가 다시 열 수 있어요.'
+                : redrawControl.hasMajority
+                  ? '과반 동의 완료. 추첨 담당자를 기다리는 중이에요.'
+                  : `다시뽑기는 ${redrawControl.requiredVotes}명 이상 동의하면 열립니다.`}
+              {redrawControl.message ? (
+                <div className="mt-2 text-[#c15b3d]">{redrawControl.message}</div>
+              ) : null}
+            </div>
+          )}
 
           {preferenceSummary ? (
             <div className="mt-4 flex flex-wrap gap-2">
@@ -328,6 +471,103 @@ export function ResultScreen({
           ) : null}
         </div>
 
+        <section className="mb-6 rounded-[1.75rem] bg-white p-5 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-xl font-bold tracking-[-0.04em] text-[#1f2a44]">이동 정보</div>
+              <div className="mt-1 text-sm text-[#76777e]">
+                평균 {selectedTravelSummary.averageDuration}분 · 편차{' '}
+                {selectedTravelSummary.spreadDuration}분 · {selectedTravelSourceLabel}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 rounded-full bg-[#f5f1eb] p-1">
+              {[
+                { key: 'transit' as const, label: '대중교통', summary: transitSummary },
+                { key: 'car' as const, label: '자동차', summary: carSummary },
+              ].map((item) => {
+                const active = travelMode === item.key;
+
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setTravelMode(item.key)}
+                    className={`rounded-xl px-4 py-2 text-sm transition-all ${
+                      active ? 'bg-[#1f2a44] text-white shadow-sm' : 'text-[#45464d]'
+                    }`}
+                  >
+                    <span className="block">{item.label}</span>
+                    <span className={`text-xs ${active ? 'text-white/75' : 'text-[#7a8491]'}`}>
+                      평균 {item.summary.averageDuration}분
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2">
+            {selectedTravelInfo.map((info, index) => {
+              const color = PARTICIPANT_COLORS[index % PARTICIPANT_COLORS.length];
+              const isCar = travelMode === 'car';
+              const feeText =
+                isCar && info.source === 'directions'
+                  ? `유류비 ${Math.round(info.fuelPrice ?? 0).toLocaleString()}원${
+                      info.tollFare ? ` · 통행료 ${Math.round(info.tollFare).toLocaleString()}원` : ''
+                    }`
+                  : isCar
+                    ? `예상 유류비 ${Math.round(info.cost).toLocaleString()}원`
+                    : info.source === 'transit'
+                      ? `${Math.round(info.cost).toLocaleString()}원 · 환승 ${info.transferCount ?? 0}회`
+                      : `약 ${Math.round(info.cost).toLocaleString()}원`;
+
+              return (
+                <div key={`${travelMode}:${info.participantId}`} className="rounded-[1.5rem] border border-[#f0edf0] bg-[#fbf8fb] p-4 shadow-[0_8px_22px_rgba(26,26,46,0.04)]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm text-white"
+                        style={{ backgroundColor: color }}
+                      >
+                        {info.participantName.charAt(0)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-[#1f2a44]">
+                          {info.participantName}
+                        </div>
+                        <div className="mt-0.5 text-xs text-[#7a8491]">{feeText}</div>
+                        {info.routeSummary ? (
+                          <div className="mt-1 truncate text-xs text-[#44505b]">
+                            {info.routeSummary}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 text-right">
+                      <div className="text-xl font-black tracking-[-0.05em] text-[#1f2a44]">{info.duration}분</div>
+                      <div className="text-xs text-[#7a8491]">{info.distance}km</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {travelMode === 'transit' && transitStatus !== 'ready' ? (
+            <div className="mt-4 rounded-2xl bg-[#f8fbfd] px-4 py-3 text-xs text-[#6b7280]">
+              {transitError ?? 'ODsay 대중교통 경로를 확인하는 중입니다.'}
+            </div>
+          ) : null}
+
+          {travelMode === 'car' && carTravelStatus !== 'ready' ? (
+            <div className="mt-4 rounded-2xl bg-[#f8fbfd] px-4 py-3 text-xs text-[#6b7280]">
+              {carTravelError ?? '자동차 경로를 확인하는 중입니다.'}
+            </div>
+          ) : null}
+        </section>
+
         {showMap && (
           <div className="mb-6">
             <div className="mb-3 flex items-center justify-between">
@@ -354,15 +594,15 @@ export function ResultScreen({
           </div>
         )}
 
-        <section className="mb-6 rounded-[28px] bg-white p-6 shadow-sm">
+        <section className="mb-6 rounded-[1.75rem] bg-white p-5 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
               <div className="flex items-center gap-2 text-[#1a1a2e]">
                 <Sparkles className="h-4 w-4 text-[#ff7b6b]" />
-                <h3 className="text-lg">다음 코스 추천</h3>
+                <h3 className="text-xl font-bold tracking-[-0.04em]">주변 추천</h3>
               </div>
               <p className="mt-1 text-sm leading-relaxed text-[#6b7280]">
-                큰 카테고리를 정한 뒤 세부 키워드까지 바로 검색해 드릴게요.
+                카테고리를 고르면 근처 인기 장소를 바로 보여줘요.
               </p>
             </div>
 
@@ -386,7 +626,7 @@ export function ResultScreen({
                   key={category}
                   type="button"
                   onClick={() => handleChangeCategory(category)}
-                  className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm transition-all ${
+                  className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-all ${
                     active ? 'text-white shadow-sm' : 'bg-[#f5f1eb] text-[#44505b]'
                   }`}
                   style={
@@ -404,7 +644,7 @@ export function ResultScreen({
             })}
           </div>
 
-          <div className="mt-5 rounded-[24px] border border-[#edf2f5] bg-[#faf7f2] p-4">
+          <div className="mt-5 rounded-[1.5rem] border border-[#f0edf0] bg-[#f5f1eb] p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <div className="text-sm text-[#1a1a2e]">{contentMeta.label} 세부 추천</div>
@@ -472,10 +712,10 @@ export function ResultScreen({
           </div>
         </section>
 
-        <section className="rounded-[28px] bg-white p-6 shadow-sm">
+        <section className="rounded-[1.75rem] bg-white p-5 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
           <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
             <div>
-              <div className="text-lg text-[#1a1a2e]">
+              <div className="text-xl font-bold tracking-[-0.04em] text-[#1f2a44]">
                 {winner.name} 근처 {detailQuery}
               </div>
               <p className="mt-1 text-sm leading-relaxed text-[#6b7280]">
@@ -493,21 +733,21 @@ export function ResultScreen({
           </div>
 
           {selectedPlace && (
-            <div className="mt-5 rounded-[24px] border border-[#edf2f5] bg-[#f8fbfd] p-5">
+            <div className="mt-5 rounded-[1.5rem] border border-[#f0edf0] bg-[#fbf8fb] p-5">
               <div className="mb-2 flex items-center gap-2 text-xs text-[#6b7280]">
                 <span className="rounded-full bg-[#fff2ee] px-3 py-1 text-[#ff7b6b]">
                   TOP {selectedPlace.rank}
                 </span>
                 <span>현재 추천 카드</span>
               </div>
-              <div className="text-2xl text-[#1a1a2e]">{selectedPlace.name}</div>
+              <div className="text-2xl font-bold tracking-[-0.05em] text-[#1f2a44]">{selectedPlace.name}</div>
               <div className="mt-1 text-sm text-[#6b7280]">
                 {selectedPlace.categoryPath || selectedPlace.description}
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
                 <a
-                  href={selectedPlace.link || selectedPlace.naverSearchLink}
+                  href={buildNaverMapSearchLink(getNaverMapKeyword(selectedPlace))}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[#1f2a44] px-5 text-sm text-white transition-transform active:scale-95"
@@ -516,7 +756,7 @@ export function ResultScreen({
                   <ExternalLink className="h-4 w-4" />
                 </a>
                 <a
-                  href={selectedPlace.reservationSearchLink}
+                  href={buildNaverMapReservationLink(getNaverMapKeyword(selectedPlace))}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[#f5f1eb] px-5 text-sm text-[#1a1a2e] transition-transform active:scale-95"
@@ -544,7 +784,7 @@ export function ResultScreen({
                     key={item.id}
                     type="button"
                     onClick={() => setSelectedPlaceId(item.id)}
-                    className={`rounded-[24px] border p-4 text-left shadow-sm transition-transform active:scale-[0.99] ${
+                    className={`rounded-[1.5rem] border p-4 text-left shadow-[0_8px_22px_rgba(26,26,46,0.04)] transition-transform active:scale-[0.99] ${
                       active ? 'border-[#1f2a44] bg-white' : 'border-[#edf2f5] bg-[#fbfcfd]'
                     }`}
                   >
@@ -573,7 +813,7 @@ export function ResultScreen({
 
                       <div className="flex flex-wrap gap-2 md:justify-end">
                         <a
-                          href={item.link || item.naverSearchLink}
+                          href={buildNaverMapSearchLink(getNaverMapKeyword(item))}
                           target="_blank"
                           rel="noreferrer"
                           onClick={(event) => event.stopPropagation()}
@@ -583,7 +823,7 @@ export function ResultScreen({
                           <ExternalLink className="h-4 w-4" />
                         </a>
                         <a
-                          href={item.reservationSearchLink}
+                          href={buildNaverMapReservationLink(getNaverMapKeyword(item))}
                           target="_blank"
                           rel="noreferrer"
                           onClick={(event) => event.stopPropagation()}

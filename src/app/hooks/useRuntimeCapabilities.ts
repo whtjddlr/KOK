@@ -9,6 +9,9 @@ interface RuntimeCapabilitiesResponse {
   naverSearch?: {
     connected?: boolean;
   };
+  odsayTransit?: {
+    connected?: boolean;
+  };
 }
 
 interface RuntimeCapabilitiesState {
@@ -21,6 +24,9 @@ interface RuntimeCapabilitiesState {
   naverSearch: {
     connected: boolean;
   };
+  odsayTransit: {
+    connected: boolean;
+  };
 }
 
 const initialState: RuntimeCapabilitiesState = {
@@ -31,6 +37,9 @@ const initialState: RuntimeCapabilitiesState = {
     model: null,
   },
   naverSearch: {
+    connected: false,
+  },
+  odsayTransit: {
     connected: false,
   },
 };
@@ -65,6 +74,9 @@ export function useRuntimeCapabilities() {
           },
           naverSearch: {
             connected: Boolean(data.naverSearch?.connected),
+          },
+          odsayTransit: {
+            connected: Boolean(data.odsayTransit?.connected),
           },
         });
       })

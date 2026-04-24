@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Crosshair, ExternalLink, MapPin, Minus, Plus, Search, X } from 'lucide-react';
 import { Candidate, Coordinates, NearbyPlace, Participant } from '../types';
-import { getDistanceKm, getTravelDistanceFromMinutes } from '../lib/meeting';
+import {
+  getCloseParticipantContext,
+  getDistanceKm,
+  getTravelDistanceFromMinutes,
+} from '../lib/meeting';
 import { loadNaverMapSdk } from '../lib/naver-map';
+import { buildNaverMapReservationLink, buildNaverMapSearchLink } from '../lib/naver-links';
 
 interface MapViewProps {
   participants: Participant[];
@@ -29,6 +34,34 @@ function getCoverageCenter(points: Coordinates[]) {
     lat: points.reduce((sum, point) => sum + point.lat, 0) / points.length,
     lng: points.reduce((sum, point) => sum + point.lng, 0) / points.length,
   };
+}
+
+function getAdaptiveParticipantRadiusKm(participant: Participant, participants: Participant[]) {
+  const maxTravelRadiusKm = getTravelDistanceFromMinutes(participant.maxTravelTime);
+
+  if (participants.length < 2) {
+    return Math.min(maxTravelRadiusKm, 5);
+  }
+
+  const closeContext = getCloseParticipantContext(participants);
+
+  if (closeContext.isCloseGroup) {
+    const compactRadiusKm =
+      closeContext.candidateLimitKm +
+      Math.max(0.35, closeContext.spreadKm * 0.55);
+
+    return Math.min(maxTravelRadiusKm, Math.max(1.2, compactRadiusKm));
+  }
+
+  if (closeContext.spreadKm <= 10) {
+    return Math.min(maxTravelRadiusKm, Math.max(4.5, closeContext.spreadKm * 0.75 + 2.2));
+  }
+
+  if (closeContext.spreadKm <= 25) {
+    return Math.min(maxTravelRadiusKm, Math.max(7.5, closeContext.spreadKm * 0.5 + 3.5));
+  }
+
+  return Math.min(maxTravelRadiusKm, 18);
 }
 
 function createParticipantIcon(name: string, color: string) {
@@ -126,10 +159,6 @@ function getNearbyCategoryLabel(category: NearbyPlace['category']) {
   return '놀거리';
 }
 
-function buildNaverSearchLink(keyword: string) {
-  return `https://search.naver.com/search.naver?query=${encodeURIComponent(keyword)}`;
-}
-
 function buildViewportSignature(
   participants: Participant[],
   candidates: Candidate[],
@@ -177,6 +206,7 @@ export function MapView({
   const fitViewRef = useRef<(() => void) | null>(null);
   const mapListenersRef = useRef<any[]>([]);
   const lastViewportSignatureRef = useRef<string>('');
+  const lastWheelZoomAtRef = useRef(0);
   const [sdkReady, setSdkReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number | null>(null);
@@ -262,7 +292,6 @@ export function MapView({
             return false;
           }
 
-          const interactionEnabled = window.innerWidth >= 768;
           const initialCenter = participants[0]?.coordinates ?? { lat: 37.5665, lng: 126.978 };
 
           if (!mapRef.current) {
@@ -277,7 +306,7 @@ export function MapView({
               scaleControl: false,
               logoControl: false,
               keyboardShortcuts: true,
-              scrollWheel: interactionEnabled,
+              scrollWheel: true,
               draggable: true,
               pinchZoom: true,
               disableDoubleTapZoom: false,
@@ -361,7 +390,7 @@ export function MapView({
     participants.forEach((participant, index) => {
       const color = colors[index % colors.length];
       const center = new maps.LatLng(participant.coordinates.lat, participant.coordinates.lng);
-      const radius = getTravelDistanceFromMinutes(participant.maxTravelTime) * 1000;
+      const radius = getAdaptiveParticipantRadiusKm(participant, participants) * 1000;
 
       const circle = new maps.Circle({
         map,
@@ -636,6 +665,45 @@ export function MapView({
     };
   }, [locationPickerEnabled, onLocationPick, sdkReady]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+
+    if (!sdkReady || !container) {
+      return;
+    }
+
+    const handleWheelZoom = (event: WheelEvent) => {
+      if (!mapRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const now = window.performance.now();
+
+      if (now - lastWheelZoomAtRef.current < 120) {
+        return;
+      }
+
+      lastWheelZoomAtRef.current = now;
+      const currentZoom = mapRef.current.getZoom?.() ?? 11;
+      const nextZoom = Math.max(8, Math.min(17, currentZoom + (event.deltaY < 0 ? 1 : -1)));
+
+      if (nextZoom === currentZoom) {
+        return;
+      }
+
+      mapRef.current.setZoom(nextZoom, true);
+      setZoomLevel(nextZoom);
+    };
+
+    container.addEventListener('wheel', handleWheelZoom, { passive: false });
+
+    return () => {
+      container.removeEventListener('wheel', handleWheelZoom);
+    };
+  }, [sdkReady]);
+
   const handleZoom = (delta: number) => {
     if (!mapRef.current) {
       return;
@@ -654,7 +722,7 @@ export function MapView({
 
   if (error) {
     return (
-      <div className="relative w-full h-[22rem] md:h-[28rem] rounded-3xl overflow-hidden border border-[#f0d4d0] bg-[#fff8f7] p-5 shadow-inner">
+      <div className="relative h-[24rem] w-full overflow-hidden rounded-[2rem] border border-[#f0d4d0] bg-[#fff8f7] p-5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)] md:h-[30rem]">
         <div className="text-sm text-[#a24b41] mb-2">네이버 지도를 불러오지 못했습니다.</div>
         <p className="text-sm text-[#6b7280] leading-relaxed">{error}</p>
       </div>
@@ -662,26 +730,26 @@ export function MapView({
   }
 
   return (
-    <div className="relative h-[19rem] w-full overflow-hidden rounded-2xl border border-[#e7edf2] bg-[#eef3f7] shadow-inner sm:h-[22rem] md:h-[28rem]">
+    <div className="relative h-[24rem] w-full overflow-hidden rounded-[2rem] border border-white/70 bg-[#e4e2e4] shadow-[0_10px_30px_rgba(26,26,46,0.08)] sm:h-[28rem] md:h-[32rem]">
       <div ref={containerRef} className="absolute inset-0 h-full w-full" />
 
       {!sdkReady && (
         <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.92),rgba(240,244,248,0.95))]">
-          <div className="rounded-2xl bg-white/90 backdrop-blur-sm px-4 py-3 text-sm text-[#6b7280] shadow-sm">
+          <div className="rounded-[1.25rem] bg-white/90 px-4 py-3 text-sm text-[#76777e] shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-sm">
             네이버 지도 불러오는 중...
           </div>
         </div>
       )}
 
       {locationPickerHintVisible && (
-        <div className="pointer-events-none absolute left-4 top-4 rounded-full bg-[#1f2a44]/92 px-4 py-2 text-xs text-white shadow-lg backdrop-blur-sm">
+        <div className="pointer-events-none absolute left-4 top-4 rounded-full bg-[#1f2a44]/92 px-4 py-2 text-xs text-white shadow-[0_10px_30px_rgba(26,26,46,0.14)] backdrop-blur-sm">
           지도에서 우클릭하거나 길게 눌러 출발지를 찍어주세요
         </div>
       )}
 
       {activeNearbyPlaceDetail && (
         <div className="absolute inset-x-4 bottom-16 z-10 md:right-20 md:left-4">
-          <div className="rounded-[1.4rem] border border-white/80 bg-white/96 p-4 shadow-[0_18px_40px_rgba(18,28,45,0.16)] backdrop-blur-sm">
+          <div className="rounded-[1.75rem] border border-white/80 bg-white/96 p-4 shadow-[0_18px_40px_rgba(18,28,45,0.16)] backdrop-blur-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="mb-2 flex flex-wrap gap-2">
@@ -739,8 +807,7 @@ export function MapView({
                 <div className="mt-4 flex flex-wrap gap-2">
                   <a
                     href={
-                      activeNearbyPlaceDetail.link ||
-                      buildNaverSearchLink(activeNearbyPlaceDetail.name)
+                      buildNaverMapSearchLink(activeNearbyPlaceDetail.name)
                     }
                     target="_blank"
                     rel="noreferrer"
@@ -750,7 +817,7 @@ export function MapView({
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
                   <a
-                    href={buildNaverSearchLink(`${activeNearbyPlaceDetail.name} 예약`)}
+                    href={buildNaverMapReservationLink(activeNearbyPlaceDetail.name)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#f5f1eb] px-4 text-xs text-[#1a1a2e] transition-transform active:scale-95"
@@ -774,14 +841,14 @@ export function MapView({
       </div>
 
       <div className="pointer-events-none hidden absolute left-4 bottom-4 bg-[#1f2a44]/82 text-white text-[11px] px-3 py-2 rounded-full shadow-lg backdrop-blur-sm">
-        드래그로 이동 · 핀치나 버튼으로 확대/축소
+        드래그로 이동 · 스크롤/핀치로 확대/축소
       </div>
 
       <div className="absolute right-3 bottom-3 flex flex-col gap-2 sm:right-4 sm:bottom-4">
         <button
           type="button"
           onClick={() => handleZoom(1)}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/80 bg-white/94 text-[#1f2a44] shadow-lg backdrop-blur-sm transition-transform active:scale-95"
+          className="flex h-12 w-12 items-center justify-center rounded-full border border-white/80 bg-white/94 text-[#1f2a44] shadow-[0_10px_30px_rgba(26,26,46,0.12)] backdrop-blur-sm transition-transform active:scale-95"
           aria-label="지도 확대"
         >
           <Plus className="h-5 w-5" />
@@ -789,7 +856,7 @@ export function MapView({
         <button
           type="button"
           onClick={() => handleZoom(-1)}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/80 bg-white/94 text-[#1f2a44] shadow-lg backdrop-blur-sm transition-transform active:scale-95"
+          className="flex h-12 w-12 items-center justify-center rounded-full border border-white/80 bg-white/94 text-[#1f2a44] shadow-[0_10px_30px_rgba(26,26,46,0.12)] backdrop-blur-sm transition-transform active:scale-95"
           aria-label="지도 축소"
         >
           <Minus className="h-5 w-5" />
@@ -797,7 +864,7 @@ export function MapView({
         <button
           type="button"
           onClick={handleResetView}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#314062] bg-[#1f2a44]/92 text-white shadow-lg backdrop-blur-sm transition-transform active:scale-95"
+          className="flex h-12 w-12 items-center justify-center rounded-full border border-[#314062] bg-[#1f2a44]/92 text-white shadow-[0_10px_30px_rgba(26,26,46,0.16)] backdrop-blur-sm transition-transform active:scale-95"
           aria-label="전체 범위 보기"
         >
           <Crosshair className="h-4 w-4" />

@@ -33,5 +33,8 @@ export default async function handler(req: any, res: any) {
     naverSearch: {
       connected: Boolean(env.NAVER_SEARCH_CLIENT_ID && env.NAVER_SEARCH_CLIENT_SECRET),
     },
+    odsayTransit: {
+      connected: Boolean(pickFirstEnv(env, ['ODSAY_API_KEY', 'VITE_ODSAY_API_KEY'])),
+    },
   });
 }

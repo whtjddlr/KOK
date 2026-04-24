@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Candidate, Coordinates, MeetCategoryKey } from '../types';
 import { fetchNearbySearchResults } from '../lib/naver-local-search';
 import { searchAddress } from '../lib/naver-map';
+import { buildNaverMapReservationLink, buildNaverMapSearchLink } from '../lib/naver-links';
 
 export type ContentCategoryKey =
   | 'restaurant'
@@ -95,10 +96,6 @@ function buildRecommendationCacheKey(
   detailQuery: string,
 ) {
   return `${candidateId}:${category}:${detailQuery.trim().toLowerCase()}`;
-}
-
-function buildNaverSearchLink(keyword: string) {
-  return `https://search.naver.com/search.naver?query=${encodeURIComponent(keyword)}`;
 }
 
 function cleanQuerySegment(value: string) {
@@ -233,9 +230,9 @@ export function useContentRecommendations(
               categoryPath: item.categoryPath,
               address: item.address,
               roadAddress: item.roadAddress,
-              link: item.link,
-              naverSearchLink: buildNaverSearchLink(placeKeyword),
-              reservationSearchLink: buildNaverSearchLink(`${placeKeyword} 예약`),
+              link: buildNaverMapSearchLink(placeKeyword),
+              naverSearchLink: buildNaverMapSearchLink(placeKeyword),
+              reservationSearchLink: buildNaverMapReservationLink(placeKeyword),
               coordinates,
             } satisfies ContentRecommendationItem;
           }),

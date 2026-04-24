@@ -1,4 +1,4 @@
-import { Clock3, Minus } from 'lucide-react';
+import { Clock3, MapPin, Minus } from 'lucide-react';
 import { NearbyPlacesPanel } from './NearbyPlacesPanel';
 import { inferMetroAreaLabel } from '../lib/meeting';
 import { CandidateInsight, NearbyPlaceCategory, NearbyPlaceSection } from '../types';
@@ -11,9 +11,42 @@ interface CandidateCardProps {
   nearbySections?: NearbyPlaceSection[];
   activeNearbyCategory?: NearbyPlaceCategory;
   onNearbyCategoryChange?: (category: NearbyPlaceCategory) => void;
+  onNearbySearch?: () => void;
   nearbyStatus?: 'idle' | 'loading' | 'ready' | 'error';
   nearbyMessage?: string | null;
   nearbyError?: string | null;
+}
+
+function getCandidateGroup(candidateId: string) {
+  if (candidateId.startsWith('thrill-hyper-')) {
+    return {
+      label: '집앞 상권',
+      className: 'bg-[#ffdad6] text-[#93000a]',
+    };
+  }
+
+  if (candidateId.startsWith('thrill-local-')) {
+    return {
+      label: '극단 로컬',
+      className: 'bg-[#fff0eb] text-[#a6392e]',
+    };
+  }
+
+  if (candidateId.startsWith('participant-near-')) {
+    return {
+      label: '동네 상권',
+      className: 'bg-[#e5fbf8] text-[#00504c]',
+    };
+  }
+
+  if (candidateId.startsWith('midpoint-') || candidateId.startsWith('close-range-')) {
+    return {
+      label: '중간 후보',
+      className: 'bg-[#f0edf0] text-[#45464d]',
+    };
+  }
+
+  return null;
 }
 
 export function CandidateCard({
@@ -24,65 +57,77 @@ export function CandidateCard({
   nearbySections = [],
   activeNearbyCategory = 'restaurant',
   onNearbyCategoryChange,
+  onNearbySearch,
   nearbyStatus = 'idle',
   nearbyMessage = null,
   nearbyError = null,
 }: CandidateCardProps) {
   const { candidate, averageDuration, allReachable } = insight;
   const metroAreaLabel = inferMetroAreaLabel(candidate);
+  const candidateGroup = getCandidateGroup(candidate.id);
 
   return (
     <div
-      className={`rounded-xl border bg-white shadow-sm transition-all ${
+      className={`rounded-[1.35rem] border bg-white shadow-[0_10px_30px_rgba(26,26,46,0.06)] transition-all ${
         selected
           ? 'border-[#ff7b6b] ring-2 ring-[#ff7b6b]/20'
-          : 'border-[#e8edf3] hover:border-[#d7e0e8]'
+          : 'border-[#e4e2e4] hover:border-[#c6c6ce] hover:shadow-[0_18px_42px_rgba(26,26,46,0.1)]'
       }`}
     >
       <div
         onClick={onClick}
-        className="group flex cursor-pointer items-center gap-3 px-3 py-3"
+        className="group flex cursor-pointer items-center gap-4 px-4 py-4"
       >
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onExclude?.();
-          }}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f5f1eb] text-[#6b7280] transition-colors hover:bg-[#ffe7e2] hover:text-[#d95f4d]"
-          aria-label={`${candidate.name} 후보 제외`}
-        >
-          <Minus className="h-4 w-4" />
-        </button>
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[1rem] bg-[#f0edf0] text-[#1f2a44]">
+          <MapPin className="h-5 w-5" />
+        </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <div className="truncate text-base font-medium text-[#1a1a2e]">{candidate.name}</div>
-            <span className="shrink-0 rounded-full bg-[#eef4ff] px-2 py-0.5 text-[11px] text-[#35548c]">
+            <div className="truncate text-base font-semibold tracking-[-0.03em] text-[#1f2a44]">{candidate.name}</div>
+            <span className="shrink-0 rounded-full bg-[#f5f1eb] px-2.5 py-1 text-[11px] text-[#45464d]">
               {metroAreaLabel}
             </span>
+            {candidateGroup && (
+              <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] ${candidateGroup.className}`}>
+                {candidateGroup.label}
+              </span>
+            )}
             {allReachable && (
-              <span className="hidden shrink-0 rounded-full bg-[#e8faf7] px-2 py-0.5 text-[11px] text-[#128075] sm:inline-flex">
+              <span className="hidden shrink-0 rounded-full bg-[#e5fbf8] px-2.5 py-1 text-[11px] text-[#00504c] sm:inline-flex">
                 가능
               </span>
             )}
           </div>
-          <div className="mt-1 truncate text-sm text-[#7a8491]">{candidate.district}</div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1 text-xs text-[#8a94a2]">
-          <Clock3 className="h-3.5 w-3.5" />
-          {averageDuration}분
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="hidden items-center gap-1 rounded-full bg-[#f5f3f5] px-3 py-1.5 text-xs text-[#76777e] sm:inline-flex">
+            <Clock3 className="h-3.5 w-3.5" />
+            {averageDuration}분
+          </div>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onExclude?.();
+            }}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f0edf0] text-[#76777e] transition-colors hover:bg-[#ffdad6] hover:text-[#ba1a1a]"
+            aria-label={`${candidate.name} 후보 제외`}
+          >
+            <Minus className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
       {selected && (
-        <div className="border-t border-[#edf1f4] px-3 pb-3 pt-3">
+        <div className="border-t border-[#f0edf0] px-4 pb-4 pt-3">
           <NearbyPlacesPanel
             candidate={candidate}
             sections={nearbySections}
             activeCategory={activeNearbyCategory}
             onCategoryChange={onNearbyCategoryChange ?? (() => undefined)}
+            onSearch={onNearbySearch}
             status={nearbyStatus}
             message={nearbyMessage}
             error={nearbyError}

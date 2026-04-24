@@ -1,11 +1,13 @@
 import { ExternalLink, LoaderCircle, MapPin, Sparkles } from 'lucide-react';
 import { Candidate, NearbyPlaceCategory, NearbyPlaceSection } from '../types';
+import { buildNaverMapSearchLink } from '../lib/naver-links';
 
 interface NearbyPlacesPanelProps {
   candidate: Candidate | null;
   sections: NearbyPlaceSection[];
   activeCategory: NearbyPlaceCategory;
   onCategoryChange: (category: NearbyPlaceCategory) => void;
+  onSearch?: () => void;
   status: 'idle' | 'loading' | 'ready' | 'error';
   message: string | null;
   error: string | null;
@@ -17,6 +19,7 @@ export function NearbyPlacesPanel({
   sections,
   activeCategory,
   onCategoryChange,
+  onSearch,
   status,
   message,
   error,
@@ -62,6 +65,16 @@ export function NearbyPlacesPanel({
         </div>
       )}
 
+      {status === 'idle' && !visibleSections.length && onSearch && (
+        <button
+          type="button"
+          onClick={onSearch}
+          className="mt-4 inline-flex h-10 items-center justify-center rounded-full bg-[#1f2a44] px-4 text-sm text-white transition-transform active:scale-95"
+        >
+          근처 정보 보기
+        </button>
+      )}
+
       {visibleSections.length > 0 && (
         <>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -100,9 +113,8 @@ export function NearbyPlacesPanel({
                       </div>
                     </div>
 
-                    {place.link ? (
-                      <a
-                        href={place.link}
+                    <a
+                        href={buildNaverMapSearchLink(place.name || place.query || candidate.name)}
                         target="_blank"
                         rel="noreferrer"
                         className="inline-flex h-9 items-center justify-center gap-1 rounded-full bg-white px-3 text-xs text-[#1a1a2e] shadow-sm transition-transform active:scale-95"
@@ -110,7 +122,6 @@ export function NearbyPlacesPanel({
                         보기
                         <ExternalLink className="h-3.5 w-3.5" />
                       </a>
-                    ) : null}
                   </div>
 
                   <div className="mt-3 flex items-center gap-2 text-xs text-[#6b7280]">

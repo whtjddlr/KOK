@@ -27,7 +27,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const upstreamUrl = new URL('https://naveropenapi.apigw.ntruss.com/map-direction/v1/driving');
+    const upstreamUrl = new URL('https://maps.apigw.ntruss.com/map-direction/v1/driving');
     upstreamUrl.searchParams.set('start', start);
     upstreamUrl.searchParams.set('goal', goal);
     upstreamUrl.searchParams.set('option', option);

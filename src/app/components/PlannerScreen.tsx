@@ -2,16 +2,23 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot,
   BookmarkPlus,
+  Car,
+  ChevronDown,
   ChevronLeft,
+  ChevronUp,
   Copy,
   LoaderCircle,
   LocateFixed,
   Plus,
+  Route,
   Search,
   Settings2,
   Shuffle,
   Sparkles,
+  TrainFront,
+  Trash2,
   Users,
+  UserRound,
   Wifi,
 } from 'lucide-react';
 import {
@@ -19,6 +26,7 @@ import {
   CandidateInsight,
   CandidateScopeKey,
   Coordinates,
+  DrawProof,
   MeetingRoom,
   MeetCategoryKey,
   NearbyPlaceCategory,
@@ -27,6 +35,9 @@ import {
   SavedFriend,
   SelectionModeKey,
   ThrillLevel,
+  TravelInfo,
+  TravelMode,
+  TravelRouteStep,
 } from '../types';
 import { ParticipantCard } from './ParticipantCard';
 import { MapView } from './MapView';
@@ -34,11 +45,15 @@ import { CandidateCard } from './CandidateCard';
 import { RandomDrawer } from './RandomDrawer';
 import { AiConfigSheet } from './AiConfigSheet';
 import { useLiveCandidateSearch } from '../hooks/useLiveCandidateSearch';
+import { useCandidateTravelRoutes } from '../hooks/useCandidateTravelRoutes';
 import { getDefaultNearbyCategory, useNearbyPlaces } from '../hooks/useNearbyPlaces';
 import { useRuntimeCapabilities } from '../hooks/useRuntimeCapabilities';
 import { meetCategories, mockCandidates, selectionModes, thrillStages } from '../data/mockData';
 import {
   buildCandidateUniverse,
+  ensureParticipantLocalCoverage,
+  getCloseBalancedCandidateInsights,
+  getCloseParticipantContext,
   getCandidateInsights,
   getDrawPool,
   getDynamicCandidateInsights,
@@ -64,22 +79,30 @@ import {
 } from '../lib/friends';
 import {
   addRoomParticipant,
+  forgetLocalRoomParticipant,
+  getCurrentRoomActorIds,
+  getParticipantActorKey,
+  getPreferredDrawControllerId,
   getRoomShareUrl,
+  loadMeetingRoomByCode,
   loadRoomParticipants,
+  rememberLocalRoomParticipant,
   removeRoomParticipant,
-  subscribeToRoomParticipants,
-  subscribeToRoomState,
+  updateRoomDrawController,
   updateRoomSelection,
 } from '../lib/rooms';
 import { NearbyPlacesPanel } from './NearbyPlacesPanel';
+import type { UserHomeLocation } from '../lib/auth';
 
 interface PlannerScreenProps {
   currentUserId: string;
   currentUserName: string;
+  currentUserHomeLocation?: UserHomeLocation | null;
   onlineRoom: MeetingRoom | null;
   isOpeningRoom?: boolean;
   roomError?: string | null;
   onCreateOnlineRoom?: (participants: Participant[]) => Promise<void>;
+  onOpenProfile?: () => void;
   initialParticipants: Participant[];
   selectedCategory: MeetCategoryKey;
   onCategoryChange: (category: MeetCategoryKey) => void;
@@ -92,12 +115,34 @@ interface PlannerScreenProps {
   candidateTargetCount: number;
   onCandidateTargetCountChange: (count: number) => void;
   onBack: () => void;
-  onComplete: (winner: Candidate, participants: Participant[], category: MeetCategoryKey) => void;
+  onComplete: (
+    winner: Candidate,
+    participants: Participant[],
+    category: MeetCategoryKey,
+    proof?: DrawProof | null,
+  ) => void;
 }
 
 type LocationMode = 'current' | 'address' | 'map';
 
 const PARTICIPANT_COLORS = ['#ff7b6b', '#4ecdc4', '#ffd166', '#a78bfa', '#f59e0b', '#ec4899'];
+
+const travelModeOptions: Array<{
+  key: TravelMode;
+  label: string;
+  hint: string;
+}> = [
+  {
+    key: 'transit',
+    label: '대중교통',
+    hint: '지하철·버스',
+  },
+  {
+    key: 'car',
+    label: '자차',
+    hint: '자동차',
+  },
+];
 
 const candidateScopeOptions: Array<{
   key: CandidateScopeKey;
@@ -130,6 +175,7 @@ const thrillButtonLabels: Record<ThrillLevel, string> = {
   2: 'Lv.2',
   3: 'Lv.3',
   4: 'Lv.4',
+  5: 'Lv.5',
 };
 
 function clampCandidateTargetCount(count: number) {
@@ -166,6 +212,105 @@ function sortInsightsByCandidateIds(insights: CandidateInsight[], candidateIds: 
     .filter((insight): insight is CandidateInsight => Boolean(insight));
 }
 
+function getTravelModeLabel(mode?: TravelMode) {
+  return mode === 'car' ? '자차' : '대중교통';
+}
+
+function getTravelModeIcon(mode?: TravelMode) {
+  return mode === 'car' ? Car : TrainFront;
+}
+
+function getRouteSourceLabel(route: TravelInfo) {
+  if (route.source === 'transit') {
+    return 'ODsay';
+  }
+
+  if (route.source === 'directions') {
+    return '네이버';
+  }
+
+  return '예상';
+}
+
+function formatRouteFee(route: TravelInfo) {
+  if (route.mode === 'car') {
+    const fuel = Math.round(route.fuelPrice ?? route.cost ?? 0);
+    const toll = Math.round(route.tollFare ?? 0);
+    return toll > 0
+      ? `유류비 ${fuel.toLocaleString()}원 · 통행료 ${toll.toLocaleString()}원`
+      : `유류비 ${fuel.toLocaleString()}원`;
+  }
+
+  return `${Math.round(route.cost ?? 0).toLocaleString()}원 · 환승 ${route.transferCount ?? 0}회`;
+}
+
+function getRouteHeadline(route: TravelInfo) {
+  if (route.routeSummary) {
+    return route.routeSummary;
+  }
+
+  return route.mode === 'car' ? '자동차 경로' : '대중교통 예상 경로';
+}
+
+function formatRouteStepDistance(distance?: number) {
+  if (!distance) {
+    return null;
+  }
+
+  if (distance >= 1000) {
+    return `${(distance / 1000).toFixed(distance >= 10000 ? 0 : 1)}km`;
+  }
+
+  return `${distance.toLocaleString()}m`;
+}
+
+function getRouteStepTypeLabel(type: TravelRouteStep['type']) {
+  if (type === 'subway') {
+    return '지하철';
+  }
+
+  if (type === 'bus') {
+    return '버스';
+  }
+
+  if (type === 'car') {
+    return '자차';
+  }
+
+  return '도보';
+}
+
+function getRouteStepBadgeClass(type: TravelRouteStep['type']) {
+  if (type === 'subway') {
+    return 'bg-[#eef5ff] text-[#2563eb]';
+  }
+
+  if (type === 'bus') {
+    return 'bg-[#ecfdf5] text-[#059669]';
+  }
+
+  if (type === 'car') {
+    return 'bg-[#fff7ed] text-[#ea580c]';
+  }
+
+  return 'bg-[#f5f1eb] text-[#6b7280]';
+}
+
+function getRouteDetailMeta(route: TravelInfo) {
+  const items = [
+    route.walkDistance ? `도보 ${route.walkDistance.toLocaleString()}m` : null,
+    typeof route.transferCount === 'number' ? `환승 ${route.transferCount}회` : null,
+    route.firstStartStation && route.lastEndStation
+      ? `${route.firstStartStation} → ${route.lastEndStation}`
+      : null,
+    route.mode === 'car' && typeof route.taxiFare === 'number' && route.taxiFare > 0
+      ? `예상 택시 ${Math.round(route.taxiFare).toLocaleString()}원`
+      : null,
+  ].filter(Boolean);
+
+  return items.join(' · ');
+}
+
 function getLocationErrorMessage(error: GeolocationPositionError) {
   if (error.code === error.PERMISSION_DENIED) {
     return '브라우저 위치 권한이 꺼져 있어요. 권한을 허용해 주세요.';
@@ -186,13 +331,42 @@ function isFriendAlreadyAdded(participants: Participant[], friend: SavedFriend) 
   );
 }
 
+function getParticipantSyncSignature(participants: Participant[]) {
+  return participants
+    .map((participant) =>
+      [
+        participant.id,
+        participant.name,
+        participant.location,
+        participant.coordinates.lat.toFixed(6),
+        participant.coordinates.lng.toFixed(6),
+        participant.maxTravelTime,
+        participant.travelMode ?? 'transit',
+        participant.locationSource ?? '',
+        participant.savedFriendId ?? '',
+        participant.createdBy ?? '',
+      ].join(':'),
+    )
+    .join('|');
+}
+
+function mergeSyncedParticipants(current: Participant[], synced: Participant[]) {
+  if (getParticipantSyncSignature(current) === getParticipantSyncSignature(synced)) {
+    return current;
+  }
+
+  return synced;
+}
+
 export function PlannerScreen({
   currentUserId,
   currentUserName,
+  currentUserHomeLocation = null,
   onlineRoom,
   isOpeningRoom = false,
   roomError: externalRoomError = null,
   onCreateOnlineRoom,
+  onOpenProfile,
   initialParticipants,
   selectedCategory,
   onCategoryChange,
@@ -227,8 +401,10 @@ export function PlannerScreen({
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
   const [newLocation, setNewLocation] = useState('');
   const [newCoordinates, setNewCoordinates] = useState<Coordinates | null>(null);
+  const [newTravelMode, setNewTravelMode] = useState<TravelMode>('transit');
   const newTravelTime = DEFAULT_MAX_TRAVEL_TIME;
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [expandedRouteKey, setExpandedRouteKey] = useState<string | null>(null);
   const [excludedCandidateIds, setExcludedCandidateIds] = useState<string[]>([]);
   const [activeNearbyCategory, setActiveNearbyCategory] = useState<NearbyPlaceCategory>(
     getDefaultNearbyCategory(selectedCategory),
@@ -241,10 +417,16 @@ export function PlannerScreen({
   const [roomMessage, setRoomMessage] = useState<string | null>(null);
   const [copiedRoomLink, setCopiedRoomLink] = useState(false);
   const [isCreatingRoomFromPlanner, setIsCreatingRoomFromPlanner] = useState(false);
+  const [nearbySearchCandidateId, setNearbySearchCandidateId] = useState<string | null>(null);
+  const [syncedRoom, setSyncedRoom] = useState<MeetingRoom | null>(onlineRoom);
 
   useEffect(() => {
     participantsRef.current = participants;
   }, [participants]);
+
+  useEffect(() => {
+    setSyncedRoom(onlineRoom);
+  }, [onlineRoom]);
 
   useEffect(() => {
     if (onlineRoom) {
@@ -262,77 +444,89 @@ export function PlannerScreen({
     }
 
     let active = true;
+    let isSyncingParticipants = false;
+    let isSyncingRoom = false;
     setRoomSyncStatus('loading');
     setRoomMessage(null);
 
-    loadRoomParticipants(onlineRoom.id)
-      .then((nextParticipants) => {
-        if (!active) {
-          return;
-        }
+    const syncParticipants = () => {
+      if (isSyncingParticipants) {
+        return;
+      }
 
-        setParticipants(nextParticipants);
-        setRoomSyncStatus('connected');
-      })
-      .catch((error: Error) => {
-        if (!active) {
-          return;
-        }
+      isSyncingParticipants = true;
 
-        setRoomSyncStatus('error');
-        setRoomMessage(error.message);
-      });
+      void loadRoomParticipants(onlineRoom.id)
+        .then((nextParticipants) => {
+          if (!active) {
+            return;
+          }
 
-    const unsubscribeParticipants = subscribeToRoomParticipants(
-      onlineRoom.id,
-      (nextParticipants) => {
-        if (!active) {
-          return;
-        }
+          setParticipants((current) => mergeSyncedParticipants(current, nextParticipants));
+          setRoomSyncStatus('connected');
+        })
+        .catch((error: Error) => {
+          if (!active) {
+            return;
+          }
 
-        setParticipants(nextParticipants);
-        setRoomSyncStatus('connected');
-      },
-      (message) => {
-        if (!active) {
-          return;
-        }
+          setRoomSyncStatus('error');
+          setRoomMessage(error.message);
+        })
+        .finally(() => {
+          isSyncingParticipants = false;
+        });
+    };
 
-        setRoomSyncStatus('error');
-        setRoomMessage(message);
-      },
-    );
+    const syncRoomState = () => {
+      if (isSyncingRoom) {
+        return;
+      }
 
-    const unsubscribeRoom = subscribeToRoomState(
-      onlineRoom.id,
-      (room) => {
-        if (!active || room.status !== 'decided' || !room.selectedCandidate) {
-          return;
-        }
+      isSyncingRoom = true;
 
-        const winnerKey = `${room.selectedCandidate.id}-${room.updatedAt}`;
+      void loadMeetingRoomByCode(onlineRoom.code)
+        .then((room) => {
+          if (!active || !room) {
+            return;
+          }
 
-        if (seenRoomWinnerRef.current === winnerKey) {
-          return;
-        }
+          setSyncedRoom(room);
 
-        seenRoomWinnerRef.current = winnerKey;
-        onCategoryChange(room.selectedCategory);
-        onComplete(room.selectedCandidate, participantsRef.current, room.selectedCategory);
-      },
-      (message) => {
-        if (!active) {
-          return;
-        }
+          if (room.status !== 'decided' || !room.selectedCandidate) {
+            return;
+          }
 
-        setRoomMessage(message);
-      },
-    );
+          const winnerKey = `${room.selectedCandidate.id}-${room.updatedAt}`;
+
+          if (seenRoomWinnerRef.current === winnerKey) {
+            return;
+          }
+
+          seenRoomWinnerRef.current = winnerKey;
+          onCategoryChange(room.selectedCategory);
+          onComplete(room.selectedCandidate, participantsRef.current, room.selectedCategory);
+        })
+        .catch((error: Error) => {
+          if (active) {
+            setRoomMessage(error.message);
+          }
+        })
+        .finally(() => {
+          isSyncingRoom = false;
+        });
+    };
+
+    syncParticipants();
+    syncRoomState();
+
+    const participantsIntervalId = window.setInterval(syncParticipants, 2500);
+    const roomIntervalId = window.setInterval(syncRoomState, 3500);
 
     return () => {
       active = false;
-      unsubscribeParticipants();
-      unsubscribeRoom();
+      window.clearInterval(participantsIntervalId);
+      window.clearInterval(roomIntervalId);
     };
   }, [onlineRoom, onCategoryChange, onComplete]);
 
@@ -340,9 +534,11 @@ export function PlannerScreen({
     let active = true;
 
     void loadSavedFriends(currentUserId).then((friends) => {
-      if (active) {
-        setSavedFriends(friends);
+      if (!active) {
+        return;
       }
+
+      setSavedFriends(friends);
     });
 
     return () => {
@@ -355,6 +551,7 @@ export function PlannerScreen({
   }, []);
 
   const isGuestMode = !currentUserId;
+  const roomState = syncedRoom ?? onlineRoom;
   const runtimeCapabilities = useRuntimeCapabilities();
   const effectiveRuntimeAiConfig = runtimeCapabilities.ai.connected ? null : runtimeAiConfig;
   const aiConfigSignature = getRuntimeAiConfigSignature(effectiveRuntimeAiConfig);
@@ -368,37 +565,145 @@ export function PlannerScreen({
   const activeMode =
     selectionModes.find((mode) => mode.key === selectionMode) ?? selectionModes[0];
   const effectiveThrillLevel: ThrillLevel =
-    selectionMode === 'balance' ? 1 : thrillLevel >= 3 ? thrillLevel : 3;
+    selectionMode === 'balance' ? 1 : thrillLevel;
   const activeThrill =
     thrillStages.find((stage) => stage.level === effectiveThrillLevel) ?? thrillStages[0];
-  const visibleThrillStages = thrillStages.filter((stage) => stage.level >= 3);
+  const visibleThrillStages = thrillStages;
   const activeScope =
     candidateScopeOptions.find((scope) => scope.key === candidateScope) ?? candidateScopeOptions[0];
   const activeCandidateTargetCount = clampCandidateTargetCount(candidateTargetCount);
-
-  const candidateUniverse = buildCandidateUniverse(
-    participants,
-    mockCandidates,
-    selectedCategory,
-    effectiveThrillLevel,
+  const roomActorIds = useMemo(
+    () =>
+      getCurrentRoomActorIds({
+        roomId: roomState?.id ?? null,
+        currentUserId,
+        participants,
+      }),
+    [currentUserId, participants, roomState?.id],
   );
-  const allCandidateInsights = getCandidateInsights(participants, candidateUniverse, selectedCategory);
-  const effectiveCandidateTargetCount = allCandidateInsights.length
-    ? Math.min(activeCandidateTargetCount, allCandidateInsights.length)
-    : activeCandidateTargetCount;
-  const candidateCountLimited =
-    allCandidateInsights.length > 0 && activeCandidateTargetCount > allCandidateInsights.length;
-  const candidateSliderMax = allCandidateInsights.length
-    ? Math.max(MIN_CANDIDATE_TARGET_COUNT, Math.min(MAX_CANDIDATE_TARGET_COUNT, allCandidateInsights.length))
-    : MAX_CANDIDATE_TARGET_COUNT;
-  const seedCandidateInsights = getDynamicCandidateInsights(
+  const fallbackDrawControllerId = useMemo(
+    () => getPreferredDrawControllerId(participants, roomState?.ownerId),
+    [participants, roomState?.ownerId],
+  );
+  const activeDrawControllerId = roomState?.drawControllerId ?? fallbackDrawControllerId;
+  const drawControllerName =
+    participants.find(
+      (participant) => getParticipantActorKey(participant) === activeDrawControllerId,
+    )?.name ?? '추첨 담당자';
+  const canStartOnlineDraw =
+    !roomState || (activeDrawControllerId ? roomActorIds.includes(activeDrawControllerId) : false);
+
+  useEffect(() => {
+    if (!onlineRoom || !participants.length) {
+      return;
+    }
+
+    const currentControllerStillPresent =
+      roomState?.drawControllerId &&
+      participants.some(
+        (participant) => getParticipantActorKey(participant) === roomState.drawControllerId,
+      );
+
+    if (currentControllerStillPresent) {
+      return;
+    }
+
+    const nextControllerId = getPreferredDrawControllerId(
+      participants,
+      roomState?.ownerId ?? onlineRoom.ownerId,
+    );
+
+    if (!nextControllerId || nextControllerId === roomState?.drawControllerId) {
+      return;
+    }
+
+    void updateRoomDrawController({
+      roomId: onlineRoom.id,
+      drawControllerId: nextControllerId,
+    })
+      .then((room) => {
+        if (room) {
+          setSyncedRoom(room);
+        }
+      })
+      .catch((error: Error) => {
+        setRoomMessage(error.message);
+      });
+  }, [
+    onlineRoom,
     participants,
-    candidateUniverse,
-    selectedCategory,
-    selectionMode,
-    effectiveThrillLevel,
-    candidateScope,
-    effectiveCandidateTargetCount,
+    roomState?.drawControllerId,
+    roomState?.ownerId,
+  ]);
+
+  const candidateUniverse = useMemo(
+    () =>
+      buildCandidateUniverse(
+        participants,
+        mockCandidates,
+        selectedCategory,
+        effectiveThrillLevel,
+      ),
+    [effectiveThrillLevel, participants, selectedCategory],
+  );
+  const allCandidateInsights = useMemo(
+    () => getCandidateInsights(participants, candidateUniverse, selectedCategory),
+    [candidateUniverse, participants, selectedCategory],
+  );
+  const closeParticipantContext = useMemo(
+    () => getCloseParticipantContext(participants),
+    [participants],
+  );
+  const scopedCandidateInsights = useMemo(
+    () =>
+      selectionMode === 'balance' && closeParticipantContext.isCloseGroup
+        ? getCloseBalancedCandidateInsights(allCandidateInsights, participants)
+        : allCandidateInsights,
+    [allCandidateInsights, closeParticipantContext.isCloseGroup, participants, selectionMode],
+  );
+  const effectiveCandidateTargetCount = scopedCandidateInsights.length
+    ? Math.min(
+        Math.max(
+          activeCandidateTargetCount,
+          selectionMode === 'neighborhood' && effectiveThrillLevel >= 5
+            ? participants.length
+            : MIN_CANDIDATE_TARGET_COUNT,
+        ),
+        scopedCandidateInsights.length,
+      )
+    : participants.length >= 2
+      ? 0
+      : activeCandidateTargetCount;
+  const candidateCountLimited =
+    participants.length >= 2 &&
+    activeCandidateTargetCount > scopedCandidateInsights.length;
+  const candidateSliderMax = scopedCandidateInsights.length
+    ? Math.max(MIN_CANDIDATE_TARGET_COUNT, Math.min(MAX_CANDIDATE_TARGET_COUNT, scopedCandidateInsights.length))
+    : MIN_CANDIDATE_TARGET_COUNT;
+  const seedCandidateInsights = useMemo(
+    () =>
+      getDynamicCandidateInsights(
+        participants,
+        candidateUniverse,
+        selectedCategory,
+        selectionMode,
+        effectiveThrillLevel,
+        candidateScope,
+        effectiveCandidateTargetCount,
+      ),
+    [
+      candidateScope,
+      candidateUniverse,
+      effectiveCandidateTargetCount,
+      effectiveThrillLevel,
+      participants,
+      selectedCategory,
+      selectionMode,
+    ],
+  );
+  const fallbackCandidateIds = useMemo(
+    () => seedCandidateInsights.map((insight) => insight.candidate.id),
+    [seedCandidateInsights],
   );
 
   const {
@@ -409,8 +714,8 @@ export function PlannerScreen({
     error: aiCandidateError,
   } = useLiveCandidateSearch(
     participants,
-    allCandidateInsights,
-    seedCandidateInsights.map((insight) => insight.candidate.id),
+    scopedCandidateInsights,
+    fallbackCandidateIds,
     selectedCategory,
     selectionMode,
     effectiveThrillLevel,
@@ -420,31 +725,126 @@ export function PlannerScreen({
     effectiveCandidateTargetCount,
   );
 
-  const aiCandidateInsights = sortInsightsByCandidateIds(allCandidateInsights, aiCandidateIds);
-  const rawCandidateInsights = aiCandidateInsights.length ? aiCandidateInsights : seedCandidateInsights;
-  const candidateInsights = rawCandidateInsights.filter(
-    (insight) => !excludedCandidateIds.includes(insight.candidate.id),
+  const aiCandidateInsights = useMemo(
+    () => sortInsightsByCandidateIds(scopedCandidateInsights, aiCandidateIds),
+    [aiCandidateIds, scopedCandidateInsights],
   );
-  const { pool: drawPool, fallbackNotice } = getDrawPool(
-    candidateInsights,
-    selectionMode,
-    effectiveThrillLevel,
-    candidateScope,
-    effectiveCandidateTargetCount,
+  const guardedAiCandidateInsights = useMemo(
+    () =>
+      selectionMode === 'balance' && closeParticipantContext.isCloseGroup
+        ? getCloseBalancedCandidateInsights(aiCandidateInsights, participants)
+        : aiCandidateInsights,
+    [aiCandidateInsights, closeParticipantContext.isCloseGroup, participants, selectionMode],
   );
+  const rawCandidateInsights = useMemo(
+    () => {
+      const scopedCandidateIdSet = new Set(
+        scopedCandidateInsights.map((insight) => insight.candidate.id),
+      );
+      const sourceInsights = guardedAiCandidateInsights.length
+        ? guardedAiCandidateInsights
+        : seedCandidateInsights;
+      const scopedSourceInsights = sourceInsights.filter((insight) =>
+        scopedCandidateIdSet.has(insight.candidate.id),
+      );
+      const fallbackScopedInsights = scopedCandidateInsights.slice(
+        0,
+        Math.min(
+          effectiveCandidateTargetCount || scopedCandidateInsights.length,
+          scopedCandidateInsights.length,
+        ),
+      );
 
-  const selectedInsight =
-    candidateInsights.find((insight) => insight.candidate.id === selectedCandidateId) ??
-    candidateInsights[0] ??
-    null;
+      return ensureParticipantLocalCoverage(
+        scopedCandidateInsights,
+        scopedSourceInsights.length ? scopedSourceInsights : fallbackScopedInsights,
+        participants,
+        Math.min(
+          effectiveCandidateTargetCount || scopedSourceInsights.length || fallbackScopedInsights.length,
+          scopedCandidateInsights.length ||
+            scopedSourceInsights.length ||
+            fallbackScopedInsights.length,
+        ),
+        {
+          selectionMode,
+          thrillLevel: effectiveThrillLevel,
+        },
+      );
+    },
+    [
+      effectiveCandidateTargetCount,
+      effectiveThrillLevel,
+      guardedAiCandidateInsights,
+      participants,
+      scopedCandidateInsights,
+      seedCandidateInsights,
+      selectionMode,
+    ],
+  );
+  const candidateInsights = useMemo(
+    () =>
+      rawCandidateInsights.filter(
+        (insight) => !excludedCandidateIds.includes(insight.candidate.id),
+      ),
+    [excludedCandidateIds, rawCandidateInsights],
+  );
+  const { pool: drawPool, fallbackNotice } = useMemo(
+    () =>
+      getDrawPool(
+        candidateInsights,
+        selectionMode,
+        effectiveThrillLevel,
+        candidateScope,
+        effectiveCandidateTargetCount,
+      ),
+    [
+      candidateInsights,
+      candidateScope,
+      effectiveCandidateTargetCount,
+      effectiveThrillLevel,
+      selectionMode,
+    ],
+  );
+  const drawDisabledReason = participants.length < 2
+    ? '먼저 참여자를 2명 이상 입력해 주세요.'
+    : !canStartOnlineDraw
+      ? `${drawControllerName}만 최종 랜덤 추첨을 시작할 수 있어요.`
+      : !drawPool.length
+        ? '추첨 가능한 후보가 아직 없어요.'
+        : aiCandidateStatus === 'loading'
+          ? 'AI가 후보를 정리하는 중이에요.'
+          : null;
+
+  const selectedInsight = useMemo(
+    () =>
+      candidateInsights.find((insight) => insight.candidate.id === selectedCandidateId) ??
+      candidateInsights[0] ??
+      null,
+    [candidateInsights, selectedCandidateId],
+  );
+  const {
+    routes: selectedCandidateRoutes,
+    status: selectedRouteStatus,
+    error: selectedRouteError,
+    hasLiveData: selectedRouteHasLiveData,
+  } = useCandidateTravelRoutes(participants, selectedInsight?.candidate ?? null);
+
+  useEffect(() => {
+    setExpandedRouteKey(null);
+  }, [selectedInsight?.candidate.id]);
+
+  const nearbySearchEnabled =
+    Boolean(selectedInsight) && nearbySearchCandidateId === selectedInsight?.candidate.id;
   const {
     sections: nearbySections,
     status: nearbyPlacesStatus,
     error: nearbyPlacesError,
     message: nearbyPlacesMessage,
-  } = useNearbyPlaces(selectedInsight?.candidate ?? null, selectedCategory);
-  const nearbyMapPlaces =
-    nearbySections.find((section) => section.key === activeNearbyCategory)?.items ?? [];
+  } = useNearbyPlaces(selectedInsight?.candidate ?? null, selectedCategory, nearbySearchEnabled);
+  const nearbyMapPlaces = useMemo(
+    () => nearbySections.find((section) => section.key === activeNearbyCategory)?.items ?? [],
+    [activeNearbyCategory, nearbySections],
+  );
 
   useEffect(() => {
     const availableCandidateIds = new Set(rawCandidateInsights.map((insight) => insight.candidate.id));
@@ -492,6 +892,17 @@ export function PlannerScreen({
   const savedFriendIds = useMemo(
     () => new Set(savedFriends.map((friend) => friend.id)),
     [savedFriends],
+  );
+  const selfProfileParticipantKey = currentUserId ? `self-profile-${currentUserId}` : '';
+  const isSelfProfileAdded = Boolean(
+    currentUserHomeLocation &&
+      participants.some(
+        (participant) =>
+          participant.savedFriendId === selfProfileParticipantKey ||
+          (participant.createdBy === currentUserId &&
+            participant.name === currentUserName &&
+            participant.location === currentUserHomeLocation.location),
+      ),
   );
 
   const persistFriends = (nextFriends: SavedFriend[]) => {
@@ -567,7 +978,16 @@ export function PlannerScreen({
         return;
       }
 
-      setAddressResults(results.slice(0, 5));
+      const nextResults = results.slice(0, 5);
+      const firstResult = nextResults[0];
+
+      setAddressResults(nextResults);
+
+      if (firstResult) {
+        setNewLocation(firstResult.title);
+        setAddressQuery(firstResult.title);
+        setNewCoordinates(firstResult.coordinates);
+      }
     } catch (error) {
       setLocationError(error instanceof Error ? error.message : '주소 검색 중 오류가 발생했어요.');
     } finally {
@@ -647,11 +1067,53 @@ export function PlannerScreen({
     setParticipants((current) => [...current, nextParticipant]);
 
     if (onlineRoom) {
+      rememberLocalRoomParticipant(onlineRoom.id, nextParticipant.id);
       void addRoomParticipant({
         roomId: onlineRoom.id,
         participant: nextParticipant,
         userId: currentUserId || null,
       }).catch((error: Error) => {
+        forgetLocalRoomParticipant(onlineRoom.id, nextParticipant.id);
+        setRoomMessage(error.message);
+        setParticipants((current) =>
+          current.filter((participant) => participant.id !== nextParticipant.id),
+        );
+      });
+    }
+  };
+
+  const handleQuickAddSelfProfile = () => {
+    if (!currentUserId || !currentUserHomeLocation) {
+      onOpenProfile?.();
+      return;
+    }
+
+    if (isSelfProfileAdded) {
+      return;
+    }
+
+    const nextParticipant: Participant = {
+      id: `participant-self-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: currentUserName,
+      location: currentUserHomeLocation.location,
+      coordinates: currentUserHomeLocation.coordinates,
+      maxTravelTime: DEFAULT_MAX_TRAVEL_TIME,
+      travelMode: 'transit',
+      locationSource: currentUserHomeLocation.locationSource ?? 'address',
+      savedFriendId: selfProfileParticipantKey,
+      createdBy: currentUserId,
+    };
+
+    setParticipants((current) => [...current, nextParticipant]);
+
+    if (onlineRoom) {
+      rememberLocalRoomParticipant(onlineRoom.id, nextParticipant.id);
+      void addRoomParticipant({
+        roomId: onlineRoom.id,
+        participant: nextParticipant,
+        userId: currentUserId || null,
+      }).catch((error: Error) => {
+        forgetLocalRoomParticipant(onlineRoom.id, nextParticipant.id);
         setRoomMessage(error.message);
         setParticipants((current) =>
           current.filter((participant) => participant.id !== nextParticipant.id),
@@ -684,6 +1146,19 @@ export function PlannerScreen({
     );
   };
 
+  const handleDeleteSavedFriend = (friendId: string) => {
+    const nextFriends = savedFriends.filter((friend) => friend.id !== friendId);
+    persistFriends(nextFriends);
+
+    setParticipants((current) =>
+      current.map((participant) =>
+        participant.savedFriendId === friendId
+          ? { ...participant, savedFriendId: undefined }
+          : participant,
+      ),
+    );
+  };
+
   const handleAddParticipant = () => {
     if (!newName.trim()) {
       return;
@@ -702,6 +1177,7 @@ export function PlannerScreen({
       location: locationMode === 'current' ? '현재 위치 기준' : newLocation,
       coordinates: newCoordinates,
       maxTravelTime: DEFAULT_MAX_TRAVEL_TIME,
+      travelMode: newTravelMode,
       locationSource: locationMode,
       savedFriendId,
       createdBy: currentUserId || null,
@@ -710,11 +1186,13 @@ export function PlannerScreen({
     setParticipants((current) => [...current, newParticipant]);
 
     if (onlineRoom) {
+      rememberLocalRoomParticipant(onlineRoom.id, newParticipant.id);
       void addRoomParticipant({
         roomId: onlineRoom.id,
         participant: newParticipant,
         userId: currentUserId || null,
       }).catch((error: Error) => {
+        forgetLocalRoomParticipant(onlineRoom.id, newParticipant.id);
         setRoomMessage(error.message);
         setParticipants((current) =>
           current.filter((participant) => participant.id !== newParticipant.id),
@@ -731,6 +1209,7 @@ export function PlannerScreen({
     setShowAddForm(false);
     setSaveNewFriend(!isGuestMode);
     setLocationMode('address');
+    setNewTravelMode('transit');
     resetLocationDraft();
   };
 
@@ -738,6 +1217,7 @@ export function PlannerScreen({
     setParticipants((current) => current.filter((participant) => participant.id !== id));
 
     if (onlineRoom) {
+      forgetLocalRoomParticipant(onlineRoom.id, id);
       void removeRoomParticipant(onlineRoom.id, id).catch((error: Error) => {
         setRoomMessage(error.message);
       });
@@ -762,7 +1242,7 @@ export function PlannerScreen({
       return;
     }
 
-    onThrillLevelChange(level < 3 ? 3 : level);
+    onThrillLevelChange(level);
   };
 
   const handleExcludeCandidate = (candidateId: string) => {
@@ -783,7 +1263,7 @@ export function PlannerScreen({
     onCandidateScopeChange(getCandidateScopeFromTargetCount(nextCount));
   };
 
-  const handleDrawComplete = (winner: Candidate) => {
+  const handleDrawComplete = (winner: Candidate, proof: DrawProof) => {
     setShowDrawer(false);
 
     if (onlineRoom) {
@@ -791,12 +1271,16 @@ export function PlannerScreen({
         roomId: onlineRoom.id,
         selectedCategory,
         selectedCandidate: winner,
-      }).catch((error: Error) => {
-        setRoomMessage(error.message);
-      });
+      })
+        .then((room) => {
+          setSyncedRoom(room);
+        })
+        .catch((error: Error) => {
+          setRoomMessage(error.message);
+        });
     }
 
-    onComplete(winner, participants, selectedCategory);
+    onComplete(winner, participants, selectedCategory, proof);
   };
 
   const handleSaveAiConfig = (config: RuntimeAiConfig) => {
@@ -821,40 +1305,54 @@ export function PlannerScreen({
           : fallbackNotice ?? `공통 범위 안에서 바로 추첨 가능한 후보 ${drawPool.length}곳을 골라뒀어요.`;
 
   return (
-    <div className="min-h-screen bg-[#fafaf8] pb-32">
-      <div className="sticky top-0 z-20 flex items-center justify-between border-b border-[#f0f0f0] bg-white/92 px-4 py-4 backdrop-blur-sm">
+    <div className="min-h-screen bg-[#f5f1eb] pb-32 text-[#1f2a44]">
+      <div className="sticky top-0 z-20 flex items-center justify-between rounded-b-[2rem] bg-[#f5f1eb]/88 px-5 py-4 shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-md">
         <button
           type="button"
           onClick={onBack}
-          className="flex h-10 w-10 items-center justify-center"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-[#1f2a44] shadow-sm transition-transform active:scale-95"
         >
-          <ChevronLeft className="h-6 w-6 text-[#1a1a2e]" />
+          <ChevronLeft className="h-6 w-6" />
         </button>
-        <h2 className="text-lg text-[#1a1a2e]">약속 플래너</h2>
-        <div className="w-10" />
+        <h2 className="absolute left-1/2 -translate-x-1/2 text-xl font-black tracking-[-0.05em] text-[#1f2a44]">
+          Drop
+        </h2>
+        {onOpenProfile ? (
+          <button
+            type="button"
+            onClick={onOpenProfile}
+            className="inline-flex h-10 max-w-[132px] items-center gap-1.5 rounded-full bg-white px-3 text-sm text-[#1f2a44] shadow-sm transition-transform active:scale-95"
+            aria-label="프로필 설정"
+          >
+            <UserRound className="h-4 w-4 shrink-0 text-[#6b7280]" />
+            <span className="truncate">{currentUserName}</span>
+          </button>
+        ) : (
+          <div className="w-10" />
+        )}
       </div>
 
-      <div className="mx-auto flex max-w-[1040px] flex-col gap-5 px-4 py-5 sm:gap-6 sm:py-6">
+      <div className="mx-auto flex max-w-[1040px] flex-col gap-4 px-4 py-5 sm:gap-5 sm:py-6">
         {onlineRoom ? (
-          <section className="rounded-2xl border border-[#e8edf3] bg-white px-4 py-3 shadow-sm">
+          <section className="rounded-[1.75rem] border border-white/70 bg-white/92 px-4 py-3 shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-sm">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm text-[#1a1a2e]">
+                <div className="flex items-center gap-2 text-sm font-semibold text-[#1f2a44]">
                   <Wifi className="h-4 w-4 shrink-0 text-[#22c55e]" />
                   <span className="shrink-0">방 코드</span>
-                  <span className="rounded-full bg-[#eef4ff] px-2.5 py-1 text-xs text-[#2d5aa7]">
+                  <span className="rounded-full bg-[#f5f1eb] px-2.5 py-1 text-xs text-[#45464d]">
                     {onlineRoom.code}
                   </span>
                 </div>
                 <div className="mt-1 text-xs text-[#8a94a2]">
-                  {participants.length}명 참여
+                  {participants.length}명 참여 · 추첨 {drawControllerName}
                 </div>
               </div>
 
               <button
                 type="button"
                 onClick={handleCopyRoomLink}
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-4 text-sm text-white transition-transform active:scale-95"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-4 text-sm text-white shadow-sm transition-transform active:scale-95"
               >
                 <Copy className="h-4 w-4" />
                 {copiedRoomLink ? '복사됨' : '공유'}
@@ -868,8 +1366,8 @@ export function PlannerScreen({
             )}
           </section>
         ) : (
-          <section className="relative flex items-center justify-between gap-3 rounded-2xl border border-[#e8edf3] bg-white px-4 py-3 shadow-sm">
-            <div className="min-w-0 text-sm text-[#667085]">
+          <section className="relative flex items-center justify-between gap-3 rounded-[1.75rem] border border-white/70 bg-white/92 px-4 py-3 shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-sm">
+            <div className="min-w-0 text-sm text-[#76777e]">
               혼자 쓰는 중
             </div>
             <button
@@ -878,7 +1376,7 @@ export function PlannerScreen({
                 void handleCreateShareRoom();
               }}
               disabled={isOpeningRoom || isCreatingRoomFromPlanner}
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-4 text-sm text-white transition-transform active:scale-95 disabled:opacity-60"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-4 text-sm text-white shadow-sm transition-transform active:scale-95 disabled:opacity-60"
             >
               {(isOpeningRoom || isCreatingRoomFromPlanner) && (
                 <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -909,13 +1407,13 @@ export function PlannerScreen({
           />
         </section>
 
-        <div className="order-3 flex flex-col gap-3 rounded-2xl border border-[#ece4d8] bg-[#f5f1eb] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="order-3 flex flex-col gap-3 rounded-[1.75rem] border border-white/70 bg-white/92 px-4 py-3 shadow-[0_10px_30px_rgba(26,26,46,0.06)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Sparkles className="h-4 w-4 text-[#ff7b6b]" />
-            <span className="rounded-full bg-white px-3 py-1 text-xs text-[#1a1a2e] shadow-sm">
+            <span className="rounded-full bg-[#fff2ee] px-3 py-1 text-xs font-semibold text-[#ff7b6b]">
               {activeCategory.label}
             </span>
-            <span className="rounded-full bg-white px-3 py-1 text-xs text-[#1a1a2e] shadow-sm">
+            <span className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs font-semibold text-[#1f2a44]">
               {activeMode.shortLabel}
             </span>
             {selectionMode === 'neighborhood' && (
@@ -936,9 +1434,9 @@ export function PlannerScreen({
         </div>
 
         {showAdvancedOptions && (
-          <div className="order-3 space-y-4 rounded-2xl border border-[#e8edf3] bg-white p-4 shadow-sm">
+          <div className="order-3 space-y-5 rounded-[1.75rem] border border-white/70 bg-white/95 p-5 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
             <section>
-              <div className="mb-2 text-sm font-medium text-[#1a1a2e]">오늘의 모임</div>
+              <div className="mb-3 text-sm font-semibold text-[#45464d]">오늘의 모임</div>
               <div className="flex flex-wrap gap-2">
                 {meetCategories.map((category) => {
                   const active = category.key === selectedCategory;
@@ -950,7 +1448,7 @@ export function PlannerScreen({
                       onClick={() => onCategoryChange(category.key)}
                       className={`h-10 rounded-full px-4 text-sm transition-all ${
                         active
-                          ? 'bg-[#1f2a44] text-white shadow-sm'
+                          ? 'bg-[#ff7b6b] text-white shadow-sm'
                           : 'bg-[#f5f1eb] text-[#44505b]'
                       }`}
                     >
@@ -962,7 +1460,7 @@ export function PlannerScreen({
             </section>
 
             <section>
-              <div className="mb-2 text-sm font-medium text-[#1a1a2e]">선정 방식</div>
+              <div className="mb-3 text-sm font-semibold text-[#45464d]">선정 방식</div>
               <div className="grid grid-cols-2 gap-2">
                 {selectionModes.map((mode) => {
                   const active = mode.key === selectionMode;
@@ -993,7 +1491,7 @@ export function PlannerScreen({
                     {activeThrill.shortLabel}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-5 gap-1.5">
                   {visibleThrillStages.map((stage) => {
                     const active = stage.level === effectiveThrillLevel;
 
@@ -1050,10 +1548,10 @@ export function PlannerScreen({
         )}
 
         <section ref={participantSectionRef} className="order-2">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-lg text-[#1a1a2e]">사람 추가</h3>
-              <p className="text-sm text-[#6b7280]">주소나 지도에서 출발 위치를 정해 주세요.</p>
+              <h3 className="text-xl font-bold tracking-[-0.04em] text-[#1f2a44]">사람 추가</h3>
+              <p className="text-sm text-[#76777e]">주소나 지도에서 출발 위치를 정해 주세요.</p>
             </div>
 
             <button
@@ -1070,41 +1568,105 @@ export function PlannerScreen({
             </button>
           </div>
 
-          {!isGuestMode && savedFriends.length > 0 && (
-            <div className="mb-4 rounded-3xl border border-[#eceff3] bg-white p-4 shadow-sm">
-              <div className="mb-3 flex items-center gap-2 text-[#1a1a2e]">
-                <Users className="h-4 w-4 text-[#2d3561]" />
-                <span className="text-sm">저장된 친구</span>
+          {currentUserId && (
+            <div className="mb-3 flex flex-col gap-3 rounded-[1.75rem] border border-white/70 bg-white/95 p-4 shadow-[0_10px_30px_rgba(26,26,46,0.06)] sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#f5f1eb] text-[#2d3561]">
+                  <UserRound className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-[#1a1a2e]">내 정보</div>
+                  <div className="mt-1 truncate text-sm text-[#6b7280]">
+                    {currentUserHomeLocation
+                      ? `${currentUserName} · ${currentUserHomeLocation.location}`
+                      : '기본 출발지를 저장하면 바로 추가할 수 있어요.'}
+                  </div>
+                </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={handleQuickAddSelfProfile}
+                  disabled={Boolean(currentUserHomeLocation && isSelfProfileAdded)}
+                  className="h-10 rounded-full bg-[#1f2a44] px-4 text-sm text-white shadow-sm transition-transform active:scale-95 disabled:opacity-55"
+                >
+                  {currentUserHomeLocation
+                    ? isSelfProfileAdded
+                      ? '추가됨'
+                      : '내 위치 추가'
+                    : '내 정보 저장'}
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenProfile}
+                  className="h-10 rounded-full bg-[#f5f1eb] px-4 text-sm text-[#44505b] transition-transform active:scale-95"
+                >
+                  수정
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!isGuestMode && savedFriends.length > 0 && (
+            <div className="mb-3 rounded-[1.75rem] border border-white/70 bg-white/95 p-3 shadow-[0_10px_30px_rgba(26,26,46,0.06)]">
+              <div className="mb-2 flex items-center justify-between gap-2 text-[#1a1a2e]">
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-[#2d3561]" />
+                  <span className="text-sm">저장된 친구</span>
+                </div>
+                <span className="text-xs text-[#8a94a2]">눌러서 추가</span>
+              </div>
+
+              <div className="flex max-h-28 flex-wrap gap-2 overflow-y-auto pr-1">
                 {savedFriends.map((friend) => {
                   const alreadyAdded = isFriendAlreadyAdded(participants, friend);
+                  const TravelIcon = getTravelModeIcon(friend.travelMode);
 
                   return (
                     <div
                       key={friend.id}
-                      className="rounded-2xl border border-[#edf2f5] bg-[#f8fbfd] p-4"
+                      className={`inline-flex max-w-full items-center rounded-full border text-sm transition-all ${
+                        alreadyAdded
+                          ? 'border-[#e8edf3] bg-[#f5f1eb] text-[#9ca3af]'
+                          : 'border-[#dfe7ef] bg-[#f8fbfd] text-[#1a1a2e] hover:border-[#2d3561]/30 hover:bg-white'
+                      }`}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-base text-[#1a1a2e]">{friend.name}</div>
-                          <div className="mt-1 text-sm text-[#6b7280]">{friend.location}</div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleQuickAddSavedFriend(friend)}
-                          disabled={alreadyAdded}
-                          className="rounded-full bg-white px-3 py-1.5 text-xs text-[#1a1a2e] transition-transform active:scale-95 disabled:opacity-55"
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!alreadyAdded) {
+                            handleQuickAddSavedFriend(friend);
+                          }
+                        }}
+                        disabled={alreadyAdded}
+                        className="inline-flex min-w-0 items-center gap-2 rounded-l-full py-2 pl-3 pr-2 text-left transition-transform active:scale-95 disabled:cursor-default"
+                      >
+                        <span
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] ${
+                            alreadyAdded ? 'bg-white text-[#9ca3af]' : 'bg-[#1f2a44] text-white'
+                          }`}
                         >
-                          {alreadyAdded ? '추가됨' : '바로 추가'}
-                        </button>
-                      </div>
+                          {alreadyAdded ? '✓' : '+'}
+                        </span>
+                        <span className="min-w-0 truncate">{friend.name}</span>
+                        <span className="hidden max-w-28 truncate text-xs text-[#8a94a2] sm:inline">
+                          {friend.location}
+                        </span>
+                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-[11px] text-[#6b7280]">
+                          <TravelIcon className="h-3 w-3" />
+                          {getTravelModeLabel(friend.travelMode)}
+                        </span>
+                      </button>
 
-                      <div className="hidden mt-3 text-xs text-[#9ca3af]">
-                        최대 {friend.maxTravelTime}분 이동 가능
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSavedFriend(friend.id)}
+                        className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#9ca3af] transition-colors hover:bg-[#ffdad6] hover:text-[#ba1a1a]"
+                        aria-label={`${friend.name} 저장된 친구 삭제`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   );
                 })}
@@ -1113,7 +1675,7 @@ export function PlannerScreen({
           )}
 
           {showAddForm && (
-            <div className="mb-3 rounded-[1.75rem] border border-[#eceff3] bg-white p-5 shadow-sm">
+            <div className="mb-3 rounded-[2rem] border border-white/70 bg-white/95 p-5 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
               <div className="mb-4 flex flex-col gap-2 text-sm text-[#1a1a2e] sm:flex-row sm:items-center sm:justify-between">
                 <BookmarkPlus className="h-4 w-4 text-[#2d3561]" />
                 {isGuestMode
@@ -1239,7 +1801,7 @@ export function PlannerScreen({
                               void handleAddressSearch();
                             }
                           }}
-                          placeholder="도로명, 건물명, 동네 이름"
+                          placeholder="역, 장소명, 건물명, 도로명"
                           className="h-12 flex-1 rounded-2xl border border-[#edf1f4] bg-white px-4 text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:border-[#d8e0ea] focus:ring-2 focus:ring-[#2d3561]/10"
                         />
 
@@ -1277,11 +1839,11 @@ export function PlannerScreen({
                                 }`}
                               >
                                 <div className="text-sm text-[#1a1a2e]">
-                                  {result.roadAddress || result.title}
+                                  {result.title}
                                 </div>
-                                {result.jibunAddress && (
+                                {(result.roadAddress || result.jibunAddress) && (
                                   <div className="mt-1 text-xs text-[#6b7280]">
-                                    {result.jibunAddress}
+                                    {result.roadAddress || result.jibunAddress}
                                   </div>
                                 )}
                               </button>
@@ -1303,6 +1865,30 @@ export function PlannerScreen({
                       )}
                     </div>
                   )}
+                </div>
+
+                <div className="rounded-2xl border border-[#e8edf3] bg-[#f8fbfd] p-3">
+                  <div className="mb-2 text-xs text-[#6b7280]">이동수단</div>
+                  <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#f7f3ed] p-1.5">
+                    {travelModeOptions.map((option) => {
+                      const active = newTravelMode === option.key;
+                      const Icon = getTravelModeIcon(option.key);
+
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={() => setNewTravelMode(option.key)}
+                          className={`flex h-12 items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium transition-all ${
+                            active ? 'bg-[#1f2a44] text-white shadow-sm' : 'text-[#6b7280]'
+                          }`}
+                        >
+                          <Icon className="h-4 w-4" />
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <select
@@ -1348,6 +1934,7 @@ export function PlannerScreen({
                     setShowAddForm(false);
                     setSaveNewFriend(!isGuestMode);
                     setLocationMode('address');
+                    setNewTravelMode('transit');
                     resetLocationDraft();
                   }}
                   className="h-11 rounded-2xl bg-[#f5f1eb] px-5 text-[#6b7280] transition-transform active:scale-95"
@@ -1360,18 +1947,18 @@ export function PlannerScreen({
         </section>
 
         {participants.length > 0 && (
-          <section className="order-4 rounded-[1.75rem] border border-[#eceff3] bg-white/90 p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between gap-3">
+          <section className="order-4 rounded-[2rem] border border-white/70 bg-white/95 p-4 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
+            <div className="mb-2 flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-base text-[#1a1a2e]">참여자 목록</h3>
-                <p className="text-xs text-[#8a94a2]">원하지 않는 사람은 여기서 바로 뺄 수 있어요.</p>
+                <h3 className="text-base font-semibold text-[#1f2a44]">참여자 목록</h3>
+                <p className="text-xs text-[#76777e]">원하지 않는 사람은 바로 뺄 수 있어요.</p>
               </div>
               <span className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs text-[#44505b]">
                 {participants.length}명
               </span>
             </div>
 
-            <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
+            <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
               {participants.map((participant, index) => (
                 <ParticipantCard
                   key={participant.id}
@@ -1385,13 +1972,177 @@ export function PlannerScreen({
                 />
               ))}
             </div>
+
+            {selectedInsight ? (
+              <div className="mt-3 rounded-[1.25rem] border border-[#e8edf3] bg-[#f8fbfd] p-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-sm text-[#1a1a2e]">
+                      <Route className="h-4 w-4 text-[#2d3561]" />
+                      {selectedInsight.candidate.name}까지
+                    </div>
+                    <div className="mt-1 text-xs text-[#8a94a2]">
+                      참여자별 선택 이동수단으로 계산
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs text-[#44505b] shadow-sm">
+                    {selectedRouteStatus === 'loading'
+                      ? '계산 중'
+                      : selectedRouteHasLiveData
+                        ? '실경로'
+                        : '예상'}
+                  </span>
+                </div>
+
+                <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                  {participants.map((participant, index) => {
+                    const route =
+                      selectedCandidateRoutes.find((item) => item.participantId === participant.id) ??
+                      null;
+                    const TravelIcon = getTravelModeIcon(participant.travelMode);
+                    const color = PARTICIPANT_COLORS[index % PARTICIPANT_COLORS.length];
+                    const routeKey = `${selectedInsight.candidate.id}:${participant.id}`;
+                    const isRouteExpanded = expandedRouteKey === routeKey;
+                    const routeSteps = route?.routeSteps ?? [];
+                    const routeMeta = route ? getRouteDetailMeta(route) : '';
+
+                    return (
+                      <button
+                        key={routeKey}
+                        type="button"
+                        disabled={!route}
+                        onClick={() =>
+                          setExpandedRouteKey((current) => (current === routeKey ? null : routeKey))
+                        }
+                        className="w-full rounded-xl bg-white p-3 text-left transition-all hover:-translate-y-0.5 hover:shadow-sm disabled:cursor-default disabled:hover:translate-y-0 disabled:hover:shadow-none"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-full text-xs text-white"
+                                style={{ backgroundColor: color }}
+                              >
+                                {participant.name.charAt(0)}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="truncate text-sm text-[#1a1a2e]">
+                                  {participant.name}
+                                </div>
+                                <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[#6b7280]">
+                                  <TravelIcon className="h-3.5 w-3.5" />
+                                  {getTravelModeLabel(participant.travelMode)}
+                                  {route ? ` · ${getRouteSourceLabel(route)}` : ''}
+                                </div>
+                              </div>
+                            </div>
+
+                            {route ? (
+                              <>
+                                <div className="mt-3 text-sm text-[#44505b]">
+                                  {getRouteHeadline(route)}
+                                </div>
+                                <div className="mt-1 text-xs text-[#8a94a2]">
+                                  {formatRouteFee(route)}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="mt-3 flex items-center gap-2 text-xs text-[#8a94a2]">
+                                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                                경로 계산 중
+                              </div>
+                            )}
+                          </div>
+
+                          {route ? (
+                            <div className="shrink-0 text-right">
+                              <div className="text-lg text-[#1a1a2e]">{route.duration}분</div>
+                              <div className="text-xs text-[#8a94a2]">{route.distance}km</div>
+                              <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#f5f1eb] px-2 py-1 text-[11px] text-[#6b7280]">
+                                {isRouteExpanded ? (
+                                  <ChevronUp className="h-3 w-3" />
+                                ) : (
+                                  <ChevronDown className="h-3 w-3" />
+                                )}
+                                {isRouteExpanded ? '접기' : '상세'}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {route && isRouteExpanded ? (
+                          <div className="mt-3 border-t border-[#eef2f6] pt-3">
+                            {routeMeta ? (
+                              <div className="mb-2 rounded-2xl bg-[#f8fbfd] px-3 py-2 text-xs text-[#6b7280]">
+                                {routeMeta}
+                              </div>
+                            ) : null}
+
+                            {routeSteps.length ? (
+                              <ol className="space-y-2">
+                                {routeSteps.map((step, stepIndex) => {
+                                  const stepDistance = formatRouteStepDistance(step.distance);
+                                  const stepMeta = [
+                                    step.duration ? `${step.duration}분` : null,
+                                    stepDistance,
+                                    step.stationCount ? `${step.stationCount}개 정류장` : null,
+                                  ].filter(Boolean);
+
+                                  return (
+                                    <li
+                                      key={`${routeKey}:step:${stepIndex}`}
+                                      className="flex gap-2 rounded-2xl bg-[#fbf8fb] px-3 py-2"
+                                    >
+                                      <span
+                                        className={`mt-0.5 h-fit shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${getRouteStepBadgeClass(step.type)}`}
+                                      >
+                                        {getRouteStepTypeLabel(step.type)}
+                                      </span>
+                                      <div className="min-w-0 flex-1">
+                                        <div className="text-xs font-semibold text-[#1f2a44]">
+                                          {step.label}
+                                        </div>
+                                        {step.from || step.to ? (
+                                          <div className="mt-0.5 truncate text-[11px] text-[#8a94a2]">
+                                            {[step.from, step.to].filter(Boolean).join(' → ')}
+                                          </div>
+                                        ) : null}
+                                        {stepMeta.length ? (
+                                          <div className="mt-1 text-[11px] text-[#8a94a2]">
+                                            {stepMeta.join(' · ')}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    </li>
+                                  );
+                                })}
+                              </ol>
+                            ) : (
+                              <div className="rounded-2xl bg-[#fbf8fd] px-3 py-2 text-xs text-[#8a94a2]">
+                                실시간 요약 경로만 받아왔어요. 더 자세한 안내는 지도 앱에서 확인할 수 있어요.
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedRouteError ? (
+                  <div className="mt-3 rounded-2xl bg-[#fff7ed] px-3 py-2 text-xs text-[#b45309]">
+                    {selectedRouteError}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </section>
         )}
 
         <section className="order-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="text-lg text-[#1a1a2e]">
+              <h3 className="text-lg font-semibold text-[#1f2a44]">
                 후보 {candidateInsights.length}곳
               </h3>
               <p className="mt-1 truncate text-sm text-[#8a94a2]">
@@ -1416,7 +2167,7 @@ export function PlannerScreen({
               <button
                 type="button"
                 onClick={() => setShowCandidateList((current) => !current)}
-                className="h-10 rounded-full bg-[#f5f1eb] px-4 text-sm text-[#1a1a2e] transition-transform active:scale-95"
+                className="h-10 rounded-full bg-white px-4 text-sm text-[#1f2a44] shadow-sm transition-transform active:scale-95"
               >
                 {showCandidateList ? '접기' : '보기'}
               </button>
@@ -1426,19 +2177,20 @@ export function PlannerScreen({
           {showCandidateList && (
             <div className="space-y-3">
               {candidateInsights.map((insight) => (
-                <CandidateCard
-                  key={insight.candidate.id}
-                  insight={insight}
-                  selected={selectedInsight?.candidate.id === insight.candidate.id}
-                  onClick={() => setSelectedCandidateId(insight.candidate.id)}
-                  onExclude={() => handleExcludeCandidate(insight.candidate.id)}
-                  nearbySections={selectedInsight?.candidate.id === insight.candidate.id ? nearbySections : []}
-                  activeNearbyCategory={activeNearbyCategory}
-                  onNearbyCategoryChange={setActiveNearbyCategory}
-                  nearbyStatus={nearbyPlacesStatus}
-                  nearbyMessage={nearbyPlacesMessage}
-                  nearbyError={nearbyPlacesError}
-                />
+                  <CandidateCard
+                    key={insight.candidate.id}
+                    insight={insight}
+                    selected={selectedInsight?.candidate.id === insight.candidate.id}
+                    onClick={() => setSelectedCandidateId(insight.candidate.id)}
+                    onExclude={() => handleExcludeCandidate(insight.candidate.id)}
+                    nearbySections={selectedInsight?.candidate.id === insight.candidate.id ? nearbySections : []}
+                    activeNearbyCategory={activeNearbyCategory}
+                    onNearbyCategoryChange={setActiveNearbyCategory}
+                    onNearbySearch={() => setNearbySearchCandidateId(insight.candidate.id)}
+                    nearbyStatus={nearbyPlacesStatus}
+                    nearbyMessage={nearbyPlacesMessage}
+                    nearbyError={nearbyPlacesError}
+                  />
               ))}
 
               {!candidateInsights.length && (
@@ -1453,19 +2205,19 @@ export function PlannerScreen({
       </div>
 
       <div className="mx-auto max-w-[1040px] px-4 pb-8">
-        <div className="rounded-[1.25rem] border border-[#eceff3] bg-white/94 p-3 shadow-[0_18px_40px_rgba(18,28,45,0.12)] backdrop-blur-xl">
+        <div className="rounded-[2rem] border border-white/80 bg-white/95 p-4 shadow-[0_18px_42px_rgba(26,26,46,0.12)] backdrop-blur-xl">
           <div className="mb-3 space-y-3">
-            <div className="rounded-xl bg-[#faf7f2] px-4 py-4">
+            <div className="rounded-[1.5rem] bg-[#f5f1eb] px-4 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm font-medium text-[#1a1a2e]">후보군 개수</div>
-                  <div className="mt-1 text-xs text-[#6b7280]">
+                  <div className="text-sm font-semibold text-[#1f2a44]">후보군 개수</div>
+                  <div className="mt-1 text-xs text-[#76777e]">
                     {candidateCountLimited
                       ? `가능 ${effectiveCandidateTargetCount}개 · 요청 ${activeCandidateTargetCount}개`
                       : `최대 ${activeCandidateTargetCount}개 · 현재 ${drawPool.length}개`}
                   </div>
                 </div>
-                <div className="rounded-full bg-white px-3 py-1 text-xs text-[#44505b] shadow-sm">
+                <div className="rounded-full bg-white px-3 py-1 text-xs text-[#45464d] shadow-sm">
                   {effectiveCandidateTargetCount}개
                 </div>
               </div>
@@ -1479,10 +2231,10 @@ export function PlannerScreen({
                 onChange={(event) =>
                   handleCandidateTargetCountChange(Number(event.target.value))
                 }
-                className="mt-4 h-2 w-full cursor-pointer appearance-none rounded-full bg-[#e7ded2] accent-[#ff7b6b]"
+                className="mt-4 h-2 w-full cursor-pointer appearance-none rounded-full bg-[#e4e2e4] accent-[#ff7b6b]"
               />
 
-              <div className="mt-3 grid grid-cols-5 gap-2 text-xs text-[#6b7280]">
+              <div className="mt-3 grid grid-cols-5 gap-2 text-xs text-[#76777e]">
                 {[4, 8, 12, 16, 20].map((count) => (
                   <button
                     key={count}
@@ -1500,19 +2252,16 @@ export function PlannerScreen({
             </div>
           </div>
 
-          <div className="px-2 pb-2 text-xs text-[#6b7280]">
-            {aiCandidateStatus === 'loading'
-              ? 'AI가 후보를 정리하는 중이에요.'
-              : drawPool.length
-                ? `${drawPool.length}개의 후보 안에서 마지막 랜덤을 돌립니다.`
-                : '먼저 참여자를 2명 이상 입력해 주세요.'}
+          <div className="px-2 pb-2 text-xs text-[#76777e]">
+            {drawDisabledReason ??
+              `${drawPool.length}개의 후보 안에서 마지막 랜덤을 돌립니다.`}
           </div>
 
           <button
             type="button"
             onClick={() => setShowDrawer(true)}
-            disabled={participants.length < 2 || !drawPool.length || aiCandidateStatus === 'loading'}
-            className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#ff7b6b] to-[#ffa59b] text-white shadow-lg transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={Boolean(drawDisabledReason)}
+            className="flex h-16 w-full items-center justify-center gap-2 rounded-[1.35rem] bg-[#1f2a44] text-lg font-bold tracking-[-0.03em] text-white shadow-[0_10px_30px_rgba(26,26,46,0.12)] transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {aiCandidateStatus === 'loading' ? (
               <LoaderCircle className="h-5 w-5 animate-spin" />

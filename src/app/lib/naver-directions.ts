@@ -1,4 +1,4 @@
-import { Candidate, Participant, TravelInfo } from '../types';
+import { Candidate, Participant, TravelInfo, TravelRouteStep } from '../types';
 
 interface DirectionsSummary {
   distance?: number;
@@ -10,6 +10,11 @@ interface DirectionsSummary {
 
 interface DirectionsRoute {
   summary?: DirectionsSummary;
+  guide?: Array<{
+    instructions?: string;
+    distance?: number;
+    duration?: number;
+  }>;
 }
 
 interface DirectionsResponse {
@@ -43,6 +48,28 @@ function getFirstRoute(payload: DirectionsResponse) {
   }
 
   return null;
+}
+
+function buildRouteSteps(route: DirectionsRoute): TravelRouteStep[] {
+  return (route.guide ?? [])
+    .filter((guide) => guide.instructions || typeof guide.distance === 'number')
+    .slice(0, 12)
+    .map((guide, index) => ({
+      type: 'car',
+      label: guide.instructions || `${index + 1}번째 안내`,
+      duration: Math.max(0, Math.round((guide.duration ?? 0) / 60000)),
+      distance: typeof guide.distance === 'number' ? Math.round(guide.distance) : undefined,
+    }));
+}
+
+function buildRouteSummary(routeSteps: TravelRouteStep[]) {
+  const summary = routeSteps
+    .map((step) => step.label)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' → ');
+
+  return summary || '네이버 실시간 자차 경로';
 }
 
 async function getErrorMessage(response: Response) {
@@ -107,6 +134,7 @@ export async function fetchDirectionsTravelInfo(
     taxiFare = 0,
     fuelPrice = 0,
   } = route.summary;
+  const routeSteps = buildRouteSteps(route);
 
   const travelInfo: TravelInfo = {
     participantId: participant.id,
@@ -115,9 +143,12 @@ export async function fetchDirectionsTravelInfo(
     duration: Math.max(1, Math.round(duration / 60000)),
     cost: Math.max(0, tollFare + fuelPrice),
     source: 'directions',
+    mode: 'car',
     tollFare,
     taxiFare,
     fuelPrice,
+    routeSummary: buildRouteSummary(routeSteps),
+    routeSteps,
   };
 
   directionsCache.set(cacheKey, travelInfo);

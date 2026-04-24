@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Candidate, MeetCategoryKey, NearbyPlace, NearbyPlaceCategory, NearbyPlaceSection } from '../types';
 import { fetchNearbySearchResults, NearbySearchDefinition } from '../lib/naver-local-search';
-import { searchAddress } from '../lib/naver-map';
+import { buildNaverMapSearchLink } from '../lib/naver-links';
 
 type NearbyPlacesStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -18,8 +18,6 @@ interface CachedNearbyPlacesResult {
 }
 
 const nearbyPlacesCache = new Map<string, CachedNearbyPlacesResult>();
-const nearbyPlaceCoordinateCache = new Map<string, NearbyPlace['coordinates']>();
-
 const nearbySearchPresets: Record<MeetCategoryKey, NearbySearchDefinition[]> = {
   dining: [
     { key: 'restaurant', label: '맛집', query: '맛집' },
@@ -63,41 +61,20 @@ function buildNearbyCacheKey(candidate: Candidate, selectedCategory: MeetCategor
   return `${candidate.id}:${selectedCategory}`;
 }
 
-async function resolvePlaceCoordinates(address: string, fallbackQuery: string) {
-  const cacheKey = `${address}:${fallbackQuery}`;
-
-  if (nearbyPlaceCoordinateCache.has(cacheKey)) {
-    return nearbyPlaceCoordinateCache.get(cacheKey) ?? null;
-  }
-
-  try {
-    const results = await searchAddress(address || fallbackQuery);
-    const coordinates = results[0]?.coordinates ?? null;
-    nearbyPlaceCoordinateCache.set(cacheKey, coordinates);
-    return coordinates;
-  } catch {
-    nearbyPlaceCoordinateCache.set(cacheKey, null);
-    return null;
-  }
-}
-
 async function buildNearbySections(candidate: Candidate, selectedCategory: MeetCategoryKey) {
   const definitions = nearbySearchPresets[selectedCategory] ?? nearbySearchPresets.dining;
 
-  const sections = await Promise.all(
-    definitions.map(async (definition) => {
+  const sections: NearbyPlaceSection[] = [];
+
+  for (const definition of definitions) {
       const searchQuery = `${candidate.name} ${definition.query}`;
       const results = await fetchNearbySearchResults(
         searchQuery,
         definition.key === 'landmark' ? 5 : 4,
       );
 
-      const items = await Promise.all(
-        results.slice(0, 3).map(async (result, index) => {
-          const placeAddress = result.roadAddress || result.address;
-          const coordinates = await resolvePlaceCoordinates(placeAddress, searchQuery);
-
-          const item: NearbyPlace = {
+      const items = results.slice(0, 3).map((result, index) => {
+          return {
             id: `${candidate.id}:${definition.key}:${index}:${result.name}`,
             name: result.name || `${candidate.name} ${definition.label}`,
             category: definition.key,
@@ -107,22 +84,18 @@ async function buildNearbySections(candidate: Candidate, selectedCategory: MeetC
             categoryPath: result.categoryPath,
             address: result.address,
             roadAddress: result.roadAddress,
-            link: result.link,
-            coordinates,
-          };
+            link: buildNaverMapSearchLink(result.name || searchQuery),
+            coordinates: null,
+          } satisfies NearbyPlace;
+        });
 
-          return item;
-        }),
-      );
-
-      return {
+      sections.push({
         key: definition.key,
         label: definition.label,
         query: searchQuery,
         items,
-      } satisfies NearbyPlaceSection;
-    }),
-  );
+      });
+  }
 
   return sections.filter((section) => section.items.length > 0);
 }
@@ -134,6 +107,7 @@ export function getDefaultNearbyCategory(selectedCategory: MeetCategoryKey): Nea
 export function useNearbyPlaces(
   candidate: Candidate | null,
   selectedCategory: MeetCategoryKey,
+  enabled = false,
 ): UseNearbyPlacesResult {
   const cacheKey = useMemo(
     () => (candidate ? buildNearbyCacheKey(candidate, selectedCategory) : ''),
@@ -165,6 +139,16 @@ export function useNearbyPlaces(
       setStatus('ready');
       setError(null);
       setMessage(currentCached.message);
+      return () => {
+        active = false;
+      };
+    }
+
+    if (!enabled) {
+      setSections([]);
+      setStatus('idle');
+      setError(null);
+      setMessage('궁금할 때만 근처 맛집과 놀거리를 불러올게요.');
       return () => {
         active = false;
       };
@@ -210,7 +194,7 @@ export function useNearbyPlaces(
     return () => {
       active = false;
     };
-  }, [cacheKey, candidate, selectedCategory]);
+  }, [cacheKey, candidate, selectedCategory, enabled]);
 
   return {
     sections,

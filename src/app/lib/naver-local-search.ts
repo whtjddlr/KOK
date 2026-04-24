@@ -7,6 +7,8 @@ interface NaverLocalSearchItemResponse {
   description?: string;
   address?: string;
   roadAddress?: string;
+  mapx?: string;
+  mapy?: string;
 }
 
 interface NaverLocalSearchResponse {
@@ -27,6 +29,10 @@ export interface NearbySearchItem {
   description: string;
   address: string;
   roadAddress: string;
+  coordinates?: {
+    lat: number;
+    lng: number;
+  };
 }
 
 export type NaverLocalSearchSort = 'random' | 'comment';
@@ -41,6 +47,16 @@ function cleanHtmlText(value: string) {
     .replace(/&#39;/g, "'")
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function parseNaverLocalCoordinate(value?: string) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  return numericValue / 10000000;
 }
 
 export async function fetchNearbySearchResults(
@@ -60,12 +76,19 @@ export async function fetchNearbySearchResults(
     throw new Error(data.message ?? '근처 정보를 가져오지 못했습니다.');
   }
 
-  return (data.items ?? []).map<NearbySearchItem>((item) => ({
-    name: cleanHtmlText(item.title ?? ''),
-    link: item.link?.trim() ?? '',
-    categoryPath: cleanHtmlText(item.category ?? ''),
-    description: cleanHtmlText(item.description ?? ''),
-    address: cleanHtmlText(item.address ?? ''),
-    roadAddress: cleanHtmlText(item.roadAddress ?? ''),
-  }));
+  return (data.items ?? []).map<NearbySearchItem>((item) => {
+    const lng = parseNaverLocalCoordinate(item.mapx);
+    const lat = parseNaverLocalCoordinate(item.mapy);
+    const hasCoordinates = lat !== null && lng !== null;
+
+    return {
+      name: cleanHtmlText(item.title ?? ''),
+      link: item.link?.trim() ?? '',
+      categoryPath: cleanHtmlText(item.category ?? ''),
+      description: cleanHtmlText(item.description ?? ''),
+      address: cleanHtmlText(item.address ?? ''),
+      roadAddress: cleanHtmlText(item.roadAddress ?? ''),
+      coordinates: hasCoordinates ? { lat, lng } : undefined,
+    };
+  });
 }

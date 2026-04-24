@@ -1,4 +1,8 @@
-import { fetchNearbySearchResults } from './naver-local-search';
+import {
+  fetchNearbySearchResults,
+  type NearbySearchItem,
+  type NaverLocalSearchSort,
+} from './naver-local-search';
 
 let naverMapPromise: Promise<any> | null = null;
 
@@ -16,6 +20,110 @@ export interface ReverseGeocodeResult {
   roadAddress: string;
   jibunAddress: string;
   title: string;
+}
+
+function normalizeSearchText(value: string) {
+  return value
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[^\dA-Za-z가-힣]/g, '')
+    .toLowerCase();
+}
+
+function looksLikeAddress(query: string) {
+  return /\d/.test(query) && /(로|길|번길|대로|동|읍|면|리)\s*\d*/.test(query);
+}
+
+function buildPlaceSearchQueries(query: string) {
+  const trimmedQuery = query.trim();
+  const queries = trimmedQuery.endsWith('역')
+    ? [`${trimmedQuery} 지하철역`, trimmedQuery]
+    : [trimmedQuery];
+
+  if (trimmedQuery.endsWith('역')) {
+    queries.push(`${trimmedQuery} 역`);
+  } else if (!/\s/.test(trimmedQuery) && trimmedQuery.length <= 12) {
+    queries.push(`${trimmedQuery}역`);
+  }
+
+  return [...new Set(queries)];
+}
+
+function isStationQuery(query: string) {
+  return query.trim().endsWith('역');
+}
+
+function isTransitCategory(category: string) {
+  return category.includes('지하철') || category.includes('전철') || category.includes('교통');
+}
+
+function isStationExit(place: NearbySearchItem) {
+  const title = normalizeSearchText(place.name);
+  const category = normalizeSearchText(place.categoryPath);
+
+  return title.includes('출구') || category.includes('출구번호');
+}
+
+function getPlaceSearchScore(place: NearbySearchItem, query: string) {
+  const normalizedQuery = normalizeSearchText(query);
+  const title = normalizeSearchText(place.name);
+  const category = normalizeSearchText(place.categoryPath);
+  const address = normalizeSearchText(`${place.roadAddress} ${place.address}`);
+  const queryWithoutStationSuffix = normalizedQuery.replace(/역$/, '');
+  const stationQuery = isStationQuery(query);
+  const transitCategory = isTransitCategory(category);
+  let score = 0;
+
+  if (title === normalizedQuery) {
+    score += 1000;
+  } else if (title.startsWith(normalizedQuery)) {
+    score += 760;
+  } else if (title.includes(normalizedQuery)) {
+    score += 520;
+  }
+
+  if (
+    stationQuery &&
+    queryWithoutStationSuffix &&
+    title.includes(queryWithoutStationSuffix) &&
+    (title.includes('역') || transitCategory)
+  ) {
+    score += 260;
+  }
+
+  if (transitCategory) {
+    score += stationQuery ? 180 : 24;
+  }
+
+  if (stationQuery && isStationExit(place)) {
+    score -= 80;
+  }
+
+  if (stationQuery && !title.includes(normalizedQuery) && transitCategory) {
+    score -= 220;
+  }
+
+  if (stationQuery && !title.includes(normalizedQuery) && !transitCategory) {
+    score -= 160;
+  }
+
+  if (address.includes(normalizedQuery)) {
+    score += stationQuery ? 4 : 8;
+  }
+
+  return score;
+}
+
+function getSearchSortsForQuery(query: string): NaverLocalSearchSort[] {
+  return isStationQuery(query) ? ['random', 'comment'] : ['random'];
+}
+
+function getPlaceResultKey(place: NearbySearchItem) {
+  const coordinateKey = place.coordinates
+    ? `${place.coordinates.lat.toFixed(7)},${place.coordinates.lng.toFixed(7)}`
+    : normalizeSearchText(`${place.roadAddress} ${place.address}`);
+
+  return `${normalizeSearchText(place.name)}-${coordinateKey}`;
 }
 
 function getScriptUrl() {
@@ -169,13 +277,27 @@ export async function searchAddress(query: string) {
     return [] as AddressSearchResult[];
   }
 
+  if (looksLikeAddress(trimmedQuery)) {
+    const addressFirstResults = await geocodeQuery(maps, trimmedQuery);
+
+    if (addressFirstResults.length) {
+      return addressFirstResults;
+    }
+  }
+
+  const placeResults = await searchPlaceNameAsAddress(maps, trimmedQuery);
+
+  if (placeResults.length) {
+    return placeResults;
+  }
+
   const geocodeResults = await geocodeQuery(maps, trimmedQuery);
 
   if (geocodeResults.length) {
     return geocodeResults;
   }
 
-  return searchPlaceNameAsAddress(maps, trimmedQuery);
+  return [];
 }
 
 function geocodeQuery(maps: any, query: string) {
@@ -197,7 +319,7 @@ function geocodeQuery(maps: any, query: string) {
             .map((item: any) => ({
               roadAddress: item?.roadAddress ?? '',
               jibunAddress: item?.jibunAddress ?? '',
-              title: item?.roadAddress || item?.jibunAddress || trimmedQuery,
+              title: item?.roadAddress || item?.jibunAddress || query,
               coordinates: {
                 lat: Number(item?.y),
                 lng: Number(item?.x),
@@ -215,10 +337,57 @@ function geocodeQuery(maps: any, query: string) {
 
 async function searchPlaceNameAsAddress(maps: any, query: string) {
   try {
-    const places = await fetchNearbySearchResults(query, 5, 'random');
+    const placeGroups = await Promise.all(
+      buildPlaceSearchQueries(query).flatMap((searchQuery, queryIndex) =>
+        getSearchSortsForQuery(query).map(async (sort, sortIndex) => {
+          const places = await fetchNearbySearchResults(searchQuery, 10, sort);
+          return places.map((place, resultIndex) => ({
+            place,
+            score: getPlaceSearchScore(place, query),
+            queryIndex,
+            sortIndex,
+            resultIndex,
+          }));
+        }),
+      ),
+    );
+    const rankedPlaces = placeGroups
+      .flat()
+      .filter(({ score }) => score > -100)
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          left.queryIndex - right.queryIndex ||
+          left.sortIndex - right.sortIndex ||
+          left.resultIndex - right.resultIndex,
+      );
+    const seenPlaceKeys = new Set<string>();
+    const places = rankedPlaces
+      .filter(({ place }) => {
+        const key = getPlaceResultKey(place);
+
+        if (seenPlaceKeys.has(key)) {
+          return false;
+        }
+
+        seenPlaceKeys.add(key);
+        return true;
+      })
+      .slice(0, 6)
+      .map(({ place }) => place);
     const mappedResults = await Promise.all(
       places.map(async (place) => {
         const addressQuery = place.roadAddress || place.address || place.name;
+        const localCoordinates = place.coordinates;
+
+        if (localCoordinates) {
+          return {
+            roadAddress: place.roadAddress,
+            jibunAddress: place.address,
+            title: place.name,
+            coordinates: localCoordinates,
+          } satisfies AddressSearchResult;
+        }
 
         if (!addressQuery) {
           return null;

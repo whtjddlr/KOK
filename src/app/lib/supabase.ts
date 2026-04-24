@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let browserClient: SupabaseClient | null = null;
+let publicClient: SupabaseClient | null = null;
 
 export function getSupabaseUrl() {
   return import.meta.env.VITE_SUPABASE_URL?.trim() ?? '';
@@ -35,4 +36,23 @@ export function getSupabaseBrowserClient() {
   }
 
   return browserClient;
+}
+
+export function getSupabasePublicClient() {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  if (!publicClient) {
+    publicClient = createClient(getSupabaseUrl(), getSupabaseAnonKey(), {
+      auth: {
+        storageKey: 'randommeet-public-client',
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    });
+  }
+
+  return publicClient;
 }

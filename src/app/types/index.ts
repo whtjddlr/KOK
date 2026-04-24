@@ -20,6 +20,7 @@ export interface Participant {
   location: string;
   coordinates: Coordinates;
   maxTravelTime: number;
+  travelMode?: TravelMode;
   locationSource?: LocationSource;
   savedFriendId?: string;
   createdBy?: string | null;
@@ -31,6 +32,7 @@ export interface SavedFriend {
   location: string;
   coordinates: Coordinates;
   maxTravelTime: number;
+  travelMode?: TravelMode;
   locationSource?: LocationSource;
 }
 
@@ -38,6 +40,9 @@ export interface MeetingRoom {
   id: string;
   code: string;
   ownerId: string | null;
+  drawControllerId: string | null;
+  redrawVotes: string[];
+  redrawRequestedAt: string | null;
   selectedCategory: MeetCategoryKey;
   selectedCandidate: Candidate | null;
   status: 'planning' | 'decided';
@@ -73,7 +78,7 @@ export interface SelectionMode {
   accent: string;
 }
 
-export type ThrillLevel = 1 | 2 | 3 | 4;
+export type ThrillLevel = 1 | 2 | 3 | 4 | 5;
 
 export interface ThrillStage {
   level: ThrillLevel;
@@ -123,7 +128,18 @@ export interface NearbyPlaceSection {
   items: NearbyPlace[];
 }
 
-export type TravelInfoSource = 'estimated' | 'directions';
+export type TravelInfoSource = 'estimated' | 'directions' | 'transit';
+export type TravelMode = 'transit' | 'car';
+
+export interface TravelRouteStep {
+  type: 'walk' | 'bus' | 'subway' | 'car';
+  label: string;
+  duration: number;
+  distance?: number;
+  from?: string;
+  to?: string;
+  stationCount?: number;
+}
 
 export interface TravelInfo {
   participantId: string;
@@ -132,9 +148,16 @@ export interface TravelInfo {
   cost: number;
   duration: number;
   source: TravelInfoSource;
+  mode?: TravelMode;
   tollFare?: number;
   taxiFare?: number;
   fuelPrice?: number;
+  transferCount?: number;
+  walkDistance?: number;
+  routeSummary?: string;
+  routeSteps?: TravelRouteStep[];
+  firstStartStation?: string;
+  lastEndStation?: string;
 }
 
 export interface CandidateInsight {
@@ -148,6 +171,7 @@ export interface CandidateInsight {
   accessSummary: string;
   categoryMatched: boolean;
   centerDistance: number;
+  axisDistance: number;
   nearestParticipantName: string;
   nearestDuration: number;
   farthestParticipantName: string;
@@ -173,6 +197,12 @@ export interface DrawPlan {
   finalists: CandidateInsight[];
   sequence: CandidateInsight[];
   fallbackNotice: string | null;
+}
+
+export interface DrawProof {
+  variantLabel: string;
+  choiceLabel: string;
+  lockCode: string;
 }
 
 export type VenueCategoryKey = 'restaurant' | 'cafe' | 'activity';

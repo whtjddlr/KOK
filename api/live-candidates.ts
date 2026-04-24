@@ -1,5 +1,6 @@
 import {
   buildFallbackCandidateIds,
+  ensureParticipantLocalCoverageIds,
   fetchOpenAiCandidateSelection,
   fetchUpstageCandidateSelection,
   getRuntimeAiConfig,
@@ -34,6 +35,10 @@ export default async function handler(req: any, res: any) {
       typeof body?.candidateTargetCount === 'number' && Number.isFinite(body.candidateTargetCount)
         ? body.candidateTargetCount
         : undefined;
+    const effectiveCandidateTargetCount =
+      selectionMode === 'neighborhood' && thrillLevel >= 5 && participants.length
+        ? Math.max(candidateTargetCount ?? 0, participants.length)
+        : candidateTargetCount;
 
     if (!insights.length) {
       json(res, 400, { candidateIds: [], message: 'Candidate insights are required.' });
@@ -73,13 +78,26 @@ export default async function handler(req: any, res: any) {
         ? runtimeAiConfig.model
         : pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini';
 
-    const safeFallbackIds = buildFallbackCandidateIds(
+    const safeFallbackIds = ensureParticipantLocalCoverageIds(
+      buildFallbackCandidateIds(
+        insights,
+        fallbackCandidateIds,
+        selectionMode,
+        thrillLevel,
+        candidateScope,
+        effectiveCandidateTargetCount,
+      ),
       insights,
-      fallbackCandidateIds,
+      participants,
+      pickTargetCount(
+        insights.length,
+        selectionMode,
+        thrillLevel,
+        candidateScope,
+        effectiveCandidateTargetCount,
+      ),
       selectionMode,
       thrillLevel,
-      candidateScope,
-      candidateTargetCount,
     );
 
     if (!effectiveOpenAiApiKey && !effectiveUpstageApiKey) {
@@ -103,7 +121,7 @@ export default async function handler(req: any, res: any) {
             selectionMode,
             thrillLevel,
             candidateScope,
-            requestedTargetCount: candidateTargetCount,
+            requestedTargetCount: effectiveCandidateTargetCount,
           })
         : await fetchOpenAiCandidateSelection({
             apiKey: effectiveOpenAiApiKey,
@@ -114,7 +132,7 @@ export default async function handler(req: any, res: any) {
             selectionMode,
             thrillLevel,
             candidateScope,
-            requestedTargetCount: candidateTargetCount,
+            requestedTargetCount: effectiveCandidateTargetCount,
           });
 
       const allowedIds = new Set(
@@ -122,21 +140,27 @@ export default async function handler(req: any, res: any) {
           .map((insight) => insight?.candidate?.id)
           .filter((candidateId: unknown): candidateId is string => typeof candidateId === 'string'),
       );
+      const targetCount = pickTargetCount(
+        allowedIds.size,
+        selectionMode,
+        thrillLevel,
+        candidateScope,
+        effectiveCandidateTargetCount,
+      );
       const candidateIds = aiSelection.candidateIds
         .filter((candidateId) => allowedIds.has(candidateId))
-        .slice(
-          0,
-          pickTargetCount(
-            allowedIds.size,
-            selectionMode,
-            thrillLevel,
-            candidateScope,
-            candidateTargetCount,
-          ),
-        );
+        .slice(0, targetCount);
+      const coveredCandidateIds = ensureParticipantLocalCoverageIds(
+        candidateIds.length ? candidateIds : safeFallbackIds,
+        insights,
+        participants,
+        targetCount,
+        selectionMode,
+        thrillLevel,
+      );
 
       json(res, 200, {
-        candidateIds: candidateIds.length ? candidateIds : safeFallbackIds,
+        candidateIds: coveredCandidateIds.length ? coveredCandidateIds : safeFallbackIds,
         source: effectiveUpstageApiKey ? 'upstage' : 'openai',
         message: aiSelection.summary || undefined,
       });
