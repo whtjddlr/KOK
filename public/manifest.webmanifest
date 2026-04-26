@@ -1,0 +1,45 @@
+{
+  "name": "KoK",
+  "short_name": "KoK",
+  "description": "KoK meeting place picker",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fbf7f0",
+  "theme_color": "#1f2a44",
+  "categories": ["navigation", "food", "social"],
+  "icons": [
+    {
+      "src": "/icons/kok-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/kok-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/kok-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/kok-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Start KoK",
+      "short_name": "Start",
+      "url": "/"
+    }
+  ]
+}

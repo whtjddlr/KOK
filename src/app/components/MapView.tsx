@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Crosshair, ExternalLink, MapPin, Minus, Plus, Search, X } from 'lucide-react';
-import { Candidate, Coordinates, NearbyPlace, Participant } from '../types';
-import {
-  getCloseParticipantContext,
-  getDistanceKm,
-  getTravelDistanceFromMinutes,
-} from '../lib/meeting';
+import { Candidate, Coordinates, NearbyPlace, Participant, TravelInfo } from '../types';
 import { loadNaverMapSdk } from '../lib/naver-map';
 import { buildNaverMapReservationLink, buildNaverMapSearchLink } from '../lib/naver-links';
 
@@ -13,9 +8,11 @@ interface MapViewProps {
   participants: Participant[];
   candidates?: Candidate[];
   selectedCandidate?: Candidate;
+  selectedRoutes?: TravelInfo[];
   reachableCandidateIds?: string[];
   nearbyPlaces?: NearbyPlace[];
   onCandidateSelect?: (candidateId: string) => void;
+  onRouteSelect?: (participantId: string) => void;
   locationPickerEnabled?: boolean;
   locationPickerHintVisible?: boolean;
   pickedLocationPreview?: Coordinates | null;
@@ -25,50 +22,30 @@ interface MapViewProps {
 
 type ActiveMapDetail = { kind: 'nearby'; id: string };
 
-function getCoverageCenter(points: Coordinates[]) {
-  if (!points.length) {
-    return null;
-  }
-
-  return {
-    lat: points.reduce((sum, point) => sum + point.lat, 0) / points.length,
-    lng: points.reduce((sum, point) => sum + point.lng, 0) / points.length,
-  };
+interface SelectedRouteOverlay {
+  participant: Participant;
+  route: TravelInfo;
+  color: string;
+  path: Coordinates[];
+  labelPosition: Coordinates;
 }
 
-function getAdaptiveParticipantRadiusKm(participant: Participant, participants: Participant[]) {
-  const maxTravelRadiusKm = getTravelDistanceFromMinutes(participant.maxTravelTime);
-
-  if (participants.length < 2) {
-    return Math.min(maxTravelRadiusKm, 5);
-  }
-
-  const closeContext = getCloseParticipantContext(participants);
-
-  if (closeContext.isCloseGroup) {
-    const compactRadiusKm =
-      closeContext.candidateLimitKm +
-      Math.max(0.35, closeContext.spreadKm * 0.55);
-
-    return Math.min(maxTravelRadiusKm, Math.max(1.2, compactRadiusKm));
-  }
-
-  if (closeContext.spreadKm <= 10) {
-    return Math.min(maxTravelRadiusKm, Math.max(4.5, closeContext.spreadKm * 0.75 + 2.2));
-  }
-
-  if (closeContext.spreadKm <= 25) {
-    return Math.min(maxTravelRadiusKm, Math.max(7.5, closeContext.spreadKm * 0.5 + 3.5));
-  }
-
-  return Math.min(maxTravelRadiusKm, 18);
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function createParticipantIcon(name: string, color: string) {
+  const initial = escapeHtml(name.slice(0, 1));
+
   return {
     content: `
       <div style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:9999px;background:${color};color:#fff;font-weight:700;font-size:14px;box-shadow:0 8px 20px rgba(18,28,45,0.18);border:2px solid rgba(255,255,255,0.92);">
-        ${name.slice(0, 1)}
+        ${initial}
       </div>
     `,
     size: new window.naver.maps.Size(40, 40),
@@ -77,6 +54,7 @@ function createParticipantIcon(name: string, color: string) {
 }
 
 function createCandidateIcon(name: string, active: boolean, reachable: boolean) {
+  const safeName = escapeHtml(name);
   const background = active ? '#ff7b6b' : '#ffffff';
   const border = active ? '#ff7b6b' : reachable ? '#4ecdc4' : '#c9d4dc';
   const opacity = active || reachable ? 1 : 0.58;
@@ -89,7 +67,7 @@ function createCandidateIcon(name: string, active: boolean, reachable: boolean) 
       <div style="display:flex;flex-direction:column;align-items:center;gap:6px;opacity:${opacity};transform:translateY(-4px);">
         <div style="width:22px;height:22px;transform:rotate(45deg);background:${background};border:2px solid ${border};border-radius:6px;box-shadow:${shadow};"></div>
         ${(active || reachable)
-          ? `<div style="padding:4px 8px;border-radius:9999px;background:rgba(255,255,255,0.92);backdrop-filter:blur(8px);font-size:11px;color:#44505b;white-space:nowrap;box-shadow:0 8px 16px rgba(18,28,45,0.08);">${name}</div>`
+          ? `<div style="padding:4px 8px;border-radius:9999px;background:rgba(255,255,255,0.92);backdrop-filter:blur(8px);font-size:11px;color:#44505b;white-space:nowrap;box-shadow:0 8px 16px rgba(18,28,45,0.08);">${safeName}</div>`
           : ''}
       </div>
     `,
@@ -98,19 +76,8 @@ function createCandidateIcon(name: string, active: boolean, reachable: boolean) 
   };
 }
 
-function createCoverageIcon() {
-  return {
-    content: `
-      <div style="padding:8px 12px;border-radius:16px;background:rgba(255,255,255,0.92);backdrop-filter:blur(10px);font-size:12px;color:#2d3561;font-weight:600;box-shadow:0 12px 30px rgba(18,28,45,0.12);white-space:nowrap;">
-        공통 접근권
-      </div>
-    `,
-    size: new window.naver.maps.Size(110, 34),
-    anchor: new window.naver.maps.Point(55, 17),
-  };
-}
-
 function createNearbyPlaceIcon(label: string, category: NearbyPlace['category']) {
+  const safeLabel = escapeHtml(label);
   const palette =
     category === 'restaurant'
       ? { background: '#ff7b6b', text: '#ffffff' }
@@ -123,12 +90,37 @@ function createNearbyPlaceIcon(label: string, category: NearbyPlace['category'])
       <div style="display:flex;align-items:center;gap:6px;transform:translateY(-6px);">
         <div style="width:14px;height:14px;border-radius:9999px;background:${palette.background};box-shadow:0 8px 16px rgba(18,28,45,0.16);border:2px solid rgba(255,255,255,0.95);"></div>
         <div style="max-width:124px;padding:4px 8px;border-radius:9999px;background:rgba(255,255,255,0.96);font-size:11px;color:#44505b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 8px 16px rgba(18,28,45,0.08);">
-          ${label}
+          ${safeLabel}
         </div>
       </div>
     `,
     size: new window.naver.maps.Size(144, 32),
     anchor: new window.naver.maps.Point(14, 14),
+  };
+}
+
+function getRouteDistanceLabel(route: TravelInfo) {
+  return route.source === 'estimated' ? '실경로 확인 전' : `${route.distance}km`;
+}
+
+function createRouteInfoIcon(participantName: string, route: TravelInfo, color: string) {
+  const initial = escapeHtml(participantName.slice(0, 1));
+  const distanceLabel = getRouteDistanceLabel(route);
+
+  return {
+    content: `
+      <button type="button" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:18px;background:rgba(255,255,255,0.96);backdrop-filter:blur(12px);box-shadow:0 14px 34px rgba(18,28,45,0.18);border:1px solid rgba(226,232,240,0.92);font-family:inherit;">
+        <span style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:9999px;background:${color};color:#fff;font-weight:800;font-size:12px;flex-shrink:0;">
+          ${initial}
+        </span>
+        <span style="display:flex;flex-direction:column;gap:1px;line-height:1.1;white-space:nowrap;">
+          <span style="font-size:13px;font-weight:800;color:#1f2a44;">${route.duration}분 · ${distanceLabel}</span>
+          <span style="font-size:11px;color:#7a8491;">상세 보기</span>
+        </span>
+      </button>
+    `,
+    size: new window.naver.maps.Size(150, 74),
+    anchor: new window.naver.maps.Point(75, 74),
   };
 }
 
@@ -159,12 +151,32 @@ function getNearbyCategoryLabel(category: NearbyPlace['category']) {
   return '놀거리';
 }
 
+function getRouteOverlayPath(
+  route: TravelInfo,
+  fallbackStart?: Coordinates,
+  fallbackEnd?: Coordinates,
+) {
+  const routePath =
+    route.routePath?.filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng)) ??
+    [];
+
+  if (routePath.length >= 2) {
+    return routePath;
+  }
+
+  if (fallbackStart && fallbackEnd) {
+    return [fallbackStart, fallbackEnd];
+  }
+
+  return [];
+}
+
 function buildViewportSignature(
   participants: Participant[],
   candidates: Candidate[],
+  selectedRoutes: TravelInfo[],
   nearbyPlaces: NearbyPlace[],
   pickedLocationPreview: Coordinates | null,
-  coverageCenter: Coordinates | null,
 ) {
   return JSON.stringify({
     participants: participants.map((participant) => [
@@ -177,13 +189,19 @@ function buildViewportSignature(
       candidate.coordinates.lat,
       candidate.coordinates.lng,
     ]),
+    selectedRoutes: selectedRoutes.map((route) => [
+      route.participantId,
+      route.source,
+      route.duration,
+      route.distance,
+      route.routePath?.length ?? 0,
+    ]),
     nearbyPlaces: nearbyPlaces
       .filter((place) => place.coordinates)
       .map((place) => [place.id, place.coordinates?.lat, place.coordinates?.lng]),
     pickedLocationPreview: pickedLocationPreview
       ? [pickedLocationPreview.lat, pickedLocationPreview.lng]
       : null,
-    coverageCenter: coverageCenter ? [coverageCenter.lat, coverageCenter.lng] : null,
   });
 }
 
@@ -191,9 +209,11 @@ export function MapView({
   participants,
   candidates = [],
   selectedCandidate,
+  selectedRoutes = [],
   reachableCandidateIds = [],
   nearbyPlaces = [],
   onCandidateSelect,
+  onRouteSelect,
   locationPickerEnabled = false,
   locationPickerHintVisible = false,
   pickedLocationPreview = null,
@@ -207,6 +227,7 @@ export function MapView({
   const mapListenersRef = useRef<any[]>([]);
   const lastViewportSignatureRef = useRef<string>('');
   const lastWheelZoomAtRef = useRef(0);
+  const initialCenterRef = useRef(participants[0]?.coordinates ?? { lat: 37.5665, lng: 126.978 });
   const [sdkReady, setSdkReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number | null>(null);
@@ -215,11 +236,6 @@ export function MapView({
   const reachableCandidates = useMemo(
     () => candidates.filter((candidate) => reachableCandidateIds.includes(candidate.id)),
     [candidates, reachableCandidateIds],
-  );
-
-  const coverageCenter = useMemo(
-    () => getCoverageCenter(reachableCandidates.map((candidate) => candidate.coordinates)),
-    [reachableCandidates],
   );
 
   const focusCandidates = useMemo(() => {
@@ -238,16 +254,49 @@ export function MapView({
     () => nearbyPlaces.filter((place) => place.coordinates),
     [nearbyPlaces],
   );
+  const selectedRouteOverlays = useMemo<SelectedRouteOverlay[]>(() => {
+    if (!selectedCandidate) {
+      return [];
+    }
+
+    return participants
+      .map((participant, index) => {
+        const route = selectedRoutes.find((item) => item.participantId === participant.id);
+
+        if (!route) {
+          return null;
+        }
+
+        const path = getRouteOverlayPath(
+          route,
+          participant.coordinates,
+          selectedCandidate.coordinates,
+        );
+
+        if (!path.length) {
+          return null;
+        }
+
+        return {
+          participant,
+          route,
+          color: colors[index % colors.length],
+          path,
+          labelPosition: participant.coordinates,
+        };
+      })
+      .filter((item): item is SelectedRouteOverlay => Boolean(item));
+  }, [colors, participants, selectedCandidate, selectedRoutes]);
   const viewportSignature = useMemo(
     () =>
       buildViewportSignature(
         participants,
         candidates,
+        selectedRoutes,
         nearbyPlacesWithCoordinates,
         pickedLocationPreview,
-        coverageCenter,
       ),
-    [participants, candidates, nearbyPlacesWithCoordinates, pickedLocationPreview, coverageCenter],
+    [participants, candidates, selectedRoutes, nearbyPlacesWithCoordinates, pickedLocationPreview],
   );
 
   const activeCandidateDetail = null;
@@ -292,7 +341,7 @@ export function MapView({
             return false;
           }
 
-          const initialCenter = participants[0]?.coordinates ?? { lat: 37.5665, lng: 126.978 };
+          const initialCenter = initialCenterRef.current;
 
           if (!mapRef.current) {
             mapRef.current = new maps.Map(containerRef.current, {
@@ -354,7 +403,7 @@ export function MapView({
       mounted = false;
       resizeObserver?.disconnect();
     };
-  }, [participants]);
+  }, []);
 
   useEffect(() => {
     if (!sdkReady || !mapRef.current || !window.naver?.maps) {
@@ -383,27 +432,15 @@ export function MapView({
       pointsToFit.push(pickedLocationPreview);
     }
 
-    if (coverageCenter) {
-      pointsToFit.push(coverageCenter);
-    }
+    selectedRouteOverlays.forEach((routeOverlay) => {
+      routeOverlay.path.forEach((point) => {
+        pointsToFit.push(point);
+      });
+    });
 
     participants.forEach((participant, index) => {
       const color = colors[index % colors.length];
       const center = new maps.LatLng(participant.coordinates.lat, participant.coordinates.lng);
-      const radius = getAdaptiveParticipantRadiusKm(participant, participants) * 1000;
-
-      const circle = new maps.Circle({
-        map,
-        center,
-        radius,
-        fillColor: color,
-        fillOpacity: 0.18,
-        strokeColor: color,
-        strokeOpacity: 0.7,
-        strokeWeight: 2,
-        strokeStyle: 'shortdash',
-      });
-
       const marker = new maps.Marker({
         map,
         position: center,
@@ -411,60 +448,8 @@ export function MapView({
         icon: createParticipantIcon(participant.name, color),
       });
 
-      overlaysRef.current.push(circle, marker);
+      overlaysRef.current.push(marker);
     });
-
-    if (coverageCenter) {
-      const coverageRadius =
-        reachableCandidates.length > 0
-          ? Math.max(
-              ...reachableCandidates.map((candidate) =>
-                getDistanceKm(candidate.coordinates, coverageCenter),
-              ),
-            ) + 0.5
-          : 0;
-
-      if (coverageRadius > 0) {
-        const coverageCircle = new maps.Circle({
-          map,
-          center: new maps.LatLng(coverageCenter.lat, coverageCenter.lng),
-          radius: coverageRadius * 1000,
-          fillColor: '#4ecdc4',
-          fillOpacity: 0.12,
-          strokeColor: '#4ecdc4',
-          strokeOpacity: 0.5,
-          strokeWeight: 2,
-          strokeStyle: 'shortdash',
-        });
-
-        overlaysRef.current.push(coverageCircle);
-      }
-
-      const coverageMarker = new maps.Marker({
-        map,
-        position: new maps.LatLng(coverageCenter.lat, coverageCenter.lng),
-        icon: createCoverageIcon(),
-      });
-
-      overlaysRef.current.push(coverageMarker);
-
-      participants.forEach((participant, index) => {
-        const color = colors[index % colors.length];
-        const line = new maps.Polyline({
-          map,
-          path: [
-            new maps.LatLng(participant.coordinates.lat, participant.coordinates.lng),
-            new maps.LatLng(coverageCenter.lat, coverageCenter.lng),
-          ],
-          strokeColor: color,
-          strokeOpacity: 0.38,
-          strokeWeight: 2,
-          strokeStyle: 'shortdash',
-        });
-
-        overlaysRef.current.push(line);
-      });
-    }
 
     candidates.forEach((candidate) => {
       const isSelected = selectedCandidate?.id === candidate.id;
@@ -535,24 +520,40 @@ export function MapView({
       overlaysRef.current.push(marker);
     }
 
-    if (selectedCandidate) {
-      participants.forEach((participant, index) => {
-        const color = colors[index % colors.length];
-        const line = new maps.Polyline({
-          map,
-          path: [
-            new maps.LatLng(participant.coordinates.lat, participant.coordinates.lng),
-            new maps.LatLng(selectedCandidate.coordinates.lat, selectedCandidate.coordinates.lng),
-          ],
-          strokeColor: color,
-          strokeOpacity: 0.72,
-          strokeWeight: 3,
-          strokeStyle: 'shortdash',
-        });
-
-        overlaysRef.current.push(line);
+    selectedRouteOverlays.forEach((routeOverlay) => {
+      const line = new maps.Polyline({
+        map,
+        path: routeOverlay.path.map((point) => new maps.LatLng(point.lat, point.lng)),
+        strokeColor: routeOverlay.color,
+        strokeOpacity: routeOverlay.route.source === 'estimated' ? 0.42 : 0.82,
+        strokeWeight: routeOverlay.route.source === 'estimated' ? 3 : 4,
+        strokeStyle: routeOverlay.route.source === 'estimated' ? 'shortdash' : 'solid',
+        strokeLineCap: 'round',
+        strokeLineJoin: 'round',
       });
-    }
+      const labelPosition = new maps.LatLng(
+        routeOverlay.labelPosition.lat,
+        routeOverlay.labelPosition.lng,
+      );
+      const labelMarker = new maps.Marker({
+        map,
+        position: labelPosition,
+        title: `${routeOverlay.participant.name} 경로 상세`,
+        icon: createRouteInfoIcon(
+          routeOverlay.participant.name,
+          routeOverlay.route,
+          routeOverlay.color,
+        ),
+        zIndex: 120,
+      });
+
+      maps.Event.addListener(labelMarker, 'click', () => {
+        onRouteSelect?.(routeOverlay.participant.id);
+        map.panTo(labelPosition);
+      });
+
+      overlaysRef.current.push(line, labelMarker);
+    });
 
     const fitMapToData = () => {
       if (pointsToFit.length > 1) {
@@ -563,7 +564,7 @@ export function MapView({
         });
 
         map.fitBounds(nextBounds, {
-          top: 56,
+          top: 96,
           right: 40,
           bottom: 56,
           left: 40,
@@ -593,13 +594,13 @@ export function MapView({
     participants,
     candidates,
     colors,
-    coverageCenter,
     focusCandidates,
     nearbyPlacesWithCoordinates,
     onCandidateSelect,
+    onRouteSelect,
     reachableCandidateIds,
-    reachableCandidates,
     selectedCandidate,
+    selectedRouteOverlays,
     pickedLocationPreview,
     viewportSignature,
   ]);
@@ -833,11 +834,6 @@ export function MapView({
       )}
       <div className="pointer-events-none hidden absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs text-[#6b7280] shadow-sm">
         수도권 연결 지도
-      </div>
-
-      <div className="pointer-events-none hidden absolute top-4 right-4 flex gap-2 text-[11px] text-[#4f5b66]">
-        <div className="bg-white/85 px-3 py-1.5 rounded-full shadow-sm">반투명 원: 이동 반경</div>
-        <div className="bg-white/85 px-3 py-1.5 rounded-full shadow-sm">민트 영역: 공통 접근권</div>
       </div>
 
       <div className="pointer-events-none hidden absolute left-4 bottom-4 bg-[#1f2a44]/82 text-white text-[11px] px-3 py-2 rounded-full shadow-lg backdrop-blur-sm">

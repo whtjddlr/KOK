@@ -13,16 +13,26 @@ export interface RuntimeAiConfig {
 }
 
 export type LocationSource = 'station' | 'current' | 'address' | 'map';
+export type ParticipantGender = 'female' | 'male' | 'other' | 'unspecified';
 
 export interface Participant {
   id: string;
   name: string;
+  avatarUrl?: string | null;
   location: string;
   coordinates: Coordinates;
   maxTravelTime: number;
   travelMode?: TravelMode;
+  gender?: ParticipantGender;
   locationSource?: LocationSource;
   savedFriendId?: string;
+  createdBy?: string | null;
+}
+
+export interface RoomMemberSummary {
+  id: string;
+  roomId: string;
+  name: string;
   createdBy?: string | null;
 }
 
@@ -33,6 +43,7 @@ export interface SavedFriend {
   coordinates: Coordinates;
   maxTravelTime: number;
   travelMode?: TravelMode;
+  gender?: ParticipantGender;
   locationSource?: LocationSource;
 }
 
@@ -41,6 +52,7 @@ export interface MeetingRoom {
   code: string;
   ownerId: string | null;
   drawControllerId: string | null;
+  drawReadyIds: string[];
   redrawVotes: string[];
   redrawRequestedAt: string | null;
   selectedCategory: MeetCategoryKey;
@@ -48,6 +60,8 @@ export interface MeetingRoom {
   status: 'planning' | 'decided';
   createdAt: string;
   updatedAt: string;
+  members?: RoomMemberSummary[];
+  memberCount?: number;
 }
 
 export type MeetCategoryKey =
@@ -66,7 +80,7 @@ export interface MeetCategory {
   beats: [string, string, string];
 }
 
-export type SelectionModeKey = 'balance' | 'neighborhood';
+export type SelectionModeKey = 'balance' | 'hotplace' | 'neighborhood';
 
 export type CandidateScopeKey = 'standard' | 'wide' | 'max';
 
@@ -156,6 +170,7 @@ export interface TravelInfo {
   walkDistance?: number;
   routeSummary?: string;
   routeSteps?: TravelRouteStep[];
+  routePath?: Coordinates[];
   firstStartStation?: string;
   lastEndStation?: string;
 }
@@ -163,6 +178,11 @@ export interface TravelInfo {
 export interface CandidateInsight {
   candidate: Candidate;
   travelInfo: TravelInfo[];
+  routeVerification?: {
+    liveRouteCount: number;
+    totalRouteCount: number;
+    status: 'verified' | 'partial' | 'estimated';
+  };
   averageDistance: number;
   averageDuration: number;
   maxDuration: number;

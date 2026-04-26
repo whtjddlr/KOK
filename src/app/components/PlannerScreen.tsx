@@ -3,9 +3,8 @@ import {
   Bot,
   BookmarkPlus,
   Car,
-  ChevronDown,
+  CheckCircle2,
   ChevronLeft,
-  ChevronUp,
   Copy,
   LoaderCircle,
   LocateFixed,
@@ -31,6 +30,7 @@ import {
   MeetCategoryKey,
   NearbyPlaceCategory,
   Participant,
+  ParticipantGender,
   RuntimeAiConfig,
   SavedFriend,
   SelectionModeKey,
@@ -44,8 +44,10 @@ import { MapView } from './MapView';
 import { CandidateCard } from './CandidateCard';
 import { RandomDrawer } from './RandomDrawer';
 import { AiConfigSheet } from './AiConfigSheet';
+import { useAiGeneratedCandidates } from '../hooks/useAiGeneratedCandidates';
 import { useLiveCandidateSearch } from '../hooks/useLiveCandidateSearch';
 import { useCandidateTravelRoutes } from '../hooks/useCandidateTravelRoutes';
+import { useFairnessVerifiedCandidateInsights } from '../hooks/useFairnessVerifiedCandidateInsights';
 import { getDefaultNearbyCategory, useNearbyPlaces } from '../hooks/useNearbyPlaces';
 import { useRuntimeCapabilities } from '../hooks/useRuntimeCapabilities';
 import { meetCategories, mockCandidates, selectionModes, thrillStages } from '../data/mockData';
@@ -57,6 +59,8 @@ import {
   getCandidateInsights,
   getDrawPool,
   getDynamicCandidateInsights,
+  getFairnessSpreadLimit,
+  getPracticalRouteGuardedInsights,
 } from '../lib/meeting';
 import {
   reverseGeocodeCoordinates,
@@ -82,26 +86,42 @@ import {
   forgetLocalRoomParticipant,
   getCurrentRoomActorIds,
   getParticipantActorKey,
-  getPreferredDrawControllerId,
   getRoomShareUrl,
   loadMeetingRoomByCode,
   loadRoomParticipants,
   rememberLocalRoomParticipant,
   removeRoomParticipant,
+  resetRoomReadiness,
+  setRoomDrawReady,
+  subscribeToRoomParticipants,
+  subscribeToRoomState,
   updateRoomDrawController,
+  updateRoomPlanningCategory,
   updateRoomSelection,
 } from '../lib/rooms';
 import { NearbyPlacesPanel } from './NearbyPlacesPanel';
 import type { UserHomeLocation } from '../lib/auth';
+import {
+  buildGroupGenderContext,
+  getParticipantGenderLabel,
+  participantGenderOptions,
+} from '../lib/gender';
+import {
+  filterSupportedServiceAreaResults,
+  getAddressResultLocationLabel,
+  getSafeLocationLabel,
+  isSupportedServiceAreaLocation,
+  looksLikeUnsupportedServiceAreaQuery,
+  SERVICE_AREA_UNSUPPORTED_MESSAGE,
+} from '../lib/service-area';
 
 interface PlannerScreenProps {
   currentUserId: string;
   currentUserName: string;
+  currentUserAvatarUrl?: string | null;
+  currentUserGender?: ParticipantGender;
   currentUserHomeLocation?: UserHomeLocation | null;
   onlineRoom: MeetingRoom | null;
-  isOpeningRoom?: boolean;
-  roomError?: string | null;
-  onCreateOnlineRoom?: (participants: Participant[]) => Promise<void>;
   onOpenProfile?: () => void;
   initialParticipants: Participant[];
   selectedCategory: MeetCategoryKey;
@@ -110,10 +130,6 @@ interface PlannerScreenProps {
   onSelectionModeChange: (mode: SelectionModeKey) => void;
   thrillLevel: ThrillLevel;
   onThrillLevelChange: (level: ThrillLevel) => void;
-  candidateScope: CandidateScopeKey;
-  onCandidateScopeChange: (scope: CandidateScopeKey) => void;
-  candidateTargetCount: number;
-  onCandidateTargetCountChange: (count: number) => void;
   onBack: () => void;
   onComplete: (
     winner: Candidate,
@@ -124,6 +140,12 @@ interface PlannerScreenProps {
 }
 
 type LocationMode = 'current' | 'address' | 'map';
+
+interface DrawSessionSnapshot {
+  candidateInsights: CandidateInsight[];
+  participants: Participant[];
+  seed?: string;
+}
 
 const PARTICIPANT_COLORS = ['#ff7b6b', '#4ecdc4', '#ffd166', '#a78bfa', '#f59e0b', '#ec4899'];
 
@@ -144,32 +166,84 @@ const travelModeOptions: Array<{
   },
 ];
 
-const candidateScopeOptions: Array<{
-  key: CandidateScopeKey;
-  label: string;
-  description: string;
-  targetCount: number;
-  sliderValue: number;
-}> = [
-  {
-    key: 'standard',
-    label: '기본',
-    description: '핵심 후보 위주로 빠르게 좁힙니다.',
-  },
-  {
-    key: 'wide',
-    label: '넓게',
-    description: '조금 더 다양한 지역을 함께 봅니다.',
-  },
-  {
-    key: 'max',
-    label: '최대',
-    description: '가능한 후보를 최대한 넓게 펼칩니다.',
-  },
-];
-
 const MIN_CANDIDATE_TARGET_COUNT = 4;
-const MAX_CANDIDATE_TARGET_COUNT = 20;
+const DEFAULT_CANDIDATE_TARGET_COUNT = 10;
+const DEFAULT_CANDIDATE_SCOPE: CandidateScopeKey = 'wide';
+
+function getRouteSelectionKey(candidateId: string, participantId: string) {
+  return `${candidateId}:${participantId}`;
+}
+
+function getSeededFraction(seed: string) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0) / 4294967296;
+}
+
+function getDeterministicDrawControllerId(actorIds: string[], seed: string | null) {
+  const candidates = [...new Set(actorIds)].filter(Boolean).sort();
+
+  if (!candidates.length || !seed) {
+    return null;
+  }
+
+  return candidates[Math.floor(getSeededFraction(`${seed}:controller`) * candidates.length)] ?? null;
+}
+
+function getParticipantNameByActorId(participants: Participant[], actorId: string | null) {
+  if (!actorId) {
+    return '';
+  }
+
+  return (
+    participants.find((participant) => getParticipantActorKey(participant) === actorId)?.name ?? ''
+  );
+}
+
+function getParticipantsSignature(participants: Participant[]) {
+  return JSON.stringify(
+    participants.map((participant) => ({
+      id: participant.id,
+      name: participant.name,
+      avatarUrl: participant.avatarUrl ?? null,
+      location: participant.location,
+      coordinates: participant.coordinates,
+      maxTravelTime: participant.maxTravelTime,
+      travelMode: participant.travelMode ?? 'transit',
+      gender: participant.gender ?? 'unspecified',
+      locationSource: participant.locationSource ?? null,
+      savedFriendId: participant.savedFriendId ?? null,
+      createdBy: participant.createdBy ?? null,
+    })),
+  );
+}
+
+function getMeetingRoomSignature(room: MeetingRoom | null) {
+  if (!room) {
+    return '';
+  }
+
+  return JSON.stringify({
+    id: room.id,
+    code: room.code,
+    ownerId: room.ownerId,
+    drawControllerId: room.drawControllerId,
+    drawReadyIds: [...room.drawReadyIds].sort(),
+    redrawVotes: [...room.redrawVotes].sort(),
+    redrawRequestedAt: room.redrawRequestedAt,
+    selectedCategory: room.selectedCategory,
+    selectedCandidate: room.selectedCandidate,
+    status: room.status,
+    updatedAt: room.updatedAt,
+    memberCount: room.memberCount ?? null,
+    members: room.members ?? [],
+  });
+}
 const thrillButtonLabels: Record<ThrillLevel, string> = {
   1: 'Lv.1',
   2: 'Lv.2',
@@ -177,29 +251,6 @@ const thrillButtonLabels: Record<ThrillLevel, string> = {
   4: 'Lv.4',
   5: 'Lv.5',
 };
-
-function clampCandidateTargetCount(count: number) {
-  return Math.max(
-    MIN_CANDIDATE_TARGET_COUNT,
-    Math.min(MAX_CANDIDATE_TARGET_COUNT, Math.round(count)),
-  );
-}
-
-function getCandidateScopeFromTargetCount(count: number): CandidateScopeKey {
-  if (count >= 14) {
-    return 'max';
-  }
-
-  if (count >= 9) {
-    return 'wide';
-  }
-
-  return 'standard';
-}
-
-function formatCoordinatePreview(coordinates: Coordinates) {
-  return `${coordinates.lat.toFixed(3)}, ${coordinates.lng.toFixed(3)}`;
-}
 
 function sortInsightsByCandidateIds(insights: CandidateInsight[], candidateIds: string[]) {
   const insightById = insights.reduce<Record<string, CandidateInsight>>((acc, insight) => {
@@ -222,11 +273,11 @@ function getTravelModeIcon(mode?: TravelMode) {
 
 function getRouteSourceLabel(route: TravelInfo) {
   if (route.source === 'transit') {
-    return 'ODsay';
+    return '실제';
   }
 
   if (route.source === 'directions') {
-    return '네이버';
+    return '실제';
   }
 
   return '예상';
@@ -236,9 +287,18 @@ function formatRouteFee(route: TravelInfo) {
   if (route.mode === 'car') {
     const fuel = Math.round(route.fuelPrice ?? route.cost ?? 0);
     const toll = Math.round(route.tollFare ?? 0);
+
+    if (route.source === 'estimated') {
+      return `예상 유류비 ${fuel.toLocaleString()}원`;
+    }
+
     return toll > 0
       ? `유류비 ${fuel.toLocaleString()}원 · 통행료 ${toll.toLocaleString()}원`
       : `유류비 ${fuel.toLocaleString()}원`;
+  }
+
+  if (route.source === 'estimated') {
+    return `예상 요금 ${Math.round(route.cost ?? 0).toLocaleString()}원`;
   }
 
   return `${Math.round(route.cost ?? 0).toLocaleString()}원 · 환승 ${route.transferCount ?? 0}회`;
@@ -249,7 +309,15 @@ function getRouteHeadline(route: TravelInfo) {
     return route.routeSummary;
   }
 
-  return route.mode === 'car' ? '자동차 경로' : '대중교통 예상 경로';
+  if (route.source === 'estimated') {
+    return route.mode === 'car' ? '실제 자동차 경로 확인 필요' : '실제 대중교통 경로 확인 필요';
+  }
+
+  return route.mode === 'car' ? '자동차 경로' : '대중교통 경로';
+}
+
+function getRouteDistanceLabel(route: TravelInfo) {
+  return route.source === 'estimated' ? '실경로 확인 전' : `${route.distance}km`;
 }
 
 function formatRouteStepDistance(distance?: number) {
@@ -323,6 +391,26 @@ function getLocationErrorMessage(error: GeolocationPositionError) {
   return '위치를 가져오는 데 시간이 걸렸어요. 다시 눌러 주세요.';
 }
 
+function getFriendlyRoomMessage(message: string | null) {
+  if (!message) {
+    return null;
+  }
+
+  const lowerMessage = message.toLowerCase();
+
+  if (
+    lowerMessage.includes('column ') ||
+    lowerMessage.includes('schema cache') ||
+    lowerMessage.includes('does not exist') ||
+    lowerMessage.includes('meeting_room_participants.') ||
+    lowerMessage.includes('meeting_rooms.')
+  ) {
+    return '방 정보를 다시 맞추는 중이에요. 잠시 후 다시 시도해 주세요.';
+  }
+
+  return message;
+}
+
 function isFriendAlreadyAdded(participants: Participant[], friend: SavedFriend) {
   return participants.some(
     (participant) =>
@@ -337,14 +425,34 @@ function getParticipantSyncSignature(participants: Participant[]) {
       [
         participant.id,
         participant.name,
+        participant.avatarUrl ?? '',
         participant.location,
         participant.coordinates.lat.toFixed(6),
         participant.coordinates.lng.toFixed(6),
         participant.maxTravelTime,
         participant.travelMode ?? 'transit',
+        participant.gender ?? 'unspecified',
         participant.locationSource ?? '',
         participant.savedFriendId ?? '',
         participant.createdBy ?? '',
+      ].join(':'),
+    )
+    .join('|');
+}
+
+function getSavedFriendSyncSignature(friends: SavedFriend[]) {
+  return friends
+    .map((friend) =>
+      [
+        friend.id,
+        friend.name,
+        friend.location,
+        friend.coordinates.lat.toFixed(6),
+        friend.coordinates.lng.toFixed(6),
+        friend.maxTravelTime,
+        friend.travelMode ?? 'transit',
+        friend.gender ?? 'unspecified',
+        friend.locationSource ?? '',
       ].join(':'),
     )
     .join('|');
@@ -358,14 +466,52 @@ function mergeSyncedParticipants(current: Participant[], synced: Participant[]) 
   return synced;
 }
 
+function mergeSyncedParticipantsWithPending(
+  current: Participant[],
+  synced: Participant[],
+  pendingParticipantIds: Set<string>,
+) {
+  if (!pendingParticipantIds.size) {
+    return mergeSyncedParticipants(current, synced);
+  }
+
+  const currentById = new Map(current.map((participant) => [participant.id, participant]));
+  const syncedIds = new Set(synced.map((participant) => participant.id));
+
+  synced.forEach((participant) => {
+    const pendingParticipant = currentById.get(participant.id);
+
+    if (
+      pendingParticipant &&
+      pendingParticipantIds.has(participant.id) &&
+      getParticipantSyncSignature([pendingParticipant]) === getParticipantSyncSignature([participant])
+    ) {
+      pendingParticipantIds.delete(participant.id);
+    }
+  });
+
+  const nextParticipants = synced.map((participant) =>
+    pendingParticipantIds.has(participant.id) && currentById.has(participant.id)
+      ? currentById.get(participant.id)!
+      : participant,
+  );
+
+  current.forEach((participant) => {
+    if (pendingParticipantIds.has(participant.id) && !syncedIds.has(participant.id)) {
+      nextParticipants.push(participant);
+    }
+  });
+
+  return mergeSyncedParticipants(current, nextParticipants);
+}
+
 export function PlannerScreen({
   currentUserId,
   currentUserName,
+  currentUserAvatarUrl = null,
+  currentUserGender = 'unspecified',
   currentUserHomeLocation = null,
   onlineRoom,
-  isOpeningRoom = false,
-  roomError: externalRoomError = null,
-  onCreateOnlineRoom,
   onOpenProfile,
   initialParticipants,
   selectedCategory,
@@ -374,25 +520,25 @@ export function PlannerScreen({
   onSelectionModeChange,
   thrillLevel,
   onThrillLevelChange,
-  candidateScope,
-  onCandidateScopeChange,
-  candidateTargetCount,
-  onCandidateTargetCountChange,
   onBack,
   onComplete,
 }: PlannerScreenProps) {
   const participantSectionRef = useRef<HTMLElement | null>(null);
+  const routePanelRef = useRef<HTMLDivElement | null>(null);
   const participantsRef = useRef<Participant[]>(initialParticipants);
   const seenRoomWinnerRef = useRef<string | null>(null);
+  const pendingRoomParticipantIdsRef = useRef<Set<string>>(new Set());
 
   const [participants, setParticipants] = useState<Participant[]>(initialParticipants);
   const [savedFriends, setSavedFriends] = useState<SavedFriend[]>([]);
+  const [savedFriendsLoadedUserId, setSavedFriendsLoadedUserId] = useState('');
   const [runtimeAiConfig, setRuntimeAiConfig] = useState<RuntimeAiConfig | null>(null);
   const [isAiConfigOpen, setIsAiConfigOpen] = useState(false);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [showCandidateList, setShowCandidateList] = useState(false);
-  const [showAddForm, setShowAddForm] = useState(() => initialParticipants.length === 0);
+  const [showAddForm, setShowAddForm] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
+  const [drawSessionSnapshot, setDrawSessionSnapshot] = useState<DrawSessionSnapshot | null>(null);
   const [saveNewFriend, setSaveNewFriend] = useState(true);
   const [newName, setNewName] = useState('');
   const [locationMode, setLocationMode] = useState<LocationMode>('address');
@@ -402,7 +548,9 @@ export function PlannerScreen({
   const [newLocation, setNewLocation] = useState('');
   const [newCoordinates, setNewCoordinates] = useState<Coordinates | null>(null);
   const [newTravelMode, setNewTravelMode] = useState<TravelMode>('transit');
+  const [newGender, setNewGender] = useState<ParticipantGender>('unspecified');
   const newTravelTime = DEFAULT_MAX_TRAVEL_TIME;
+  const [editingSelfParticipantId, setEditingSelfParticipantId] = useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [expandedRouteKey, setExpandedRouteKey] = useState<string | null>(null);
   const [excludedCandidateIds, setExcludedCandidateIds] = useState<string[]>([]);
@@ -416,17 +564,38 @@ export function PlannerScreen({
   );
   const [roomMessage, setRoomMessage] = useState<string | null>(null);
   const [copiedRoomLink, setCopiedRoomLink] = useState(false);
-  const [isCreatingRoomFromPlanner, setIsCreatingRoomFromPlanner] = useState(false);
+  const [isSettingReady, setIsSettingReady] = useState(false);
   const [nearbySearchCandidateId, setNearbySearchCandidateId] = useState<string | null>(null);
   const [syncedRoom, setSyncedRoom] = useState<MeetingRoom | null>(onlineRoom);
+  const openedReadyDrawSessionRef = useRef<string | null>(null);
+  const syncedRoomSignatureRef = useRef(getMeetingRoomSignature(onlineRoom));
+  const participantsSignatureRef = useRef(getParticipantsSignature(participants));
+  const onCategoryChangeRef = useRef(onCategoryChange);
+  const onCompleteRef = useRef(onComplete);
+
+  useEffect(() => {
+    onCategoryChangeRef.current = onCategoryChange;
+  }, [onCategoryChange]);
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
 
   useEffect(() => {
     participantsRef.current = participants;
+    participantsSignatureRef.current = getParticipantsSignature(participants);
   }, [participants]);
 
   useEffect(() => {
-    setSyncedRoom(onlineRoom);
-  }, [onlineRoom]);
+    const nextSignature = getMeetingRoomSignature(onlineRoom);
+
+    if (syncedRoomSignatureRef.current !== nextSignature) {
+      syncedRoomSignatureRef.current = nextSignature;
+      setSyncedRoom(onlineRoom);
+    }
+
+    pendingRoomParticipantIdsRef.current.clear();
+  }, [onlineRoom?.id]);
 
   useEffect(() => {
     if (onlineRoom) {
@@ -446,8 +615,83 @@ export function PlannerScreen({
     let active = true;
     let isSyncingParticipants = false;
     let isSyncingRoom = false;
+    let latestParticipants = participantsRef.current;
+    let pendingDecidedRoom: MeetingRoom | null = null;
     setRoomSyncStatus('loading');
     setRoomMessage(null);
+
+    const handleSyncError = (message: string) => {
+      if (!active) {
+        return;
+      }
+
+      setRoomSyncStatus('error');
+      setRoomMessage(message);
+    };
+
+    const completeDecidedRoom = (room: MeetingRoom, roomParticipants: Participant[]) => {
+      if (room.status !== 'decided' || !room.selectedCandidate) {
+        pendingDecidedRoom = null;
+        return;
+      }
+
+      if (!roomParticipants.length) {
+        pendingDecidedRoom = room;
+        return;
+      }
+
+      const winnerKey = `${room.selectedCandidate.id}-${room.updatedAt}`;
+
+      if (seenRoomWinnerRef.current === winnerKey) {
+        pendingDecidedRoom = null;
+        return;
+      }
+
+      seenRoomWinnerRef.current = winnerKey;
+      pendingDecidedRoom = null;
+      onCategoryChangeRef.current(room.selectedCategory);
+      onCompleteRef.current(room.selectedCandidate, roomParticipants, room.selectedCategory);
+    };
+
+    const applyParticipants = (nextParticipants: Participant[]) => {
+      if (!active) {
+        return;
+      }
+
+      latestParticipants = mergeSyncedParticipantsWithPending(
+        latestParticipants,
+        nextParticipants,
+        pendingRoomParticipantIdsRef.current,
+      );
+      participantsRef.current = latestParticipants;
+      const nextSignature = getParticipantsSignature(latestParticipants);
+
+      if (participantsSignatureRef.current !== nextSignature) {
+        participantsSignatureRef.current = nextSignature;
+        setParticipants(latestParticipants);
+      }
+
+      setRoomSyncStatus('connected');
+
+      if (pendingDecidedRoom) {
+        completeDecidedRoom(pendingDecidedRoom, latestParticipants);
+      }
+    };
+
+    const applyRoomState = (room: MeetingRoom) => {
+      if (!active) {
+        return;
+      }
+
+      const nextSignature = getMeetingRoomSignature(room);
+
+      if (syncedRoomSignatureRef.current !== nextSignature) {
+        syncedRoomSignatureRef.current = nextSignature;
+        setSyncedRoom(room);
+      }
+
+      completeDecidedRoom(room, latestParticipants);
+    };
 
     const syncParticipants = () => {
       if (isSyncingParticipants) {
@@ -458,20 +702,10 @@ export function PlannerScreen({
 
       void loadRoomParticipants(onlineRoom.id)
         .then((nextParticipants) => {
-          if (!active) {
-            return;
-          }
-
-          setParticipants((current) => mergeSyncedParticipants(current, nextParticipants));
-          setRoomSyncStatus('connected');
+          applyParticipants(nextParticipants);
         })
         .catch((error: Error) => {
-          if (!active) {
-            return;
-          }
-
-          setRoomSyncStatus('error');
-          setRoomMessage(error.message);
+          handleSyncError(error.message);
         })
         .finally(() => {
           isSyncingParticipants = false;
@@ -487,30 +721,14 @@ export function PlannerScreen({
 
       void loadMeetingRoomByCode(onlineRoom.code)
         .then((room) => {
-          if (!active || !room) {
+          if (!room) {
             return;
           }
 
-          setSyncedRoom(room);
-
-          if (room.status !== 'decided' || !room.selectedCandidate) {
-            return;
-          }
-
-          const winnerKey = `${room.selectedCandidate.id}-${room.updatedAt}`;
-
-          if (seenRoomWinnerRef.current === winnerKey) {
-            return;
-          }
-
-          seenRoomWinnerRef.current = winnerKey;
-          onCategoryChange(room.selectedCategory);
-          onComplete(room.selectedCandidate, participantsRef.current, room.selectedCategory);
+          applyRoomState(room);
         })
         .catch((error: Error) => {
-          if (active) {
-            setRoomMessage(error.message);
-          }
+          handleSyncError(error.message);
         })
         .finally(() => {
           isSyncingRoom = false;
@@ -522,16 +740,25 @@ export function PlannerScreen({
 
     const participantsIntervalId = window.setInterval(syncParticipants, 2500);
     const roomIntervalId = window.setInterval(syncRoomState, 3500);
+    const unsubscribeParticipants = subscribeToRoomParticipants(
+      onlineRoom.id,
+      applyParticipants,
+      handleSyncError,
+    );
+    const unsubscribeRoom = subscribeToRoomState(onlineRoom.id, applyRoomState, handleSyncError);
 
     return () => {
       active = false;
+      unsubscribeParticipants();
+      unsubscribeRoom();
       window.clearInterval(participantsIntervalId);
       window.clearInterval(roomIntervalId);
     };
-  }, [onlineRoom, onCategoryChange, onComplete]);
+  }, [onlineRoom?.code, onlineRoom?.id]);
 
   useEffect(() => {
     let active = true;
+    setSavedFriendsLoadedUserId('');
 
     void loadSavedFriends(currentUserId).then((friends) => {
       if (!active) {
@@ -539,6 +766,7 @@ export function PlannerScreen({
       }
 
       setSavedFriends(friends);
+      setSavedFriendsLoadedUserId(currentUserId);
     });
 
     return () => {
@@ -564,14 +792,25 @@ export function PlannerScreen({
     meetCategories.find((category) => category.key === selectedCategory) ?? meetCategories[0];
   const activeMode =
     selectionModes.find((mode) => mode.key === selectionMode) ?? selectionModes[0];
-  const effectiveThrillLevel: ThrillLevel =
-    selectionMode === 'balance' ? 1 : thrillLevel;
+  const isFairnessMode = selectionMode === 'balance';
+  const effectiveThrillLevel: ThrillLevel = isFairnessMode
+    ? thrillLevel
+    : selectionMode === 'neighborhood'
+      ? 5
+      : 1;
+  const candidateUniverseThrillLevel: ThrillLevel =
+    selectionMode === 'neighborhood' ? 5 : 1;
   const activeThrill =
     thrillStages.find((stage) => stage.level === effectiveThrillLevel) ?? thrillStages[0];
   const visibleThrillStages = thrillStages;
-  const activeScope =
-    candidateScopeOptions.find((scope) => scope.key === candidateScope) ?? candidateScopeOptions[0];
-  const activeCandidateTargetCount = clampCandidateTargetCount(candidateTargetCount);
+  const activeSpreadLimit = getFairnessSpreadLimit(effectiveThrillLevel, participants);
+  const activeModeDetailLabel = isFairnessMode
+    ? `${activeThrill.shortLabel} · ${activeSpreadLimit}분 이하`
+    : selectionMode === 'hotplace'
+      ? '핫플 후보 다양화'
+      : '집앞 후보 다양화';
+  const candidateScope = DEFAULT_CANDIDATE_SCOPE;
+  const activeCandidateTargetCount = DEFAULT_CANDIDATE_TARGET_COUNT;
   const roomActorIds = useMemo(
     () =>
       getCurrentRoomActorIds({
@@ -581,74 +820,54 @@ export function PlannerScreen({
       }),
     [currentUserId, participants, roomState?.id],
   );
-  const fallbackDrawControllerId = useMemo(
-    () => getPreferredDrawControllerId(participants, roomState?.ownerId),
-    [participants, roomState?.ownerId],
+  const roomParticipantActorIds = useMemo(
+    () => [...new Set(participants.map((participant) => getParticipantActorKey(participant)))],
+    [participants],
   );
-  const activeDrawControllerId = roomState?.drawControllerId ?? fallbackDrawControllerId;
-  const drawControllerName =
-    participants.find(
-      (participant) => getParticipantActorKey(participant) === activeDrawControllerId,
-    )?.name ?? '추첨 담당자';
-  const canStartOnlineDraw =
-    !roomState || (activeDrawControllerId ? roomActorIds.includes(activeDrawControllerId) : false);
-
-  useEffect(() => {
-    if (!onlineRoom || !participants.length) {
-      return;
-    }
-
-    const currentControllerStillPresent =
-      roomState?.drawControllerId &&
-      participants.some(
-        (participant) => getParticipantActorKey(participant) === roomState.drawControllerId,
-      );
-
-    if (currentControllerStillPresent) {
-      return;
-    }
-
-    const nextControllerId = getPreferredDrawControllerId(
-      participants,
-      roomState?.ownerId ?? onlineRoom.ownerId,
-    );
-
-    if (!nextControllerId || nextControllerId === roomState?.drawControllerId) {
-      return;
-    }
-
-    void updateRoomDrawController({
-      roomId: onlineRoom.id,
-      drawControllerId: nextControllerId,
-    })
-      .then((room) => {
-        if (room) {
-          setSyncedRoom(room);
-        }
-      })
-      .catch((error: Error) => {
-        setRoomMessage(error.message);
-      });
-  }, [
-    onlineRoom,
+  const currentReadyActorId = useMemo(
+    () => roomActorIds.find((actorId) => roomParticipantActorIds.includes(actorId)) ?? null,
+    [roomActorIds, roomParticipantActorIds],
+  );
+  const roomReadyIds = roomState?.drawReadyIds ?? [];
+  const readyParticipantIds = useMemo(
+    () => roomParticipantActorIds.filter((actorId) => roomReadyIds.includes(actorId)),
+    [roomParticipantActorIds, roomReadyIds],
+  );
+  const readyCount = readyParticipantIds.length;
+  const readyRequiredCount = roomParticipantActorIds.length;
+  const isCurrentActorReady = Boolean(
+    currentReadyActorId && roomReadyIds.includes(currentReadyActorId),
+  );
+  const isOnlineReadyComplete = Boolean(
+    onlineRoom && readyRequiredCount > 0 && readyCount >= readyRequiredCount,
+  );
+  const { candidates: aiGeneratedCandidates } = useAiGeneratedCandidates(
     participants,
-    roomState?.drawControllerId,
-    roomState?.ownerId,
-  ]);
+    selectedCategory,
+    selectionMode,
+    effectiveThrillLevel,
+    activeCandidateTargetCount,
+    effectiveRuntimeAiConfig,
+    aiConfigSignature,
+  );
+  const candidateSeeds = useMemo(
+    () => [...mockCandidates, ...aiGeneratedCandidates],
+    [aiGeneratedCandidates],
+  );
 
   const candidateUniverse = useMemo(
     () =>
       buildCandidateUniverse(
         participants,
-        mockCandidates,
+        candidateSeeds,
         selectedCategory,
-        effectiveThrillLevel,
+        candidateUniverseThrillLevel,
       ),
-    [effectiveThrillLevel, participants, selectedCategory],
+    [candidateSeeds, candidateUniverseThrillLevel, participants, selectedCategory],
   );
   const allCandidateInsights = useMemo(
-    () => getCandidateInsights(participants, candidateUniverse, selectedCategory),
-    [candidateUniverse, participants, selectedCategory],
+    () => getCandidateInsights(participants, candidateUniverse, selectedCategory, selectionMode),
+    [candidateUniverse, participants, selectedCategory, selectionMode],
   );
   const closeParticipantContext = useMemo(
     () => getCloseParticipantContext(participants),
@@ -674,12 +893,6 @@ export function PlannerScreen({
     : participants.length >= 2
       ? 0
       : activeCandidateTargetCount;
-  const candidateCountLimited =
-    participants.length >= 2 &&
-    activeCandidateTargetCount > scopedCandidateInsights.length;
-  const candidateSliderMax = scopedCandidateInsights.length
-    ? Math.max(MIN_CANDIDATE_TARGET_COUNT, Math.min(MAX_CANDIDATE_TARGET_COUNT, scopedCandidateInsights.length))
-    : MIN_CANDIDATE_TARGET_COUNT;
   const seedCandidateInsights = useMemo(
     () =>
       getDynamicCandidateInsights(
@@ -690,6 +903,7 @@ export function PlannerScreen({
         effectiveThrillLevel,
         candidateScope,
         effectiveCandidateTargetCount,
+        participants,
       ),
     [
       candidateScope,
@@ -781,12 +995,35 @@ export function PlannerScreen({
       selectionMode,
     ],
   );
+  const fairnessVerificationInputInsights =
+    isFairnessMode && aiCandidateStatus !== 'loading' ? rawCandidateInsights : [];
+  const {
+    insights: fairnessVerifiedRawCandidateInsights,
+    status: fairnessVerificationStatus,
+    message: fairnessVerificationMessage,
+  } = useFairnessVerifiedCandidateInsights(participants, fairnessVerificationInputInsights);
+  const fairnessVerifiedSourceInsights = fairnessVerificationInputInsights.length
+    ? fairnessVerifiedRawCandidateInsights
+    : rawCandidateInsights;
+  const routeGuardedCandidateSourceInsights = useMemo(
+    () =>
+      !isFairnessMode
+        ? fairnessVerifiedSourceInsights
+        : getPracticalRouteGuardedInsights(
+            fairnessVerifiedSourceInsights,
+            Math.min(
+              4,
+              effectiveCandidateTargetCount || fairnessVerifiedSourceInsights.length,
+            ),
+          ),
+    [effectiveCandidateTargetCount, fairnessVerifiedSourceInsights, isFairnessMode],
+  );
   const candidateInsights = useMemo(
     () =>
-      rawCandidateInsights.filter(
+      routeGuardedCandidateSourceInsights.filter(
         (insight) => !excludedCandidateIds.includes(insight.candidate.id),
       ),
-    [excludedCandidateIds, rawCandidateInsights],
+    [excludedCandidateIds, routeGuardedCandidateSourceInsights],
   );
   const { pool: drawPool, fallbackNotice } = useMemo(
     () =>
@@ -796,31 +1033,181 @@ export function PlannerScreen({
         effectiveThrillLevel,
         candidateScope,
         effectiveCandidateTargetCount,
+        participants,
       ),
     [
       candidateInsights,
       candidateScope,
       effectiveCandidateTargetCount,
       effectiveThrillLevel,
+      participants,
       selectionMode,
     ],
   );
-  const drawDisabledReason = participants.length < 2
+  const visibleCandidateInsights = useMemo(
+    () => (selectionMode === 'balance' ? drawPool : candidateInsights),
+    [candidateInsights, drawPool, selectionMode],
+  );
+  const fairnessVerificationPending = Boolean(
+    participants.length >= 2 &&
+      fairnessVerificationInputInsights.length &&
+      fairnessVerificationStatus === 'loading',
+  );
+  const drawBlockedReason = participants.length < 2
     ? '먼저 참여자를 2명 이상 입력해 주세요.'
-    : !canStartOnlineDraw
-      ? `${drawControllerName}만 최종 랜덤 추첨을 시작할 수 있어요.`
-      : !drawPool.length
-        ? '추첨 가능한 후보가 아직 없어요.'
-        : aiCandidateStatus === 'loading'
-          ? 'AI가 후보를 정리하는 중이에요.'
+    : aiCandidateStatus === 'loading'
+      ? 'AI가 후보를 정리하는 중이에요.'
+      : fairnessVerificationPending
+        ? '실제 이동시간으로 공정도를 다시 확인 중이에요.'
+        : !drawPool.length
+          ? fallbackNotice ?? '추첨 가능한 후보가 아직 없어요.'
           : null;
+  const onlineReadyBlockedReason =
+    onlineRoom && !currentReadyActorId
+      ? '레디 전에 내 위치를 먼저 방에 추가해 주세요.'
+      : drawBlockedReason;
+  const drawDisabledReason = onlineRoom ? onlineReadyBlockedReason : drawBlockedReason;
+  const readyButtonDisabled = Boolean(
+    isSettingReady || (onlineReadyBlockedReason && !isCurrentActorReady),
+  );
+  const readyStatusText = onlineRoom
+    ? onlineReadyBlockedReason
+      ? onlineReadyBlockedReason
+      : isOnlineReadyComplete
+        ? '모두 레디 완료. 진행자가 게임을 시작해요.'
+        : isCurrentActorReady
+          ? `레디 완료 ${readyCount}/${readyRequiredCount}. 다른 참여자를 기다리는 중이에요.`
+          : `${readyRequiredCount}명 모두 레디하면 추첨 게임이 열려요.`
+    : drawBlockedReason ??
+      (isFairnessMode
+        ? `이동시간 차이 ${activeSpreadLimit}분 이하 기준으로 고른 ${drawPool.length}개의 후보 안에서 마지막 랜덤을 돌립니다.`
+        : `${activeMode.shortLabel} 후보 ${drawPool.length}개 안에서 마지막 랜덤을 돌립니다.`);
+  const onlineReadyButtonLabel = onlineRoom
+    ? isSettingReady
+      ? '레디 반영 중'
+      : !currentReadyActorId
+        ? '내 위치 추가 필요'
+        : participants.length < 2
+          ? '참여자 2명 필요'
+          : aiCandidateStatus === 'loading'
+            ? 'AI 후보 정리 중'
+            : fairnessVerificationPending
+              ? '실제 이동시간 확인 중'
+              : !drawPool.length
+                ? '기준 후보 없음'
+                : isOnlineReadyComplete
+                  ? `모두 레디 ${readyCount}/${readyRequiredCount}`
+                  : isCurrentActorReady
+                    ? `레디 완료 ${readyCount}/${readyRequiredCount}`
+                    : `레디 ${readyCount}/${readyRequiredCount}`
+    : null;
+  const readyDrawSessionSeed = useMemo(
+    () =>
+      onlineRoom && !isSettingReady && isOnlineReadyComplete && drawPool.length
+        ? [
+            onlineRoom.id,
+            roomState?.updatedAt ?? onlineRoom.updatedAt,
+            selectedCategory,
+            selectionMode,
+            effectiveThrillLevel,
+            roomParticipantActorIds.join('|'),
+            readyParticipantIds.join('|'),
+            drawPool.map((insight) => insight.candidate.id).join('|'),
+          ].join(':')
+        : null,
+    [
+      drawPool,
+      effectiveThrillLevel,
+      isOnlineReadyComplete,
+      isSettingReady,
+      onlineRoom,
+      readyParticipantIds,
+      roomState?.updatedAt,
+      roomParticipantActorIds,
+      selectedCategory,
+      selectionMode,
+    ],
+  );
+  const plannedDrawControllerId = useMemo(
+    () => getDeterministicDrawControllerId(readyParticipantIds, readyDrawSessionSeed),
+    [readyDrawSessionSeed, readyParticipantIds],
+  );
+  const activeDrawControllerId =
+    roomState?.drawControllerId && readyParticipantIds.includes(roomState.drawControllerId)
+      ? roomState.drawControllerId
+      : plannedDrawControllerId;
+  const activeDrawControllerName =
+    getParticipantNameByActorId(participants, activeDrawControllerId) || '진행자';
+  const isCurrentDrawController = Boolean(
+    !onlineRoom || (currentReadyActorId && currentReadyActorId === activeDrawControllerId),
+  );
+  const openDrawDrawer = () => {
+    setDrawSessionSnapshot({
+      candidateInsights: drawPool,
+      participants,
+      seed: readyDrawSessionSeed ?? undefined,
+    });
+    setShowDrawer(true);
+  };
+  const closeDrawDrawer = () => {
+    setShowDrawer(false);
+    setDrawSessionSnapshot(null);
+  };
+  useEffect(() => {
+    if (
+      !onlineRoom ||
+      !roomState ||
+      !isOnlineReadyComplete ||
+      !plannedDrawControllerId ||
+      roomState.status === 'decided' ||
+      roomState.drawControllerId === plannedDrawControllerId
+    ) {
+      return;
+    }
+
+    void updateRoomDrawController({
+      roomId: onlineRoom.id,
+      drawControllerId: plannedDrawControllerId,
+    })
+      .then((room) => {
+        if (room) {
+          setSyncedRoom(room);
+        }
+      })
+      .catch((error: Error) => {
+        setRoomMessage(error.message);
+      });
+  }, [
+    isOnlineReadyComplete,
+    onlineRoom,
+    plannedDrawControllerId,
+    roomState,
+  ]);
+  useEffect(() => {
+    if (!isOnlineReadyComplete) {
+      openedReadyDrawSessionRef.current = null;
+      return;
+    }
+
+    if (
+      !readyDrawSessionSeed ||
+      drawBlockedReason ||
+      showDrawer ||
+      openedReadyDrawSessionRef.current === readyDrawSessionSeed
+    ) {
+      return;
+    }
+
+    openedReadyDrawSessionRef.current = readyDrawSessionSeed;
+    openDrawDrawer();
+  }, [drawBlockedReason, isOnlineReadyComplete, readyDrawSessionSeed, showDrawer]);
 
   const selectedInsight = useMemo(
     () =>
-      candidateInsights.find((insight) => insight.candidate.id === selectedCandidateId) ??
-      candidateInsights[0] ??
+      visibleCandidateInsights.find((insight) => insight.candidate.id === selectedCandidateId) ??
+      visibleCandidateInsights[0] ??
       null,
-    [candidateInsights, selectedCandidateId],
+    [selectedCandidateId, visibleCandidateInsights],
   );
   const {
     routes: selectedCandidateRoutes,
@@ -828,6 +1215,81 @@ export function PlannerScreen({
     error: selectedRouteError,
     hasLiveData: selectedRouteHasLiveData,
   } = useCandidateTravelRoutes(participants, selectedInsight?.candidate ?? null);
+  const selectedMapRoutes = useMemo(
+    () =>
+      selectedCandidateRoutes.filter(
+        (route) =>
+          route.source !== 'estimated' &&
+          route.routePath &&
+          route.routePath.length >= 3,
+      ),
+    [selectedCandidateRoutes],
+  );
+  const selectedRouteParticipantId = useMemo(() => {
+    if (!selectedInsight) {
+      return null;
+    }
+
+    const routeKeyPrefix = `${selectedInsight.candidate.id}:`;
+
+    if (expandedRouteKey?.startsWith(routeKeyPrefix)) {
+      const routeParticipantId = expandedRouteKey.slice(routeKeyPrefix.length);
+
+      if (participants.some((participant) => participant.id === routeParticipantId)) {
+        return routeParticipantId;
+      }
+    }
+
+    const currentParticipant = currentReadyActorId
+      ? participants.find(
+          (participant) =>
+            participant.id === currentReadyActorId ||
+            getParticipantActorKey(participant) === currentReadyActorId,
+        )
+      : null;
+
+    return currentParticipant?.id ?? participants[0]?.id ?? null;
+  }, [currentReadyActorId, expandedRouteKey, participants, selectedInsight]);
+  const selectedRouteParticipantIndex = selectedRouteParticipantId
+    ? participants.findIndex((participant) => participant.id === selectedRouteParticipantId)
+    : -1;
+  const selectedRouteParticipant =
+    selectedRouteParticipantIndex >= 0 ? participants[selectedRouteParticipantIndex] : null;
+  const rawSelectedRouteDetail = selectedRouteParticipant
+    ? selectedCandidateRoutes.find((route) => route.participantId === selectedRouteParticipant.id) ??
+      null
+    : null;
+  const selectedRouteDetail =
+    rawSelectedRouteDetail &&
+    !(selectedRouteStatus === 'loading' && rawSelectedRouteDetail.source === 'estimated')
+      ? rawSelectedRouteDetail
+      : null;
+	  const selectedRouteDetailKey =
+	    selectedInsight && selectedRouteParticipant
+	      ? getRouteSelectionKey(selectedInsight.candidate.id, selectedRouteParticipant.id)
+	      : null;
+	  const showSelectedRouteSteps = selectedRouteDetail?.mode !== 'car';
+	  const selectedRouteSteps = showSelectedRouteSteps ? selectedRouteDetail?.routeSteps ?? [] : [];
+  const selectedRouteMeta = selectedRouteDetail ? getRouteDetailMeta(selectedRouteDetail) : '';
+  const SelectedRouteTravelIcon = selectedRouteParticipant
+    ? getTravelModeIcon(selectedRouteParticipant.travelMode)
+    : TrainFront;
+  const selectedRouteColor =
+    PARTICIPANT_COLORS[
+      (selectedRouteParticipantIndex >= 0 ? selectedRouteParticipantIndex : 0) %
+        PARTICIPANT_COLORS.length
+    ];
+
+  const handleMapRouteSelect = (participantId: string) => {
+    if (!selectedInsight) {
+      return;
+    }
+
+    setExpandedRouteKey(getRouteSelectionKey(selectedInsight.candidate.id, participantId));
+    window.setTimeout(() => {
+      routePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 0);
+  };
 
   useEffect(() => {
     setExpandedRouteKey(null);
@@ -835,12 +1297,21 @@ export function PlannerScreen({
 
   const nearbySearchEnabled =
     Boolean(selectedInsight) && nearbySearchCandidateId === selectedInsight?.candidate.id;
+  const groupGenderContext = useMemo(
+    () => buildGroupGenderContext(participants),
+    [participants],
+  );
   const {
     sections: nearbySections,
     status: nearbyPlacesStatus,
     error: nearbyPlacesError,
     message: nearbyPlacesMessage,
-  } = useNearbyPlaces(selectedInsight?.candidate ?? null, selectedCategory, nearbySearchEnabled);
+  } = useNearbyPlaces(
+    selectedInsight?.candidate ?? null,
+    selectedCategory,
+    nearbySearchEnabled,
+    groupGenderContext,
+  );
   const nearbyMapPlaces = useMemo(
     () => nearbySections.find((section) => section.key === activeNearbyCategory)?.items ?? [],
     [activeNearbyCategory, nearbySections],
@@ -856,18 +1327,18 @@ export function PlannerScreen({
   }, [rawCandidateInsights]);
 
   useEffect(() => {
-    if (!candidateInsights.length) {
+    if (!visibleCandidateInsights.length) {
       setSelectedCandidateId(null);
       return;
     }
 
     if (
       !selectedCandidateId ||
-      !candidateInsights.some((insight) => insight.candidate.id === selectedCandidateId)
+      !visibleCandidateInsights.some((insight) => insight.candidate.id === selectedCandidateId)
     ) {
-      setSelectedCandidateId(candidateInsights[0].candidate.id);
+      setSelectedCandidateId(visibleCandidateInsights[0].candidate.id);
     }
-  }, [candidateInsights, selectedCandidateId]);
+  }, [selectedCandidateId, visibleCandidateInsights]);
 
   useEffect(() => {
     setActiveNearbyCategory(getDefaultNearbyCategory(selectedCategory));
@@ -883,32 +1354,136 @@ export function PlannerScreen({
     }
   }, [activeNearbyCategory, nearbySections]);
 
-  useEffect(() => {
-    if (!participants.length) {
-      setShowAddForm(true);
-    }
-  }, [participants.length]);
-
   const savedFriendIds = useMemo(
     () => new Set(savedFriends.map((friend) => friend.id)),
     [savedFriends],
   );
   const selfProfileParticipantKey = currentUserId ? `self-profile-${currentUserId}` : '';
+  const selfProfileParticipant = useMemo(
+    () =>
+      selfProfileParticipantKey
+        ? participants.find((participant) => participant.savedFriendId === selfProfileParticipantKey) ?? null
+        : null,
+    [participants, selfProfileParticipantKey],
+  );
   const isSelfProfileAdded = Boolean(
     currentUserHomeLocation &&
-      participants.some(
-        (participant) =>
-          participant.savedFriendId === selfProfileParticipantKey ||
-          (participant.createdBy === currentUserId &&
+      (selfProfileParticipant ||
+        participants.some(
+          (participant) =>
+            participant.createdBy === currentUserId &&
             participant.name === currentUserName &&
-            participant.location === currentUserHomeLocation.location),
-      ),
+            participant.location === currentUserHomeLocation.location,
+        )),
   );
+  const isEditingSelfLocation = Boolean(editingSelfParticipantId);
+
+  useEffect(() => {
+    if (!currentUserId) {
+      return;
+    }
+
+    const targetParticipant = participants.find(
+      (participant) =>
+        participant.savedFriendId === selfProfileParticipantKey ||
+        (Boolean(currentUserHomeLocation) &&
+          participant.createdBy === currentUserId &&
+          participant.location === currentUserHomeLocation?.location),
+    );
+
+    if (!targetParticipant) {
+      return;
+    }
+
+    const nextParticipant = {
+      ...targetParticipant,
+      name: currentUserName,
+      avatarUrl: currentUserAvatarUrl,
+      gender: currentUserGender,
+    };
+
+    if (getParticipantSyncSignature([targetParticipant]) === getParticipantSyncSignature([nextParticipant])) {
+      return;
+    }
+
+    setParticipants((current) =>
+      current.map((participant) =>
+        participant.id === targetParticipant.id ? nextParticipant : participant,
+      ),
+    );
+
+    if (onlineRoom) {
+      pendingRoomParticipantIdsRef.current.add(nextParticipant.id);
+      void addRoomParticipant({
+        roomId: onlineRoom.id,
+        participant: nextParticipant,
+        userId: currentUserId,
+      }).catch((error: Error) => {
+        pendingRoomParticipantIdsRef.current.delete(nextParticipant.id);
+        setRoomMessage(error.message);
+      });
+    }
+  }, [
+    currentUserAvatarUrl,
+    currentUserGender,
+    currentUserId,
+    currentUserName,
+    currentUserHomeLocation,
+    onlineRoom,
+    participants,
+    selfProfileParticipantKey,
+  ]);
 
   const persistFriends = (nextFriends: SavedFriend[]) => {
     setSavedFriends(nextFriends);
     void persistSavedFriends(currentUserId, nextFriends);
   };
+
+  useEffect(() => {
+    if (
+      !onlineRoom ||
+      !currentUserId ||
+      savedFriendsLoadedUserId !== currentUserId ||
+      !participants.length
+    ) {
+      return;
+    }
+
+    const roomFriendParticipants = participants.filter((participant) => {
+      const isFromAnotherUser = Boolean(
+        participant.createdBy && participant.createdBy !== currentUserId,
+      );
+      const hasValidLocation =
+        Boolean(participant.name.trim()) &&
+        Boolean(participant.location.trim()) &&
+        Number.isFinite(participant.coordinates.lat) &&
+        Number.isFinite(participant.coordinates.lng);
+
+      return isFromAnotherUser && hasValidLocation;
+    });
+
+    if (!roomFriendParticipants.length) {
+      return;
+    }
+
+    const nextFriends = roomFriendParticipants.reduce(
+      (currentFriends, participant) =>
+        upsertSavedFriend(currentFriends, buildSavedFriendFromParticipant(participant)),
+      savedFriends,
+    );
+
+    if (getSavedFriendSyncSignature(nextFriends) === getSavedFriendSyncSignature(savedFriends)) {
+      return;
+    }
+
+    persistFriends(nextFriends);
+  }, [
+    currentUserId,
+    onlineRoom,
+    participants,
+    savedFriends,
+    savedFriendsLoadedUserId,
+  ]);
 
   const handleCopyRoomLink = async () => {
     if (!onlineRoom) {
@@ -926,29 +1501,23 @@ export function PlannerScreen({
     }
   };
 
-  const handleCreateShareRoom = async () => {
-    if (!onCreateOnlineRoom) {
-      return;
-    }
-
-    setIsCreatingRoomFromPlanner(true);
-    setRoomMessage(null);
-
-    try {
-      await onCreateOnlineRoom(participants);
-    } catch (error) {
-      setRoomMessage(error instanceof Error ? error.message : '공유 방을 만들지 못했어요.');
-    } finally {
-      setIsCreatingRoomFromPlanner(false);
-    }
-  };
-
   const resetLocationDraft = () => {
     setAddressQuery('');
     setAddressResults([]);
     setNewLocation('');
     setNewCoordinates(null);
     setLocationError(null);
+  };
+
+  const resetParticipantDraft = () => {
+    setNewName('');
+    setShowAddForm(false);
+    setSaveNewFriend(!isGuestMode);
+    setLocationMode('address');
+    setNewTravelMode('transit');
+    setNewGender('unspecified');
+    setEditingSelfParticipantId(null);
+    resetLocationDraft();
   };
 
   const handleLocationModeChange = (mode: LocationMode) => {
@@ -971,10 +1540,20 @@ export function PlannerScreen({
     setNewLocation('');
 
     try {
-      const results = await searchAddress(query);
+      if (looksLikeUnsupportedServiceAreaQuery(query)) {
+        setLocationError(SERVICE_AREA_UNSUPPORTED_MESSAGE);
+        return;
+      }
+
+      const rawResults = await searchAddress(query);
+      const results = filterSupportedServiceAreaResults(rawResults);
 
       if (!results.length) {
-        setLocationError('검색 결과가 없어요. 도로명이나 건물명으로 다시 검색해 주세요.');
+        setLocationError(
+          rawResults.length
+            ? SERVICE_AREA_UNSUPPORTED_MESSAGE
+            : '검색 결과가 없어요. 도로명이나 건물명으로 다시 검색해 주세요.',
+        );
         return;
       }
 
@@ -984,8 +1563,9 @@ export function PlannerScreen({
       setAddressResults(nextResults);
 
       if (firstResult) {
-        setNewLocation(firstResult.title);
-        setAddressQuery(firstResult.title);
+        const locationLabel = getAddressResultLocationLabel(firstResult);
+        setNewLocation(locationLabel);
+        setAddressQuery(locationLabel);
         setNewCoordinates(firstResult.coordinates);
       }
     } catch (error) {
@@ -996,8 +1576,10 @@ export function PlannerScreen({
   };
 
   const handleSelectAddressResult = (result: AddressSearchResult) => {
-    setNewLocation(result.title);
-    setAddressQuery(result.title);
+    const locationLabel = getAddressResultLocationLabel(result);
+
+    setNewLocation(locationLabel);
+    setAddressQuery(locationLabel);
     setNewCoordinates(result.coordinates);
     setLocationError(null);
   };
@@ -1014,10 +1596,20 @@ export function PlannerScreen({
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setNewCoordinates({
+        const coordinates = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
-        });
+        };
+
+        if (!isSupportedServiceAreaLocation({ coordinates })) {
+          setNewCoordinates(null);
+          setNewLocation('');
+          setLocationError(SERVICE_AREA_UNSUPPORTED_MESSAGE);
+          setIsLocating(false);
+          return;
+        }
+
+        setNewCoordinates(coordinates);
         setNewLocation('현재 위치 기준');
         setIsLocating(false);
       },
@@ -1049,10 +1641,27 @@ export function PlannerScreen({
 
     try {
       const result = await reverseGeocodeCoordinates(coordinates.lat, coordinates.lng);
-      setNewLocation(result.title);
-      setAddressQuery(result.title);
+      if (!isSupportedServiceAreaLocation({ ...result, coordinates })) {
+        setNewCoordinates(null);
+        setNewLocation('');
+        setAddressQuery('');
+        setLocationError(SERVICE_AREA_UNSUPPORTED_MESSAGE);
+        return;
+      }
+
+      const locationLabel = getAddressResultLocationLabel(result);
+      setNewLocation(locationLabel);
+      setAddressQuery(locationLabel);
     } catch (error) {
-      setNewLocation(`${coordinates.lat.toFixed(4)}, ${coordinates.lng.toFixed(4)}`);
+      if (!isSupportedServiceAreaLocation({ coordinates })) {
+        setNewCoordinates(null);
+        setNewLocation('');
+        setAddressQuery('');
+        setLocationError(SERVICE_AREA_UNSUPPORTED_MESSAGE);
+        return;
+      }
+
+      setNewLocation('지도에서 선택한 위치');
       setAddressQuery('');
       setLocationError(error instanceof Error ? error.message : '선택한 위치 주소를 찾지 못했어요.');
     }
@@ -1063,16 +1672,23 @@ export function PlannerScreen({
       return;
     }
 
+    if (!isSupportedServiceAreaLocation({ location: friend.location, coordinates: friend.coordinates })) {
+      setRoomMessage(SERVICE_AREA_UNSUPPORTED_MESSAGE);
+      return;
+    }
+
     const nextParticipant = createParticipantFromSavedFriend(friend);
     setParticipants((current) => [...current, nextParticipant]);
 
     if (onlineRoom) {
+      pendingRoomParticipantIdsRef.current.add(nextParticipant.id);
       rememberLocalRoomParticipant(onlineRoom.id, nextParticipant.id);
       void addRoomParticipant({
         roomId: onlineRoom.id,
         participant: nextParticipant,
         userId: currentUserId || null,
       }).catch((error: Error) => {
+        pendingRoomParticipantIdsRef.current.delete(nextParticipant.id);
         forgetLocalRoomParticipant(onlineRoom.id, nextParticipant.id);
         setRoomMessage(error.message);
         setParticipants((current) =>
@@ -1092,13 +1708,25 @@ export function PlannerScreen({
       return;
     }
 
+    if (
+      !isSupportedServiceAreaLocation({
+        location: currentUserHomeLocation.location,
+        coordinates: currentUserHomeLocation.coordinates,
+      })
+    ) {
+      setRoomMessage(SERVICE_AREA_UNSUPPORTED_MESSAGE);
+      return;
+    }
+
     const nextParticipant: Participant = {
       id: `participant-self-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: currentUserName,
+      avatarUrl: currentUserAvatarUrl,
       location: currentUserHomeLocation.location,
       coordinates: currentUserHomeLocation.coordinates,
       maxTravelTime: DEFAULT_MAX_TRAVEL_TIME,
       travelMode: 'transit',
+      gender: currentUserGender,
       locationSource: currentUserHomeLocation.locationSource ?? 'address',
       savedFriendId: selfProfileParticipantKey,
       createdBy: currentUserId,
@@ -1107,12 +1735,14 @@ export function PlannerScreen({
     setParticipants((current) => [...current, nextParticipant]);
 
     if (onlineRoom) {
+      pendingRoomParticipantIdsRef.current.add(nextParticipant.id);
       rememberLocalRoomParticipant(onlineRoom.id, nextParticipant.id);
       void addRoomParticipant({
         roomId: onlineRoom.id,
         participant: nextParticipant,
         userId: currentUserId || null,
       }).catch((error: Error) => {
+        pendingRoomParticipantIdsRef.current.delete(nextParticipant.id);
         forgetLocalRoomParticipant(onlineRoom.id, nextParticipant.id);
         setRoomMessage(error.message);
         setParticipants((current) =>
@@ -1120,6 +1750,48 @@ export function PlannerScreen({
         );
       });
     }
+  };
+
+  const handleEditSelfLocationForThisRoom = () => {
+    if (!currentUserId || !currentUserHomeLocation) {
+      onOpenProfile?.();
+      return;
+    }
+
+    const targetParticipant =
+      selfProfileParticipant ??
+      participants.find(
+        (participant) =>
+          participant.createdBy === currentUserId &&
+          participant.name === currentUserName &&
+          participant.location === currentUserHomeLocation.location,
+      ) ??
+      null;
+    const draftLocation = targetParticipant?.location ?? currentUserHomeLocation.location;
+    const draftCoordinates = targetParticipant?.coordinates ?? currentUserHomeLocation.coordinates;
+
+    setEditingSelfParticipantId(
+      targetParticipant?.id ??
+        `participant-self-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    setNewName(currentUserName);
+    setNewGender(currentUserGender);
+    setNewTravelMode(targetParticipant?.travelMode ?? 'transit');
+    setLocationMode('address');
+    setAddressQuery(draftLocation);
+    setAddressResults([]);
+    setNewLocation(draftLocation);
+    setNewCoordinates(draftCoordinates);
+    setLocationError(null);
+    setSaveNewFriend(false);
+    setShowAddForm(true);
+
+    window.requestAnimationFrame(() => {
+      participantSectionRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
   };
 
   const handleSaveParticipantFriend = (participantId: string) => {
@@ -1169,33 +1841,66 @@ export function PlannerScreen({
       return;
     }
 
-    const shouldSaveNewFriend = !isGuestMode && saveNewFriend;
-    const savedFriendId = shouldSaveNewFriend ? `friend-${Date.now()}` : undefined;
+    if (!isSupportedServiceAreaLocation({ location: newLocation, coordinates: newCoordinates })) {
+      setLocationError(SERVICE_AREA_UNSUPPORTED_MESSAGE);
+      return;
+    }
+
+    const locationLabel =
+      locationMode === 'current' ? newLocation || '현재 위치 기준' : getSafeLocationLabel(newLocation);
+    const shouldSaveNewFriend = !isEditingSelfLocation && !isGuestMode && saveNewFriend;
+    const savedFriendId = isEditingSelfLocation
+      ? selfProfileParticipantKey
+      : shouldSaveNewFriend
+        ? `friend-${Date.now()}`
+        : undefined;
+    const participantId =
+      editingSelfParticipantId ??
+      `participant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const newParticipant: Participant = {
-      id: `participant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: newName.trim(),
-      location: locationMode === 'current' ? '현재 위치 기준' : newLocation,
+      id: participantId,
+      name: isEditingSelfLocation ? currentUserName : newName.trim(),
+      avatarUrl: isEditingSelfLocation ? currentUserAvatarUrl : undefined,
+      location: locationLabel,
       coordinates: newCoordinates,
       maxTravelTime: DEFAULT_MAX_TRAVEL_TIME,
       travelMode: newTravelMode,
+      gender: isEditingSelfLocation ? currentUserGender : newGender,
       locationSource: locationMode,
       savedFriendId,
       createdBy: currentUserId || null,
     };
+    const previousParticipant = editingSelfParticipantId
+      ? participants.find((participant) => participant.id === editingSelfParticipantId) ?? null
+      : null;
 
-    setParticipants((current) => [...current, newParticipant]);
+    setParticipants((current) =>
+      editingSelfParticipantId
+        ? current.some((participant) => participant.id === editingSelfParticipantId)
+          ? current.map((participant) =>
+              participant.id === editingSelfParticipantId ? newParticipant : participant,
+            )
+          : [...current, newParticipant]
+        : [...current, newParticipant],
+    );
 
     if (onlineRoom) {
+      pendingRoomParticipantIdsRef.current.add(newParticipant.id);
       rememberLocalRoomParticipant(onlineRoom.id, newParticipant.id);
       void addRoomParticipant({
         roomId: onlineRoom.id,
         participant: newParticipant,
         userId: currentUserId || null,
       }).catch((error: Error) => {
+        pendingRoomParticipantIdsRef.current.delete(newParticipant.id);
         forgetLocalRoomParticipant(onlineRoom.id, newParticipant.id);
         setRoomMessage(error.message);
         setParticipants((current) =>
-          current.filter((participant) => participant.id !== newParticipant.id),
+          previousParticipant
+            ? current.map((participant) =>
+                participant.id === previousParticipant.id ? previousParticipant : participant,
+              )
+            : current.filter((participant) => participant.id !== newParticipant.id),
         );
       });
     }
@@ -1205,18 +1910,14 @@ export function PlannerScreen({
       persistFriends(upsertSavedFriend(savedFriends, nextSavedFriend));
     }
 
-    setNewName('');
-    setShowAddForm(false);
-    setSaveNewFriend(!isGuestMode);
-    setLocationMode('address');
-    setNewTravelMode('transit');
-    resetLocationDraft();
+    resetParticipantDraft();
   };
 
   const handleRemoveParticipant = (id: string) => {
     setParticipants((current) => current.filter((participant) => participant.id !== id));
 
     if (onlineRoom) {
+      pendingRoomParticipantIdsRef.current.delete(id);
       forgetLocalRoomParticipant(onlineRoom.id, id);
       void removeRoomParticipant(onlineRoom.id, id).catch((error: Error) => {
         setRoomMessage(error.message);
@@ -1224,25 +1925,87 @@ export function PlannerScreen({
     }
   };
 
-  const handleSelectionModeSelect = (mode: SelectionModeKey) => {
-    onSelectionModeChange(mode);
-
-    if (mode === 'balance') {
-      onThrillLevelChange(1);
+  const resetOnlineReadyStateAfterOptionChange = () => {
+    if (!onlineRoom || !roomState || !roomState.drawReadyIds.length) {
       return;
     }
 
-    if (thrillLevel < 3) {
-      onThrillLevelChange(3);
+    const previousRoom = roomState;
+    const optimisticRoom = {
+      ...roomState,
+      drawReadyIds: [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    openedReadyDrawSessionRef.current = null;
+    setSyncedRoom(optimisticRoom);
+
+    void resetRoomReadiness({
+      roomId: onlineRoom.id,
+    })
+      .then((room) => {
+        if (room) {
+          setSyncedRoom(room);
+        }
+      })
+      .catch((error: Error) => {
+        setSyncedRoom(previousRoom);
+        setRoomMessage(error.message);
+      });
+  };
+
+  const handleCategorySelect = (category: MeetCategoryKey) => {
+    if (category === selectedCategory) {
+      return;
     }
+
+    onCategoryChange(category);
+    openedReadyDrawSessionRef.current = null;
+    setRoomMessage(null);
+
+    if (!onlineRoom || !roomState) {
+      return;
+    }
+
+    const previousRoom = roomState;
+    const optimisticRoom = {
+      ...roomState,
+      selectedCategory: category,
+      drawReadyIds: [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    setSyncedRoom(optimisticRoom);
+
+    void updateRoomPlanningCategory({
+      roomId: onlineRoom.id,
+      selectedCategory: category,
+    })
+      .then((room) => {
+        setSyncedRoom(room);
+      })
+      .catch((error: Error) => {
+        setSyncedRoom(previousRoom);
+        setRoomMessage(error.message);
+      });
+  };
+
+  const handleSelectionModeSelect = (mode: SelectionModeKey) => {
+    if (mode === selectionMode) {
+      return;
+    }
+
+    onSelectionModeChange(mode);
+    resetOnlineReadyStateAfterOptionChange();
   };
 
   const handleThrillLevelSelect = (level: ThrillLevel) => {
-    if (selectionMode === 'balance') {
+    if (level === thrillLevel) {
       return;
     }
 
     onThrillLevelChange(level);
+    resetOnlineReadyStateAfterOptionChange();
   };
 
   const handleExcludeCandidate = (candidateId: string) => {
@@ -1251,20 +2014,55 @@ export function PlannerScreen({
     );
 
     if (selectedCandidateId === candidateId) {
-      const nextInsight = candidateInsights.find((insight) => insight.candidate.id !== candidateId);
+      const nextInsight = visibleCandidateInsights.find(
+        (insight) => insight.candidate.id !== candidateId,
+      );
       setSelectedCandidateId(nextInsight?.candidate.id ?? null);
     }
   };
 
-  const handleCandidateTargetCountChange = (count: number) => {
-    const nextCount = clampCandidateTargetCount(count);
+  const handleReadyToggle = async () => {
+    if (!onlineRoom || !roomState) {
+      return;
+    }
 
-    onCandidateTargetCountChange(nextCount);
-    onCandidateScopeChange(getCandidateScopeFromTargetCount(nextCount));
+    if (!currentReadyActorId) {
+      setRoomMessage('레디 전에 내 위치를 먼저 방에 추가해 주세요.');
+      return;
+    }
+
+    const nextReady = !isCurrentActorReady;
+    const optimisticReadyIds = nextReady
+      ? [...new Set([...roomReadyIds, currentReadyActorId])]
+      : roomReadyIds.filter((readyId) => readyId !== currentReadyActorId);
+    const previousRoom = roomState;
+
+    setIsSettingReady(true);
+    setRoomMessage(null);
+    setSyncedRoom({
+      ...roomState,
+      drawReadyIds: optimisticReadyIds,
+      updatedAt: new Date().toISOString(),
+    });
+
+    try {
+      const nextRoom = await setRoomDrawReady({
+        room: roomState,
+        actorId: currentReadyActorId,
+        ready: nextReady,
+      });
+      setSyncedRoom(nextRoom);
+    } catch (error) {
+      setSyncedRoom(previousRoom);
+      setRoomMessage(error instanceof Error ? error.message : '레디 상태를 반영하지 못했어요.');
+    } finally {
+      setIsSettingReady(false);
+    }
   };
 
   const handleDrawComplete = (winner: Candidate, proof: DrawProof) => {
-    setShowDrawer(false);
+    const completionParticipants = drawSessionSnapshot?.participants ?? participants;
+    closeDrawDrawer();
 
     if (onlineRoom) {
       void updateRoomSelection({
@@ -1280,7 +2078,7 @@ export function PlannerScreen({
         });
     }
 
-    onComplete(winner, participants, selectedCategory, proof);
+    onComplete(winner, completionParticipants, selectedCategory, proof);
   };
 
   const handleSaveAiConfig = (config: RuntimeAiConfig) => {
@@ -1300,9 +2098,17 @@ export function PlannerScreen({
       ? 'AI가 후보 지역을 정리 중이에요.'
       : aiCandidateError
         ? aiCandidateError
+        : fairnessVerificationMessage
+          ? fairnessVerificationMessage
         : aiCandidateMessage
           ? aiCandidateMessage
           : fallbackNotice ?? `공통 범위 안에서 바로 추첨 가능한 후보 ${drawPool.length}곳을 골라뒀어요.`;
+  const displayRoomMessage = getFriendlyRoomMessage(roomMessage);
+  const activeDrawSession = drawSessionSnapshot ?? {
+    candidateInsights: drawPool,
+    participants,
+    seed: readyDrawSessionSeed ?? undefined,
+  };
 
   return (
     <div className="min-h-screen bg-[#f5f1eb] pb-32 text-[#1f2a44]">
@@ -1315,7 +2121,7 @@ export function PlannerScreen({
           <ChevronLeft className="h-6 w-6" />
         </button>
         <h2 className="absolute left-1/2 -translate-x-1/2 text-xl font-black tracking-[-0.05em] text-[#1f2a44]">
-          Drop
+          KoK
         </h2>
         {onOpenProfile ? (
           <button
@@ -1324,7 +2130,15 @@ export function PlannerScreen({
             className="inline-flex h-10 max-w-[132px] items-center gap-1.5 rounded-full bg-white px-3 text-sm text-[#1f2a44] shadow-sm transition-transform active:scale-95"
             aria-label="프로필 설정"
           >
-            <UserRound className="h-4 w-4 shrink-0 text-[#6b7280]" />
+            {currentUserAvatarUrl ? (
+              <img
+                src={currentUserAvatarUrl}
+                alt=""
+                className="h-5 w-5 shrink-0 rounded-full object-cover"
+              />
+            ) : (
+              <UserRound className="h-4 w-4 shrink-0 text-[#6b7280]" />
+            )}
             <span className="truncate">{currentUserName}</span>
           </button>
         ) : (
@@ -1333,7 +2147,7 @@ export function PlannerScreen({
       </div>
 
       <div className="mx-auto flex max-w-[1040px] flex-col gap-4 px-4 py-5 sm:gap-5 sm:py-6">
-        {onlineRoom ? (
+        {onlineRoom && (
           <section className="rounded-[1.75rem] border border-white/70 bg-white/92 px-4 py-3 shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-sm">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -1345,7 +2159,10 @@ export function PlannerScreen({
                   </span>
                 </div>
                 <div className="mt-1 text-xs text-[#8a94a2]">
-                  {participants.length}명 참여 · 추첨 {drawControllerName}
+                  {participants.length}명 참여 · 레디 {readyCount}/{Math.max(readyRequiredCount, 0)}
+                  {isOnlineReadyComplete && activeDrawControllerId
+                    ? ` · 진행자 ${activeDrawControllerName}`
+                    : ''}
                 </div>
               </div>
 
@@ -1359,33 +2176,9 @@ export function PlannerScreen({
               </button>
             </div>
 
-            {(roomMessage || roomSyncStatus === 'error') && (
+            {(displayRoomMessage || roomSyncStatus === 'error') && (
               <div className="mt-3 rounded-xl bg-[#fff8e8] px-3 py-2 text-xs text-[#8a621c]">
-                {roomMessage || '방 동기화를 확인해 주세요.'}
-              </div>
-            )}
-          </section>
-        ) : (
-          <section className="relative flex items-center justify-between gap-3 rounded-[1.75rem] border border-white/70 bg-white/92 px-4 py-3 shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-sm">
-            <div className="min-w-0 text-sm text-[#76777e]">
-              혼자 쓰는 중
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                void handleCreateShareRoom();
-              }}
-              disabled={isOpeningRoom || isCreatingRoomFromPlanner}
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-4 text-sm text-white shadow-sm transition-transform active:scale-95 disabled:opacity-60"
-            >
-              {(isOpeningRoom || isCreatingRoomFromPlanner) && (
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-              )}
-              공유 방 만들기
-            </button>
-            {(roomMessage || externalRoomError) && (
-              <div className="absolute left-4 right-4 top-full mt-2 rounded-xl bg-[#fff8e8] px-3 py-2 text-xs text-[#8a621c]">
-                {roomMessage || externalRoomError}
+                {displayRoomMessage || '방 동기화를 확인해 주세요.'}
               </div>
             )}
           </section>
@@ -1394,13 +2187,15 @@ export function PlannerScreen({
         <section className="order-1 space-y-3">
           <MapView
             participants={participants}
-            candidates={candidateInsights.map((insight) => insight.candidate)}
+            candidates={visibleCandidateInsights.map((insight) => insight.candidate)}
             reachableCandidateIds={drawPool.map((candidate) => candidate.candidate.id)}
             selectedCandidate={selectedInsight?.candidate}
+            selectedRoutes={selectedMapRoutes}
             nearbyPlaces={nearbyMapPlaces}
             onCandidateSelect={setSelectedCandidateId}
-            locationPickerEnabled
-            locationPickerHintVisible={(showAddForm && locationMode === 'map') || participants.length === 0}
+            onRouteSelect={handleMapRouteSelect}
+            locationPickerEnabled={showAddForm && locationMode === 'map'}
+            locationPickerHintVisible={showAddForm && locationMode === 'map'}
             pickedLocationPreview={showAddForm ? newCoordinates : null}
             onLocationPick={handleMapLocationPick}
             colors={PARTICIPANT_COLORS}
@@ -1416,11 +2211,9 @@ export function PlannerScreen({
             <span className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs font-semibold text-[#1f2a44]">
               {activeMode.shortLabel}
             </span>
-            {selectionMode === 'neighborhood' && (
-              <span className="rounded-full bg-white px-3 py-1 text-xs text-[#1a1a2e] shadow-sm">
-                강도 {effectiveThrillLevel}
-              </span>
-            )}
+            <span className="rounded-full bg-white px-3 py-1 text-xs text-[#1a1a2e] shadow-sm">
+              {activeModeDetailLabel}
+            </span>
           </div>
 
           <button
@@ -1434,9 +2227,9 @@ export function PlannerScreen({
         </div>
 
         {showAdvancedOptions && (
-          <div className="order-3 space-y-5 rounded-[1.75rem] border border-white/70 bg-white/95 p-5 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
-            <section>
-              <div className="mb-3 text-sm font-semibold text-[#45464d]">오늘의 모임</div>
+          <div className="order-3 space-y-3 rounded-[1.5rem] border border-white/70 bg-white/95 p-4 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
+            <section className="space-y-2">
+              <div className="text-xs font-semibold text-[#8a94a2]">모임</div>
               <div className="flex flex-wrap gap-2">
                 {meetCategories.map((category) => {
                   const active = category.key === selectedCategory;
@@ -1445,8 +2238,8 @@ export function PlannerScreen({
                     <button
                       key={category.key}
                       type="button"
-                      onClick={() => onCategoryChange(category.key)}
-                      className={`h-10 rounded-full px-4 text-sm transition-all ${
+                      onClick={() => handleCategorySelect(category.key)}
+                      className={`h-9 rounded-full px-3.5 text-sm transition-all ${
                         active
                           ? 'bg-[#ff7b6b] text-white shadow-sm'
                           : 'bg-[#f5f1eb] text-[#44505b]'
@@ -1459,9 +2252,9 @@ export function PlannerScreen({
               </div>
             </section>
 
-            <section>
-              <div className="mb-3 text-sm font-semibold text-[#45464d]">선정 방식</div>
-              <div className="grid grid-cols-2 gap-2">
+            <section className="space-y-2">
+              <div className="text-xs font-semibold text-[#8a94a2]">방식</div>
+              <div className="grid grid-cols-3 gap-1.5 rounded-2xl bg-[#f5f1eb] p-1.5">
                 {selectionModes.map((mode) => {
                   const active = mode.key === selectionMode;
 
@@ -1470,10 +2263,10 @@ export function PlannerScreen({
                       key={mode.key}
                       type="button"
                       onClick={() => handleSelectionModeSelect(mode.key)}
-                      className={`h-10 rounded-full px-4 text-sm transition-all ${
+                      className={`min-h-10 rounded-xl px-2 py-2 text-[13px] leading-tight break-keep transition-all sm:text-sm ${
                         active
                           ? 'bg-[#1f2a44] text-white shadow-sm'
-                          : 'bg-[#f5f1eb] text-[#44505b]'
+                          : 'text-[#44505b]'
                       }`}
                     >
                       {mode.shortLabel}
@@ -1483,61 +2276,51 @@ export function PlannerScreen({
               </div>
             </section>
 
-            {selectionMode === 'neighborhood' && (
-              <section>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="text-sm font-medium text-[#1a1a2e]">랜덤 강도</div>
-                  <div className="text-xs text-[#8a94a2]">
-                    {activeThrill.shortLabel}
-                  </div>
-                </div>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {visibleThrillStages.map((stage) => {
-                    const active = stage.level === effectiveThrillLevel;
+            {isFairnessMode && (
+		            <section className="rounded-2xl bg-[#faf7f2] p-3">
+		              <div className="mb-2 flex items-center justify-between gap-2">
+		                <div className="text-xs font-semibold text-[#8a94a2]">이동시간 공정도</div>
+		                <div className="text-xs text-[#8a94a2]">
+		                  {activeModeDetailLabel}
+		                </div>
+		              </div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {visibleThrillStages.map((stage) => {
+                  const active = stage.level === effectiveThrillLevel;
 
-                    return (
-                      <button
-                        key={stage.level}
-                        type="button"
-                        onClick={() => handleThrillLevelSelect(stage.level)}
-                        className={`h-10 rounded-full text-sm transition-all ${
-                          active
-                            ? 'bg-[#ff7b6b] text-white shadow-sm'
-                            : 'bg-[#f5f1eb] text-[#44505b]'
-                        }`}
-                      >
-                        {thrillButtonLabels[stage.level]}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="mt-2 truncate text-xs text-[#8a94a2]">
-                  {activeThrill.description}
-                </p>
-              </section>
+                  return (
+                    <button
+                      key={stage.level}
+                      type="button"
+                      onClick={() => handleThrillLevelSelect(stage.level)}
+                      className={`h-9 rounded-full text-sm transition-all ${
+                        active
+                          ? 'bg-[#ff7b6b] text-white shadow-sm'
+                          : 'bg-white text-[#44505b]'
+                      }`}
+                    >
+                      {thrillButtonLabels[stage.level]}
+                    </button>
+                  );
+                })}
+	              </div>
+	            </section>
             )}
 
             {!runtimeCapabilities.ai.connected && (
-              <div className="rounded-3xl border border-[#e6ebf0] bg-white p-4 shadow-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="flex items-center gap-2 text-[#1a1a2e]">
-                      <Bot className="h-4 w-4 text-[#2d3561]" />
-                      <span className="text-sm">
-                        {runtimeAiConfig ? 'AI 후보 생성 연결됨' : 'AI 후보 생성 연결 필요'}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-sm leading-relaxed text-[#6b7280]">
-                      {runtimeAiConfig
-                        ? `${runtimeAiConfig.provider === 'upstage' ? 'Upstage' : 'OpenAI'} · ${runtimeAiConfig.model}`
-                        : '키를 넣어두면 AI가 먼저 후보군을 정리합니다.'}
-                    </p>
+              <div className="rounded-2xl border border-[#e6ebf0] bg-white px-3 py-2.5 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2 text-[#1a1a2e]">
+                    <Bot className="h-4 w-4 shrink-0 text-[#2d3561]" />
+                    <span className="truncate text-sm">
+                      {runtimeAiConfig ? 'AI 연결됨' : 'AI 연결'}
+                    </span>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => setIsAiConfigOpen(true)}
-                    className="inline-flex h-10 items-center justify-center rounded-full bg-[#f5f1eb] px-4 text-sm text-[#1a1a2e] shadow-sm transition-transform active:scale-95"
+                    className="inline-flex h-8 items-center justify-center rounded-full bg-[#f5f1eb] px-3 text-xs text-[#1a1a2e] shadow-sm transition-transform active:scale-95"
                   >
                     연결
                   </button>
@@ -1548,37 +2331,57 @@ export function PlannerScreen({
         )}
 
         <section ref={participantSectionRef} className="order-2">
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-xl font-bold tracking-[-0.04em] text-[#1f2a44]">사람 추가</h3>
-              <p className="text-sm text-[#76777e]">주소나 지도에서 출발 위치를 정해 주세요.</p>
-            </div>
+          {(showAddForm || participants.length > 0) && (
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  if (showAddForm) {
+                    resetParticipantDraft();
+                    return;
+                  }
 
-            <button
-              type="button"
-              onClick={() => setShowAddForm((current) => !current)}
-              className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-full border px-4 text-sm font-medium shadow-sm transition-all active:scale-95 ${
-                showAddForm
-                  ? 'border-[#1f2a44] bg-[#1f2a44] text-white'
-                  : 'border-[#dfe5eb] bg-white text-[#2d3561] hover:bg-[#f8fbfd]'
-              }`}
-            >
-              <Plus className={`h-4 w-4 transition-transform ${showAddForm ? 'rotate-45' : ''}`} />
-              {showAddForm ? '닫기' : '추가'}
-            </button>
-          </div>
+                  setShowAddForm(true);
+                }}
+                className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-full border px-4 text-sm font-medium shadow-sm transition-all active:scale-95 ${
+                  showAddForm
+                    ? 'border-[#1f2a44] bg-[#1f2a44] text-white'
+                    : 'border-[#dfe5eb] bg-white text-[#2d3561] hover:bg-[#f8fbfd]'
+                }`}
+              >
+                <Plus className={`h-4 w-4 transition-transform ${showAddForm ? 'rotate-45' : ''}`} />
+                {showAddForm ? '닫기' : '수동 추가'}
+              </button>
+            </div>
+          )}
 
           {currentUserId && (
             <div className="mb-3 flex flex-col gap-3 rounded-[1.75rem] border border-white/70 bg-white/95 p-4 shadow-[0_10px_30px_rgba(26,26,46,0.06)] sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#f5f1eb] text-[#2d3561]">
-                  <UserRound className="h-4 w-4" />
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f5f1eb] text-[#2d3561]">
+                  {currentUserAvatarUrl ? (
+                    <img
+                      src={currentUserAvatarUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <UserRound className="h-4 w-4" />
+                  )}
                 </div>
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-[#1a1a2e]">내 정보</div>
                   <div className="mt-1 truncate text-sm text-[#6b7280]">
                     {currentUserHomeLocation
-                      ? `${currentUserName} · ${currentUserHomeLocation.location}`
+                      ? [
+                          currentUserName,
+                          getSafeLocationLabel(currentUserHomeLocation.location),
+                          currentUserGender !== 'unspecified'
+                            ? getParticipantGenderLabel(currentUserGender)
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')
                       : '기본 출발지를 저장하면 바로 추가할 수 있어요.'}
                   </div>
                 </div>
@@ -1599,10 +2402,14 @@ export function PlannerScreen({
                 </button>
                 <button
                   type="button"
-                  onClick={onOpenProfile}
+                  onClick={
+                    currentUserHomeLocation
+                      ? handleEditSelfLocationForThisRoom
+                      : onOpenProfile
+                  }
                   className="h-10 rounded-full bg-[#f5f1eb] px-4 text-sm text-[#44505b] transition-transform active:scale-95"
                 >
-                  수정
+                  {currentUserHomeLocation ? '이번 위치 수정' : '수정'}
                 </button>
               </div>
             </div>
@@ -1651,8 +2458,13 @@ export function PlannerScreen({
                         </span>
                         <span className="min-w-0 truncate">{friend.name}</span>
                         <span className="hidden max-w-28 truncate text-xs text-[#8a94a2] sm:inline">
-                          {friend.location}
+                          {getSafeLocationLabel(friend.location)}
                         </span>
+                        {friend.gender && friend.gender !== 'unspecified' && (
+                          <span className="inline-flex shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-[11px] text-[#6b7280]">
+                            {getParticipantGenderLabel(friend.gender)}
+                          </span>
+                        )}
                         <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-[11px] text-[#6b7280]">
                           <TravelIcon className="h-3 w-3" />
                           {getTravelModeLabel(friend.travelMode)}
@@ -1674,14 +2486,36 @@ export function PlannerScreen({
             </div>
           )}
 
+          {!showAddForm && participants.length === 0 && (
+            <div className="mb-3 flex flex-col gap-4 rounded-[1.75rem] border border-dashed border-[#dfe7ef] bg-white/78 p-5 text-center shadow-[0_10px_30px_rgba(26,26,46,0.04)] sm:flex-row sm:items-center sm:justify-between sm:text-left">
+              <div className="flex min-w-0 flex-col items-center gap-3 sm:flex-row">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f5f1eb] text-[#2d3561]">
+                  {onlineRoom ? <Wifi className="h-5 w-5" /> : <Users className="h-5 w-5" />}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-[#1a1a2e]">
+                    {onlineRoom ? '온라인 참여를 기다리는 중' : '참여자가 아직 없어요'}
+                  </div>
+                  <div className="mt-1 text-sm leading-relaxed text-[#6b7280]">
+                    직접 입력이 필요하면 수동 추가를 열어 주세요.
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAddForm(true)}
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#1f2a44] px-4 text-sm font-medium text-white shadow-sm transition-transform active:scale-95"
+              >
+                <Plus className="h-4 w-4" />
+                수동 추가
+              </button>
+            </div>
+          )}
+
           {showAddForm && (
             <div className="mb-3 rounded-[2rem] border border-white/70 bg-white/95 p-5 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
-              <div className="mb-4 flex flex-col gap-2 text-sm text-[#1a1a2e] sm:flex-row sm:items-center sm:justify-between">
-                <BookmarkPlus className="h-4 w-4 text-[#2d3561]" />
-                {isGuestMode
-                  ? '게스트 모드에서는 이번 약속에만 반영돼요.'
-                  : '입력한 친구는 다음에도 바로 불러올 수 있어요.'}
-              </div>
+              <BookmarkPlus className="mb-4 h-4 w-4 text-[#2d3561]" />
 
               <div className="space-y-4">
                 <input
@@ -1691,6 +2525,28 @@ export function PlannerScreen({
                   onChange={(event) => setNewName(event.target.value)}
                   className="h-12 w-full rounded-2xl border border-[#edf1f4] bg-[#fbfaf8] px-4 text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:border-[#d8e0ea] focus:ring-2 focus:ring-[#2d3561]/10"
                 />
+
+                <div className="rounded-2xl border border-[#e8edf3] bg-[#f8fbfd] p-3">
+                  <div className="mb-2 text-xs text-[#6b7280]">성별</div>
+                  <div className="flex flex-wrap gap-2">
+                    {participantGenderOptions.map((option) => {
+                      const active = newGender === option.value;
+
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setNewGender(option.value)}
+                          className={`rounded-full px-3 py-1.5 text-xs transition-all ${
+                            active ? 'bg-[#1f2a44] text-white shadow-sm' : 'bg-white text-[#44505b]'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
                 <div className="space-y-3">
                   <div className="grid grid-cols-3 gap-2 rounded-2xl bg-[#f7f3ed] p-1.5">
@@ -1752,7 +2608,7 @@ export function PlannerScreen({
 
                       {newCoordinates && (
                         <div className="mt-3 rounded-xl border border-[#e8edf3] bg-white px-3 py-2 text-xs text-[#1a1a2e]">
-                          현재 위치가 들어왔어요: {formatCoordinatePreview(newCoordinates)}
+                          현재 위치가 들어왔어요.
                         </div>
                       )}
 
@@ -1769,13 +2625,15 @@ export function PlannerScreen({
                           지도에서 우클릭하거나 길게 눌러 출발지를 찍어주세요.
                         </div>
                         <div className="mt-2 text-xs leading-relaxed text-[#6b7280]">
-                          선택한 좌표가 바로 이 사람 위치로 들어갑니다.
+                          지도에서 고른 곳이 바로 이 사람 위치로 들어갑니다.
                         </div>
                       </div>
 
                       {newCoordinates && (
                         <div className="mt-3 rounded-xl border border-[#e8edf3] bg-white px-3 py-2 text-xs text-[#1a1a2e]">
-                          {newLocation || `${newCoordinates.lat.toFixed(4)}, ${newCoordinates.lng.toFixed(4)}`}
+                          {newLocation
+                            ? getSafeLocationLabel(newLocation)
+                            : '선택한 위치가 들어왔어요.'}
                         </div>
                       )}
 
@@ -1786,8 +2644,8 @@ export function PlannerScreen({
                       )}
                     </div>
                   ) : (
-                    <div className="rounded-2xl border border-[#e8edf3] bg-[#f8fbfd] p-4">
-                      <div className="flex flex-col gap-2 sm:flex-row">
+                    <div className="rounded-2xl border border-[#e8edf3] bg-[#f8fbfd] p-2">
+                      <div className="flex items-center gap-2 rounded-xl bg-white p-1.5">
                         <input
                           type="text"
                           value={addressQuery}
@@ -1802,7 +2660,7 @@ export function PlannerScreen({
                             }
                           }}
                           placeholder="역, 장소명, 건물명, 도로명"
-                          className="h-12 flex-1 rounded-2xl border border-[#edf1f4] bg-white px-4 text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:border-[#d8e0ea] focus:ring-2 focus:ring-[#2d3561]/10"
+                          className="h-11 min-w-0 flex-1 rounded-lg border-0 bg-transparent px-3 text-sm text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:ring-0"
                         />
 
                         <button
@@ -1811,7 +2669,7 @@ export function PlannerScreen({
                             void handleAddressSearch();
                           }}
                           disabled={isSearchingAddress}
-                          className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#eef4ff] px-5 text-sm text-[#2d5aa7] transition-transform active:scale-95 disabled:opacity-60"
+                          className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#eef4ff] px-4 text-sm font-medium text-[#2d5aa7] transition-transform active:scale-95 disabled:opacity-60"
                         >
                           {isSearchingAddress ? (
                             <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -1825,7 +2683,8 @@ export function PlannerScreen({
                       {addressResults.length > 0 && (
                         <div className="mt-3 space-y-2">
                           {addressResults.map((result) => {
-                            const isSelected = newLocation === result.title;
+                            const locationLabel = getAddressResultLocationLabel(result);
+                            const isSelected = newLocation === locationLabel;
 
                             return (
                               <button
@@ -1839,7 +2698,7 @@ export function PlannerScreen({
                                 }`}
                               >
                                 <div className="text-sm text-[#1a1a2e]">
-                                  {result.title}
+                                  {locationLabel}
                                 </div>
                                 {(result.roadAddress || result.jibunAddress) && (
                                   <div className="mt-1 text-xs text-[#6b7280]">
@@ -1854,7 +2713,7 @@ export function PlannerScreen({
 
                       {newCoordinates && (
                         <div className="mt-3 rounded-xl border border-[#e8edf3] bg-white px-3 py-2 text-xs text-[#1a1a2e]">
-                          선택한 주소가 들어왔어요: {newLocation}
+                          선택한 주소가 들어왔어요: {getSafeLocationLabel(newLocation)}
                         </div>
                       )}
 
@@ -1903,11 +2762,7 @@ export function PlannerScreen({
                 </select>
               </div>
 
-              {isGuestMode ? (
-                <div className="mt-2 px-1 text-xs text-[#8a94a2]">
-                  게스트 모드라 저장 없이 이번 약속에만 반영돼요.
-                </div>
-              ) : (
+              {!isGuestMode && !isEditingSelfLocation && (
                 <label className="mt-3 flex items-center gap-2 text-sm text-[#44505b]">
                   <input
                     type="checkbox"
@@ -1925,18 +2780,12 @@ export function PlannerScreen({
                   onClick={handleAddParticipant}
                   className="h-11 rounded-2xl bg-[#2d3561] px-5 text-white transition-transform active:scale-95 sm:min-w-[180px]"
                 >
-                  참여자 추가
+                  {isEditingSelfLocation ? '이번 위치 적용' : '참여자 추가'}
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowAddForm(false);
-                    setSaveNewFriend(!isGuestMode);
-                    setLocationMode('address');
-                    setNewTravelMode('transit');
-                    resetLocationDraft();
-                  }}
+                  onClick={resetParticipantDraft}
                   className="h-11 rounded-2xl bg-[#f5f1eb] px-5 text-[#6b7280] transition-transform active:scale-95"
                 >
                   취소
@@ -1964,7 +2813,11 @@ export function PlannerScreen({
                   key={participant.id}
                   participant={participant}
                   onRemove={handleRemoveParticipant}
-                  onSaveFriend={isGuestMode ? undefined : handleSaveParticipantFriend}
+                  onSaveFriend={
+                    isGuestMode || participant.savedFriendId === selfProfileParticipantKey
+                      ? undefined
+                      : handleSaveParticipantFriend
+                  }
                   isSavedFriend={Boolean(
                     participant.savedFriendId && savedFriendIds.has(participant.savedFriendId),
                   )}
@@ -1974,7 +2827,10 @@ export function PlannerScreen({
             </div>
 
             {selectedInsight ? (
-              <div className="mt-3 rounded-[1.25rem] border border-[#e8edf3] bg-[#f8fbfd] p-3">
+              <div
+                ref={routePanelRef}
+                className="mt-3 rounded-[1.25rem] border border-[#e8edf3] bg-[#f8fbfd] p-3"
+              >
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 text-sm text-[#1a1a2e]">
@@ -1994,140 +2850,169 @@ export function PlannerScreen({
                   </span>
                 </div>
 
-                <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-                  {participants.map((participant, index) => {
-                    const route =
-                      selectedCandidateRoutes.find((item) => item.participantId === participant.id) ??
-                      null;
-                    const TravelIcon = getTravelModeIcon(participant.travelMode);
-                    const color = PARTICIPANT_COLORS[index % PARTICIPANT_COLORS.length];
-                    const routeKey = `${selectedInsight.candidate.id}:${participant.id}`;
-                    const isRouteExpanded = expandedRouteKey === routeKey;
-                    const routeSteps = route?.routeSteps ?? [];
-                    const routeMeta = route ? getRouteDetailMeta(route) : '';
+                {participants.length > 1 && (
+                  <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+                    {participants.map((participant, index) => {
+                      const routeKey = getRouteSelectionKey(
+                        selectedInsight.candidate.id,
+                        participant.id,
+                      );
+                      const active = participant.id === selectedRouteParticipantId;
 
-                    return (
-                      <button
-                        key={routeKey}
-                        type="button"
-                        disabled={!route}
-                        onClick={() =>
-                          setExpandedRouteKey((current) => (current === routeKey ? null : routeKey))
-                        }
-                        className="w-full rounded-xl bg-white p-3 text-left transition-all hover:-translate-y-0.5 hover:shadow-sm disabled:cursor-default disabled:hover:translate-y-0 disabled:hover:shadow-none"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="inline-flex h-7 w-7 items-center justify-center rounded-full text-xs text-white"
-                                style={{ backgroundColor: color }}
-                              >
-                                {participant.name.charAt(0)}
-                              </span>
-                              <div className="min-w-0">
-                                <div className="truncate text-sm text-[#1a1a2e]">
-                                  {participant.name}
-                                </div>
-                                <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[#6b7280]">
-                                  <TravelIcon className="h-3.5 w-3.5" />
-                                  {getTravelModeLabel(participant.travelMode)}
-                                  {route ? ` · ${getRouteSourceLabel(route)}` : ''}
-                                </div>
-                              </div>
-                            </div>
-
-                            {route ? (
-                              <>
-                                <div className="mt-3 text-sm text-[#44505b]">
-                                  {getRouteHeadline(route)}
-                                </div>
-                                <div className="mt-1 text-xs text-[#8a94a2]">
-                                  {formatRouteFee(route)}
-                                </div>
-                              </>
+                      return (
+                        <button
+                          key={routeKey}
+                          type="button"
+                          onClick={() => setExpandedRouteKey(routeKey)}
+                          className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-full px-3 text-xs font-semibold transition-transform active:scale-95 ${
+                            active
+                              ? 'bg-[#1f2a44] text-white shadow-sm'
+                              : 'bg-white text-[#44505b] shadow-sm'
+                          }`}
+                        >
+                          <span
+                            className="inline-flex h-5 w-5 items-center justify-center overflow-hidden rounded-full text-[10px] text-white"
+                            style={{ backgroundColor: PARTICIPANT_COLORS[index % PARTICIPANT_COLORS.length] }}
+                          >
+                            {participant.avatarUrl ? (
+                              <img
+                                src={participant.avatarUrl}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
                             ) : (
-                              <div className="mt-3 flex items-center gap-2 text-xs text-[#8a94a2]">
-                                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                                경로 계산 중
-                              </div>
+                              participant.name.charAt(0)
                             )}
-                          </div>
+                          </span>
+                          <span className="max-w-[90px] truncate">{participant.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
-                          {route ? (
-                            <div className="shrink-0 text-right">
-                              <div className="text-lg text-[#1a1a2e]">{route.duration}분</div>
-                              <div className="text-xs text-[#8a94a2]">{route.distance}km</div>
-                              <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#f5f1eb] px-2 py-1 text-[11px] text-[#6b7280]">
-                                {isRouteExpanded ? (
-                                  <ChevronUp className="h-3 w-3" />
-                                ) : (
-                                  <ChevronDown className="h-3 w-3" />
-                                )}
-                                {isRouteExpanded ? '접기' : '상세'}
-                              </div>
+                {selectedRouteParticipant ? (
+                  <div className="rounded-xl bg-white p-3 text-left shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="inline-flex h-8 w-8 items-center justify-center overflow-hidden rounded-full text-xs text-white"
+                            style={{ backgroundColor: selectedRouteColor }}
+                          >
+                            {selectedRouteParticipant.avatarUrl ? (
+                              <img
+                                src={selectedRouteParticipant.avatarUrl}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              selectedRouteParticipant.name.charAt(0)
+                            )}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-[#1a1a2e]">
+                              {selectedRouteParticipant.name}
                             </div>
-                          ) : null}
+                            <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[#6b7280]">
+                              <SelectedRouteTravelIcon className="h-3.5 w-3.5" />
+                              {getTravelModeLabel(selectedRouteParticipant.travelMode)}
+                              {selectedRouteDetail
+                                ? ` · ${getRouteSourceLabel(selectedRouteDetail)}`
+                                : ''}
+                            </div>
+                          </div>
                         </div>
 
-                        {route && isRouteExpanded ? (
-                          <div className="mt-3 border-t border-[#eef2f6] pt-3">
-                            {routeMeta ? (
-                              <div className="mb-2 rounded-2xl bg-[#f8fbfd] px-3 py-2 text-xs text-[#6b7280]">
-                                {routeMeta}
-                              </div>
-                            ) : null}
+                        {selectedRouteDetail ? (
+                          <>
+                            <div className="mt-3 text-sm text-[#44505b]">
+                              {getRouteHeadline(selectedRouteDetail)}
+                            </div>
+                            <div className="mt-1 text-xs text-[#8a94a2]">
+                              {formatRouteFee(selectedRouteDetail)}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="mt-3 flex items-center gap-2 text-xs text-[#8a94a2]">
+                            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                            경로 계산 중
+                          </div>
+                        )}
+                      </div>
 
-                            {routeSteps.length ? (
-                              <ol className="space-y-2">
-                                {routeSteps.map((step, stepIndex) => {
-                                  const stepDistance = formatRouteStepDistance(step.distance);
-                                  const stepMeta = [
-                                    step.duration ? `${step.duration}분` : null,
-                                    stepDistance,
-                                    step.stationCount ? `${step.stationCount}개 정류장` : null,
-                                  ].filter(Boolean);
+                      {selectedRouteDetail ? (
+                        <div className="shrink-0 text-right">
+                          <div className="text-lg font-semibold text-[#1a1a2e]">
+                            {selectedRouteDetail.duration}분
+                          </div>
+                          <div className="text-xs text-[#8a94a2]">
+                            {getRouteDistanceLabel(selectedRouteDetail)}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
 
-                                  return (
-                                    <li
-                                      key={`${routeKey}:step:${stepIndex}`}
-                                      className="flex gap-2 rounded-2xl bg-[#fbf8fb] px-3 py-2"
-                                    >
-                                      <span
-                                        className={`mt-0.5 h-fit shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${getRouteStepBadgeClass(step.type)}`}
-                                      >
-                                        {getRouteStepTypeLabel(step.type)}
-                                      </span>
-                                      <div className="min-w-0 flex-1">
-                                        <div className="text-xs font-semibold text-[#1f2a44]">
-                                          {step.label}
-                                        </div>
-                                        {step.from || step.to ? (
-                                          <div className="mt-0.5 truncate text-[11px] text-[#8a94a2]">
-                                            {[step.from, step.to].filter(Boolean).join(' → ')}
-                                          </div>
-                                        ) : null}
-                                        {stepMeta.length ? (
-                                          <div className="mt-1 text-[11px] text-[#8a94a2]">
-                                            {stepMeta.join(' · ')}
-                                          </div>
-                                        ) : null}
-                                      </div>
-                                    </li>
-                                  );
-                                })}
-                              </ol>
-                            ) : (
-                              <div className="rounded-2xl bg-[#fbf8fd] px-3 py-2 text-xs text-[#8a94a2]">
-                                실시간 요약 경로만 받아왔어요. 더 자세한 안내는 지도 앱에서 확인할 수 있어요.
-                              </div>
-                            )}
+	                    {selectedRouteDetail && showSelectedRouteSteps ? (
+	                      <div className="mt-3 border-t border-[#eef2f6] pt-3">
+                        {selectedRouteMeta ? (
+                          <div className="mb-2 rounded-2xl bg-[#f8fbfd] px-3 py-2 text-xs text-[#6b7280]">
+                            {selectedRouteMeta}
                           </div>
                         ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
+
+                        {selectedRouteSteps.length ? (
+                          <ol className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                            {selectedRouteSteps.map((step, stepIndex) => {
+                              const stepDistance = formatRouteStepDistance(step.distance);
+                              const stepMeta = [
+                                step.duration ? `${step.duration}분` : null,
+                                stepDistance,
+                                step.stationCount ? `${step.stationCount}개 정류장` : null,
+                              ].filter(Boolean);
+
+                              return (
+                                <li
+                                  key={`${selectedRouteDetailKey}:step:${stepIndex}`}
+                                  className="flex gap-2 rounded-2xl bg-[#fbf8fb] px-3 py-2"
+                                >
+                                  <span
+                                    className={`mt-0.5 h-fit shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${getRouteStepBadgeClass(step.type)}`}
+                                  >
+                                    {getRouteStepTypeLabel(step.type)}
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-semibold text-[#1f2a44]">
+                                      {step.label}
+                                    </div>
+                                    {step.from || step.to ? (
+                                      <div className="mt-0.5 truncate text-[11px] text-[#8a94a2]">
+                                        {[step.from, step.to].filter(Boolean).join(' → ')}
+                                      </div>
+                                    ) : null}
+                                    {stepMeta.length ? (
+                                      <div className="mt-1 text-[11px] text-[#8a94a2]">
+                                        {stepMeta.join(' · ')}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ol>
+                        ) : (
+                          <div className="rounded-2xl bg-[#fbf8fd] px-3 py-2 text-xs text-[#8a94a2]">
+                            {selectedRouteDetail.source === 'estimated'
+                              ? selectedRouteDetail.mode === 'car'
+                                ? '자동차 상세 경로를 받지 못해 임시 예상 시간만 표시 중이에요.'
+                                : '대중교통 상세 경로를 받지 못해 임시 예상 시간만 표시 중이에요.'
+                              : '실시간 경로는 받았지만 단계 안내가 비어 있어 요약만 표시 중이에요.'}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {selectedRouteError ? (
                   <div className="mt-3 rounded-2xl bg-[#fff7ed] px-3 py-2 text-xs text-[#b45309]">
@@ -2143,15 +3028,8 @@ export function PlannerScreen({
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <h3 className="text-lg font-semibold text-[#1f2a44]">
-                후보 {candidateInsights.length}곳
+                후보 {visibleCandidateInsights.length}곳
               </h3>
-              <p className="mt-1 truncate text-sm text-[#8a94a2]">
-                {aiCandidateStatus === 'loading'
-                  ? '후보 정리 중'
-                  : excludedCandidateIds.length
-                    ? `${excludedCandidateIds.length}곳 제외됨`
-                    : `${activeCategory.label} 기준`}
-              </p>
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
@@ -2176,7 +3054,7 @@ export function PlannerScreen({
 
           {showCandidateList && (
             <div className="space-y-3">
-              {candidateInsights.map((insight) => (
+              {visibleCandidateInsights.map((insight) => (
                   <CandidateCard
                     key={insight.candidate.id}
                     insight={insight}
@@ -2193,11 +3071,16 @@ export function PlannerScreen({
                   />
               ))}
 
-              {!candidateInsights.length && (
-                <div className="rounded-2xl border border-dashed border-[#d9e0e7] bg-white/80 px-5 py-8 text-center text-sm text-[#6b7280]">
-                  남은 후보가 없어요. 되돌리기를 눌러 다시 볼 수 있습니다.
-                </div>
-              )}
+	              {!visibleCandidateInsights.length && (
+	                <div className="rounded-2xl border border-dashed border-[#d9e0e7] bg-white/80 px-5 py-8 text-center text-sm text-[#6b7280]">
+		                  {excludedCandidateIds.length
+		                    ? '남은 후보가 없어요. 되돌리기를 눌러 다시 볼 수 있습니다.'
+		                    : fallbackNotice ??
+		                      (isFairnessMode
+		                        ? '조건에 맞는 후보가 없어요. 공정도를 넓히거나 다른 방식을 골라 주세요.'
+		                        : '조건에 맞는 후보가 없어요. 다른 모임 방식이나 카테고리를 골라 주세요.')}
+	                </div>
+	              )}
             </div>
           )}
 
@@ -2206,89 +3089,68 @@ export function PlannerScreen({
 
       <div className="mx-auto max-w-[1040px] px-4 pb-8">
         <div className="rounded-[2rem] border border-white/80 bg-white/95 p-4 shadow-[0_18px_42px_rgba(26,26,46,0.12)] backdrop-blur-xl">
-          <div className="mb-3 space-y-3">
-            <div className="rounded-[1.5rem] bg-[#f5f1eb] px-4 py-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-[#1f2a44]">후보군 개수</div>
-                  <div className="mt-1 text-xs text-[#76777e]">
-                    {candidateCountLimited
-                      ? `가능 ${effectiveCandidateTargetCount}개 · 요청 ${activeCandidateTargetCount}개`
-                      : `최대 ${activeCandidateTargetCount}개 · 현재 ${drawPool.length}개`}
-                  </div>
-                </div>
-                <div className="rounded-full bg-white px-3 py-1 text-xs text-[#45464d] shadow-sm">
-                  {effectiveCandidateTargetCount}개
-                </div>
-              </div>
-
-              <input
-                type="range"
-                min={MIN_CANDIDATE_TARGET_COUNT}
-                max={candidateSliderMax}
-                step={1}
-                value={Math.min(activeCandidateTargetCount, candidateSliderMax)}
-                onChange={(event) =>
-                  handleCandidateTargetCountChange(Number(event.target.value))
-                }
-                className="mt-4 h-2 w-full cursor-pointer appearance-none rounded-full bg-[#e4e2e4] accent-[#ff7b6b]"
-              />
-
-              <div className="mt-3 grid grid-cols-5 gap-2 text-xs text-[#76777e]">
-                {[4, 8, 12, 16, 20].map((count) => (
-                  <button
-                    key={count}
-                    type="button"
-                    onClick={() => handleCandidateTargetCountChange(count)}
-                    disabled={count > candidateSliderMax}
-                    className={`rounded-full px-2 py-2 transition-colors ${
-                      count === activeCandidateTargetCount ? 'bg-white text-[#1a1a2e] shadow-sm' : ''
-                    } disabled:opacity-35`}
-                  >
-                    {count}
-                  </button>
-                ))}
-              </div>
+          {!onlineRoom && (
+            <div className="px-2 pb-2 text-xs text-[#76777e]">
+              {readyStatusText}
             </div>
-          </div>
-
-          <div className="px-2 pb-2 text-xs text-[#76777e]">
-            {drawDisabledReason ??
-              `${drawPool.length}개의 후보 안에서 마지막 랜덤을 돌립니다.`}
-          </div>
+          )}
 
           <button
             type="button"
-            onClick={() => setShowDrawer(true)}
-            disabled={Boolean(drawDisabledReason)}
-            className="flex h-16 w-full items-center justify-center gap-2 rounded-[1.35rem] bg-[#1f2a44] text-lg font-bold tracking-[-0.03em] text-white shadow-[0_10px_30px_rgba(26,26,46,0.12)] transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => {
+              if (onlineRoom) {
+                void handleReadyToggle();
+                return;
+              }
+
+              openDrawDrawer();
+            }}
+            disabled={onlineRoom ? readyButtonDisabled : Boolean(drawDisabledReason)}
+            className={`flex h-16 w-full items-center justify-center gap-2 rounded-[1.35rem] text-lg font-bold tracking-[-0.03em] text-white shadow-[0_10px_30px_rgba(26,26,46,0.12)] transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 ${
+              onlineRoom && isCurrentActorReady ? 'bg-[#22c55e]' : 'bg-[#1f2a44]'
+            }`}
           >
-            {aiCandidateStatus === 'loading' ? (
+            {aiCandidateStatus === 'loading' || fairnessVerificationPending || isSettingReady ? (
               <LoaderCircle className="h-5 w-5 animate-spin" />
+            ) : onlineRoom ? (
+              <CheckCircle2 className="h-5 w-5" />
             ) : (
               <Shuffle className="h-5 w-5" />
             )}
-            {aiCandidateStatus === 'loading'
-              ? 'AI 후보 정리 중'
-              : `${activeCategory.label} 랜덤 추첨 시작`}
+            {onlineRoom
+              ? onlineReadyButtonLabel
+              : aiCandidateStatus === 'loading'
+                ? 'AI 후보 정리 중'
+                : fairnessVerificationPending
+                  ? '실제 이동시간 확인 중'
+                : '장소 추첨 시작'}
           </button>
         </div>
       </div>
 
       {showDrawer && (
         <RandomDrawer
-          candidateInsights={drawPool}
-          categoryLabel={activeCategory.label}
-          modeLabel={
-            selectionMode === 'neighborhood'
-              ? `${activeMode.shortLabel} · ${activeThrill.label} · ${activeScope.label}`
-              : `${activeMode.shortLabel} · ${activeScope.label}`
-          }
+          key={activeDrawSession.seed ?? 'manual-draw'}
+	          candidateInsights={activeDrawSession.candidateInsights}
+	          categoryLabel={activeCategory.label}
+	          modeLabel={
+	            isFairnessMode
+	              ? `${activeMode.shortLabel} · ${activeThrill.shortLabel}`
+	              : activeMode.shortLabel
+	          }
           selectionMode={selectionMode}
           thrillLevel={effectiveThrillLevel}
           candidateScope={candidateScope}
+          participants={activeDrawSession.participants}
+          drawSeed={activeDrawSession.seed}
+          canChoose={isCurrentDrawController}
+          waitingMessage={
+            onlineRoom && !isCurrentDrawController
+              ? `${activeDrawControllerName}님이 게임을 진행 중이에요. 결과가 정해지면 자동으로 넘어갑니다.`
+              : undefined
+          }
           onComplete={handleDrawComplete}
-          onClose={() => setShowDrawer(false)}
+          onClose={closeDrawDrawer}
         />
       )}
 

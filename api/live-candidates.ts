@@ -8,6 +8,7 @@ import {
   pickFirstEnv,
   pickTargetCount,
   readJsonBody,
+  reorderCandidateIdsByFairness,
 } from './_lib/server.js';
 
 export default async function handler(req: any, res: any) {
@@ -78,7 +79,7 @@ export default async function handler(req: any, res: any) {
         ? runtimeAiConfig.model
         : pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini';
 
-    const safeFallbackIds = ensureParticipantLocalCoverageIds(
+    const safeFallbackBaseIds = ensureParticipantLocalCoverageIds(
       buildFallbackCandidateIds(
         insights,
         fallbackCandidateIds,
@@ -99,6 +100,10 @@ export default async function handler(req: any, res: any) {
       selectionMode,
       thrillLevel,
     );
+    const safeFallbackIds =
+      selectionMode === 'balance'
+        ? reorderCandidateIdsByFairness(safeFallbackBaseIds, insights, thrillLevel, participants)
+        : safeFallbackBaseIds;
 
     if (!effectiveOpenAiApiKey && !effectiveUpstageApiKey) {
       json(res, 200, {
@@ -150,7 +155,7 @@ export default async function handler(req: any, res: any) {
       const candidateIds = aiSelection.candidateIds
         .filter((candidateId) => allowedIds.has(candidateId))
         .slice(0, targetCount);
-      const coveredCandidateIds = ensureParticipantLocalCoverageIds(
+      const coveredCandidateBaseIds = ensureParticipantLocalCoverageIds(
         candidateIds.length ? candidateIds : safeFallbackIds,
         insights,
         participants,
@@ -158,6 +163,15 @@ export default async function handler(req: any, res: any) {
         selectionMode,
         thrillLevel,
       );
+      const coveredCandidateIds =
+        selectionMode === 'balance'
+          ? reorderCandidateIdsByFairness(
+              coveredCandidateBaseIds,
+              insights,
+              thrillLevel,
+              participants,
+            )
+          : coveredCandidateBaseIds;
 
       json(res, 200, {
         candidateIds: coveredCandidateIds.length ? coveredCandidateIds : safeFallbackIds,

@@ -5,6 +5,11 @@ interface OdsayLane {
   busNo?: string;
 }
 
+interface OdsayStationPoint {
+  x?: string | number;
+  y?: string | number;
+}
+
 interface OdsaySubPath {
   trafficType?: number;
   distance?: number;
@@ -13,6 +18,9 @@ interface OdsaySubPath {
   lane?: OdsayLane[];
   startName?: string;
   endName?: string;
+  passStopList?: {
+    stations?: OdsayStationPoint[];
+  };
 }
 
 interface OdsayPathInfo {
@@ -37,10 +45,16 @@ interface OdsayResponse {
   result?: {
     path?: OdsayPath[];
   };
-  error?: Array<{
-    code?: string | number;
-    message?: string;
-  }>;
+  error?:
+    | {
+        code?: string | number;
+        message?: string;
+      }
+    | Array<{
+        code?: string | number;
+        message?: string;
+      }>;
+  message?: string;
 }
 
 const transitCache = new Map<string, TravelInfo>();
@@ -100,6 +114,32 @@ function buildRouteSummary(steps: TravelRouteStep[]) {
     .join(' → ');
 }
 
+function parseRoutePoint(station: OdsayStationPoint) {
+  const lng = Number(station.x);
+  const lat = Number(station.y);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  return { lat, lng };
+}
+
+function isSamePoint(left: { lat: number; lng: number }, right: { lat: number; lng: number }) {
+  return Math.abs(left.lat - right.lat) < 0.00001 && Math.abs(left.lng - right.lng) < 0.00001;
+}
+
+function buildRoutePath(path: OdsayPath, participant: Participant, candidate: Candidate) {
+  const stationPoints =
+    path.subPath
+      ?.flatMap((step) => step.passStopList?.stations ?? [])
+      .map(parseRoutePoint)
+      .filter((point): point is { lat: number; lng: number } => Boolean(point)) ?? [];
+  const routePath = [participant.coordinates, ...stationPoints, candidate.coordinates];
+
+  return routePath.filter((point, index) => index === 0 || !isSamePoint(point, routePath[index - 1]));
+}
+
 function getBestPath(paths: OdsayPath[]) {
   return [...paths].sort((left, right) => {
     const leftInfo = left.info ?? {};
@@ -118,11 +158,24 @@ function getBestPath(paths: OdsayPath[]) {
 }
 
 function getOdsayErrorMessage(payload: OdsayResponse) {
-  const firstError = Array.isArray(payload.error) ? payload.error[0] : null;
+  const firstError = Array.isArray(payload.error) ? payload.error[0] : payload.error;
   const code = firstError?.code ? ` (${firstError.code})` : '';
+
   return firstError?.message
     ? `ODsay 대중교통 경로를 찾지 못했습니다${code}. ${firstError.message}`
+    : payload.message
+      ? `ODsay 대중교통 경로를 찾지 못했습니다. ${payload.message}`
     : 'ODsay 대중교통 경로를 찾지 못했습니다.';
+}
+
+function parseOdsayPayload(rawBody: string): OdsayResponse {
+  try {
+    return JSON.parse(rawBody) as OdsayResponse;
+  } catch {
+    return {
+      message: rawBody.trim().slice(0, 160),
+    };
+  }
 }
 
 export async function fetchOdsayTransitTravelInfo(
@@ -147,7 +200,8 @@ export async function fetchOdsayTransitTravelInfo(
       Accept: 'application/json',
     },
   });
-  const payload = (await response.json()) as OdsayResponse;
+  const rawBody = await response.text();
+  const payload = parseOdsayPayload(rawBody);
 
   if (!response.ok) {
     const fallbackMessage =
@@ -157,7 +211,7 @@ export async function fetchOdsayTransitTravelInfo(
     throw new Error(fallbackMessage);
   }
 
-  if (payload.error?.length) {
+  if (payload.error) {
     throw new Error(getOdsayErrorMessage(payload));
   }
 
@@ -173,6 +227,7 @@ export async function fetchOdsayTransitTravelInfo(
   const rideCount = (info.busTransitCount ?? 0) + (info.subwayTransitCount ?? 0);
   const transferCount = Math.max(0, rideCount - 1);
   const totalDistance = info.totalDistance ?? (info.trafficDistance ?? 0) + (info.totalWalk ?? 0);
+  const routePath = buildRoutePath(path, participant, candidate);
   const travelInfo: TravelInfo = {
     participantId: participant.id,
     participantName: participant.name,
@@ -185,6 +240,7 @@ export async function fetchOdsayTransitTravelInfo(
     walkDistance: Math.round(info.totalWalk ?? 0),
     routeSummary: buildRouteSummary(routeSteps),
     routeSteps,
+    routePath,
     firstStartStation: info.firstStartStation,
     lastEndStation: info.lastEndStation,
   };

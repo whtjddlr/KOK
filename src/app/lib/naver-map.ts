@@ -266,10 +266,7 @@ export function loadNaverMapSdk() {
 
 export async function searchAddress(query: string) {
   const maps = await loadNaverMapSdk();
-
-  if (!window.naver?.maps?.Service?.geocode) {
-    throw new Error('주소 검색 모듈을 아직 사용할 수 없어요. geocoder 설정을 확인해 주세요.');
-  }
+  const canGeocode = Boolean(window.naver?.maps?.Service?.geocode);
 
   const trimmedQuery = query.trim();
 
@@ -277,7 +274,7 @@ export async function searchAddress(query: string) {
     return [] as AddressSearchResult[];
   }
 
-  if (looksLikeAddress(trimmedQuery)) {
+  if (canGeocode && looksLikeAddress(trimmedQuery)) {
     const addressFirstResults = await geocodeQuery(maps, trimmedQuery);
 
     if (addressFirstResults.length) {
@@ -289,6 +286,10 @@ export async function searchAddress(query: string) {
 
   if (placeResults.length) {
     return placeResults;
+  }
+
+  if (!canGeocode) {
+    throw new Error('주소 검색 모듈을 아직 사용할 수 없어요. 현재 위치 또는 장소명으로 다시 시도해 주세요.');
   }
 
   const geocodeResults = await geocodeQuery(maps, trimmedQuery);
@@ -430,7 +431,7 @@ export async function reverseGeocodeCoordinates(lat: number, lng: number) {
   const maps = await loadNaverMapSdk();
 
   if (!window.naver?.maps?.Service?.reverseGeocode) {
-    throw new Error('좌표를 주소로 바꾸는 기능을 아직 사용할 수 없어요.');
+    throw new Error('선택한 위치의 주소를 아직 확인할 수 없어요.');
   }
 
   return new Promise<ReverseGeocodeResult>((resolve, reject) => {
@@ -479,7 +480,7 @@ export async function reverseGeocodeCoordinates(lat: number, lng: number) {
         resolve({
           roadAddress,
           jibunAddress,
-          title: roadAddress || jibunAddress || `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+          title: roadAddress || jibunAddress || '선택한 위치',
         });
       },
     );

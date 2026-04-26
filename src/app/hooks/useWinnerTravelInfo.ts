@@ -27,6 +27,61 @@ function getWinnerCacheKey(participants: Participant[], winner: Candidate) {
   return `${winner.id}:${participantIds}`;
 }
 
+function getReasonMessage(reason: unknown) {
+  if (reason instanceof Error && reason.message) {
+    return reason.message.replace(/ODsay\s*/g, '');
+  }
+
+  if (
+    reason &&
+    typeof reason === 'object' &&
+    'message' in reason &&
+    typeof (reason as { message?: unknown }).message === 'string'
+  ) {
+    return (reason as { message: string }).message.replace(/ODsay\s*/g, '');
+  }
+
+  return null;
+}
+
+function getFirstRouteError(results: PromiseSettledResult<TravelInfo>[]) {
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      const message = getReasonMessage(result.reason);
+
+      if (message) {
+        return message;
+      }
+    }
+  }
+
+  return null;
+}
+
+function getTransitFallbackMessage(message: string | null, partial: boolean) {
+  const hasOdsayNoRoute =
+    message?.includes('ODsay 대중교통 경로를 찾지 못했습니다') ||
+    message?.includes('대중교통 경로를 찾지 못했습니다') ||
+    message?.includes('ODsay 대중교통 경로 응답에 추천 경로가 없습니다') ||
+    message?.includes('대중교통 경로 응답에 추천 경로가 없습니다');
+
+  if (hasOdsayNoRoute) {
+    return partial
+      ? '일부 대중교통 경로는 실시간 응답이 없어 예상값으로 보정했습니다.'
+      : '대중교통 실시간 경로를 못 받아서 예상 이동시간으로 보정했습니다.';
+  }
+
+  if (message) {
+    return partial
+      ? `일부 대중교통 경로는 예상값으로 보정했습니다. ${message}`
+      : message;
+  }
+
+  return partial
+    ? '일부 대중교통 경로는 응답이 없어 예상값으로 보정했습니다.'
+    : '대중교통 경로를 가져오지 못해 예상값으로 안내 중입니다.';
+}
+
 export function useWinnerTravelInfo(
   participants: Participant[],
   winner: Candidate,
@@ -92,11 +147,12 @@ export function useWinnerTravelInfo(
           return transitTravelInfo[index];
         });
         const liveCount = merged.filter((item) => item.source === 'transit').length;
+        const firstRouteError = getFirstRouteError(results);
 
         if (!liveCount) {
           setLiveTransitTravelInfo(transitTravelInfo);
           setTransitStatus('error');
-          setTransitError('ODsay 대중교통 경로를 가져오지 못해 예상값으로 안내 중입니다.');
+          setTransitError(getTransitFallbackMessage(firstRouteError, false));
           return;
         }
 
@@ -106,17 +162,19 @@ export function useWinnerTravelInfo(
         setTransitError(
           liveCount === merged.length
             ? null
-            : '일부 대중교통 경로는 응답이 없어 예상값으로 보정했습니다.',
+            : getTransitFallbackMessage(firstRouteError, true),
         );
       })
-      .catch(() => {
+      .catch((error) => {
         if (!active) {
           return;
         }
 
         setLiveTransitTravelInfo(transitTravelInfo);
         setTransitStatus('error');
-        setTransitError('ODsay 대중교통 경로를 가져오지 못해 예상값으로 안내 중입니다.');
+        setTransitError(
+          getReasonMessage(error) ?? '대중교통 경로를 가져오지 못해 예상값으로 안내 중입니다.',
+        );
       });
 
     return () => {
@@ -158,11 +216,12 @@ export function useWinnerTravelInfo(
         });
 
         const liveCount = merged.filter((item) => item.source === 'directions').length;
+        const firstRouteError = getFirstRouteError(results);
 
         if (!liveCount) {
           setTravelInfo(fallbackCarTravelInfo);
           setStatus('error');
-          setError('자동차 경로를 가져오지 못해 현재는 예상값으로 안내 중입니다.');
+          setError(firstRouteError ?? '자동차 경로를 가져오지 못해 현재는 예상값으로 안내 중입니다.');
           return;
         }
 
@@ -172,17 +231,21 @@ export function useWinnerTravelInfo(
         setError(
           liveCount === merged.length
             ? null
-            : '일부 자동차 경로는 응답이 없어 예상값으로 보정했습니다.',
+            : firstRouteError
+              ? `일부 자동차 경로는 예상값으로 보정했습니다. ${firstRouteError}`
+              : '일부 자동차 경로는 응답이 없어 예상값으로 보정했습니다.',
         );
       })
-      .catch(() => {
+      .catch((error) => {
         if (!active) {
           return;
         }
 
         setTravelInfo(fallbackCarTravelInfo);
         setStatus('error');
-        setError('자동차 경로를 가져오지 못해 현재는 예상값으로 안내 중입니다.');
+        setError(
+          getReasonMessage(error) ?? '자동차 경로를 가져오지 못해 현재는 예상값으로 안내 중입니다.',
+        );
       });
 
     return () => {

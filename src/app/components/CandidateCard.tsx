@@ -1,6 +1,6 @@
-import { Clock3, MapPin, Minus } from 'lucide-react';
+import { MapPin, Minus } from 'lucide-react';
 import { NearbyPlacesPanel } from './NearbyPlacesPanel';
-import { inferMetroAreaLabel } from '../lib/meeting';
+import { getMinorityBenefitProfile, inferMetroAreaLabel } from '../lib/meeting';
 import { CandidateInsight, NearbyPlaceCategory, NearbyPlaceSection } from '../types';
 
 interface CandidateCardProps {
@@ -62,9 +62,10 @@ export function CandidateCard({
   nearbyMessage = null,
   nearbyError = null,
 }: CandidateCardProps) {
-  const { candidate, averageDuration, allReachable } = insight;
+  const { candidate } = insight;
   const metroAreaLabel = inferMetroAreaLabel(candidate);
   const candidateGroup = getCandidateGroup(candidate.id);
+  const minorityBenefitProfile = getMinorityBenefitProfile(insight);
 
   return (
     <div
@@ -93,19 +94,15 @@ export function CandidateCard({
                 {candidateGroup.label}
               </span>
             )}
-            {allReachable && (
-              <span className="hidden shrink-0 rounded-full bg-[#e5fbf8] px-2.5 py-1 text-[11px] text-[#00504c] sm:inline-flex">
-                가능
+            {minorityBenefitProfile && (
+              <span className="shrink-0 rounded-full bg-[#eef4ff] px-2.5 py-1 text-[11px] text-[#2d5aa7]">
+                효율 후보
               </span>
             )}
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <div className="hidden items-center gap-1 rounded-full bg-[#f5f3f5] px-3 py-1.5 text-xs text-[#76777e] sm:inline-flex">
-            <Clock3 className="h-3.5 w-3.5" />
-            {averageDuration}분
-          </div>
           <button
             type="button"
             onClick={(event) => {

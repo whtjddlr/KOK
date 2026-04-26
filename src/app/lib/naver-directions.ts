@@ -10,6 +10,7 @@ interface DirectionsSummary {
 
 interface DirectionsRoute {
   summary?: DirectionsSummary;
+  path?: Array<[number, number]>;
   guide?: Array<{
     instructions?: string;
     distance?: number;
@@ -70,6 +71,23 @@ function buildRouteSummary(routeSteps: TravelRouteStep[]) {
     .join(' → ');
 
   return summary || '네이버 실시간 자차 경로';
+}
+
+function isSamePoint(left: { lat: number; lng: number }, right: { lat: number; lng: number }) {
+  return Math.abs(left.lat - right.lat) < 0.00001 && Math.abs(left.lng - right.lng) < 0.00001;
+}
+
+function buildRoutePath(route: DirectionsRoute, participant: Participant, candidate: Candidate) {
+  const path =
+    route.path
+      ?.map(([lng, lat]) => ({
+        lat: Number(lat),
+        lng: Number(lng),
+      }))
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng)) ?? [];
+  const routePath = [participant.coordinates, ...path, candidate.coordinates];
+
+  return routePath.filter((point, index) => index === 0 || !isSamePoint(point, routePath[index - 1]));
 }
 
 async function getErrorMessage(response: Response) {
@@ -135,6 +153,7 @@ export async function fetchDirectionsTravelInfo(
     fuelPrice = 0,
   } = route.summary;
   const routeSteps = buildRouteSteps(route);
+  const routePath = buildRoutePath(route, participant, candidate);
 
   const travelInfo: TravelInfo = {
     participantId: participant.id,
@@ -149,6 +168,7 @@ export async function fetchDirectionsTravelInfo(
     fuelPrice,
     routeSummary: buildRouteSummary(routeSteps),
     routeSteps,
+    routePath,
   };
 
   directionsCache.set(cacheKey, travelInfo);

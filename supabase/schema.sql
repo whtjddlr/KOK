@@ -17,7 +17,9 @@ alter table public.profiles
 add column if not exists home_location text,
 add column if not exists home_latitude double precision,
 add column if not exists home_longitude double precision,
-add column if not exists home_location_source text;
+add column if not exists home_location_source text,
+add column if not exists gender text not null default 'unspecified',
+add column if not exists avatar_url text;
 
 alter table public.profiles enable row level security;
 
@@ -60,7 +62,8 @@ create table if not exists public.saved_friends (
 );
 
 alter table public.saved_friends
-add column if not exists travel_mode text not null default 'transit';
+add column if not exists travel_mode text not null default 'transit',
+add column if not exists gender text not null default 'unspecified';
 
 create index if not exists saved_friends_user_id_idx on public.saved_friends (user_id);
 
@@ -96,6 +99,7 @@ create table if not exists public.meeting_rooms (
   code text not null unique,
   owner_id uuid references auth.users(id) on delete set null,
   draw_controller_id text,
+  draw_ready_ids jsonb not null default '[]'::jsonb,
   redraw_votes jsonb not null default '[]'::jsonb,
   redraw_requested_at timestamptz,
   selected_category text not null default 'dining',
@@ -109,8 +113,11 @@ create index if not exists meeting_rooms_code_idx on public.meeting_rooms (code)
 
 alter table public.meeting_rooms
 add column if not exists draw_controller_id text,
+add column if not exists draw_ready_ids jsonb not null default '[]'::jsonb,
 add column if not exists redraw_votes jsonb not null default '[]'::jsonb,
 add column if not exists redraw_requested_at timestamptz;
+
+alter table public.meeting_rooms replica identity full;
 
 alter table public.meeting_rooms enable row level security;
 
@@ -133,6 +140,12 @@ for update
 using (true)
 with check (true);
 
+drop policy if exists "meeting_rooms_delete_own" on public.meeting_rooms;
+create policy "meeting_rooms_delete_own"
+on public.meeting_rooms
+for delete
+using (auth.uid() = owner_id);
+
 create table if not exists public.meeting_room_participants (
   id text primary key,
   room_id uuid not null references public.meeting_rooms(id) on delete cascade,
@@ -149,7 +162,9 @@ create table if not exists public.meeting_room_participants (
 );
 
 alter table public.meeting_room_participants
-add column if not exists travel_mode text not null default 'transit';
+add column if not exists travel_mode text not null default 'transit',
+add column if not exists gender text not null default 'unspecified',
+add column if not exists avatar_url text;
 
 create index if not exists meeting_room_participants_room_id_idx
 on public.meeting_room_participants (room_id, created_at);
@@ -198,3 +213,80 @@ begin
 exception
   when duplicate_object then null;
 end $$;
+
+create or replace function public.request_room_redraw_vote(
+  target_room_id uuid,
+  voter_id text
+)
+returns public.meeting_rooms
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  updated_room public.meeting_rooms;
+begin
+  update public.meeting_rooms
+  set
+    redraw_votes = (
+      select coalesce(jsonb_agg(distinct vote), '[]'::jsonb)
+      from (
+        select jsonb_array_elements_text(coalesce(public.meeting_rooms.redraw_votes, '[]'::jsonb)) as vote
+        union
+        select voter_id as vote
+      ) votes
+      where vote is not null and length(trim(vote)) > 0
+    ),
+    redraw_requested_at = coalesce(public.meeting_rooms.redraw_requested_at, now()),
+    updated_at = now()
+  where id = target_room_id
+  returning * into updated_room;
+
+  return updated_room;
+end;
+$$;
+
+grant execute on function public.request_room_redraw_vote(uuid, text) to anon, authenticated;
+
+create or replace function public.set_room_draw_ready(
+  target_room_id uuid,
+  actor_id text,
+  is_ready boolean
+)
+returns public.meeting_rooms
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  updated_room public.meeting_rooms;
+begin
+  update public.meeting_rooms
+  set
+    draw_ready_ids = case
+      when is_ready then (
+        select coalesce(jsonb_agg(distinct ready_id), '[]'::jsonb)
+        from (
+          select jsonb_array_elements_text(coalesce(public.meeting_rooms.draw_ready_ids, '[]'::jsonb)) as ready_id
+          union
+          select actor_id as ready_id
+        ) ready_ids
+        where ready_id is not null and length(trim(ready_id)) > 0
+      )
+      else (
+        select coalesce(jsonb_agg(ready_id), '[]'::jsonb)
+        from (
+          select distinct jsonb_array_elements_text(coalesce(public.meeting_rooms.draw_ready_ids, '[]'::jsonb)) as ready_id
+        ) ready_ids
+        where ready_id <> actor_id
+      )
+    end,
+    updated_at = now()
+  where id = target_room_id
+  returning * into updated_room;
+
+  return updated_room;
+end;
+$$;
+
+grant execute on function public.set_room_draw_ready(uuid, text, boolean) to anon, authenticated;

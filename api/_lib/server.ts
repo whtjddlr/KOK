@@ -49,6 +49,255 @@ function getCandidateScopeBonus(candidateScope: string) {
   return 0;
 }
 
+const FAIRNESS_SPREAD_LIMIT_BY_LEVEL: Record<number, number> = {
+  1: 10,
+  2: 15,
+  3: 20,
+  4: 25,
+  5: 35,
+};
+
+const FAIRNESS_LEVEL_DISTANCE_SCALE: Record<number, number> = {
+  1: 0.55,
+  2: 0.72,
+  3: 0.88,
+  4: 1,
+  5: 1.15,
+};
+const FAIRNESS_DYNAMIC_CAP_BY_LEVEL: Record<number, number> = {
+  1: 42,
+  2: 50,
+  3: 58,
+  4: 66,
+  5: 76,
+};
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180;
+}
+
+function getParticipantCoordinates(participant: any) {
+  const lat = Number(participant?.coordinates?.lat);
+  const lng = Number(participant?.coordinates?.lng);
+
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
+function getDistanceKm(left: { lat: number; lng: number }, right: { lat: number; lng: number }) {
+  const earthRadiusKm = 6371;
+  const latDiff = toRadians(right.lat - left.lat);
+  const lngDiff = toRadians(right.lng - left.lng);
+  const startLat = toRadians(left.lat);
+  const endLat = toRadians(right.lat);
+  const haversine =
+    Math.sin(latDiff / 2) * Math.sin(latDiff / 2) +
+    Math.cos(startLat) *
+      Math.cos(endLat) *
+      Math.sin(lngDiff / 2) *
+      Math.sin(lngDiff / 2);
+
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function getAdaptiveFairnessSpreadBonus(participants: any[] = []) {
+  const coordinates = participants
+    .map(getParticipantCoordinates)
+    .filter((coordinate): coordinate is { lat: number; lng: number } => Boolean(coordinate));
+
+  if (coordinates.length < 2) {
+    return 0;
+  }
+
+  const center = {
+    lat: coordinates.reduce((sum, coordinate) => sum + coordinate.lat, 0) / coordinates.length,
+    lng: coordinates.reduce((sum, coordinate) => sum + coordinate.lng, 0) / coordinates.length,
+  };
+  const pairDistanceKm = Math.max(
+    ...coordinates.flatMap((coordinate, firstIndex) =>
+      coordinates.slice(firstIndex + 1).map((otherCoordinate) =>
+        getDistanceKm(coordinate, otherCoordinate),
+      ),
+    ),
+  );
+  const spreadKm = Math.max(...coordinates.map((coordinate) => getDistanceKm(coordinate, center)));
+  const pairBaseKm = coordinates.length >= 3 ? 18 : 16;
+  const pairBonus = Math.max(0, pairDistanceKm - pairBaseKm) * (coordinates.length >= 3 ? 0.42 : 0.32);
+  const spreadBonus = Math.max(0, spreadKm - 8) * (coordinates.length >= 3 ? 0.55 : 0.35);
+  const complexityBonus = Math.max(0, coordinates.length - 2) * 3;
+
+  return Math.min(30, Math.round(pairBonus + spreadBonus + complexityBonus));
+}
+
+function getFairnessSpreadLimit(thrillLevel: number, participants: any[] = []) {
+  const level = Math.max(1, Math.min(5, Math.round(thrillLevel)));
+  const baseLimit = FAIRNESS_SPREAD_LIMIT_BY_LEVEL[level] ?? FAIRNESS_SPREAD_LIMIT_BY_LEVEL[1];
+  const adaptiveBonus = getAdaptiveFairnessSpreadBonus(participants);
+
+  if (!adaptiveBonus) {
+    return baseLimit;
+  }
+
+  return Math.round(
+    Math.min(
+      FAIRNESS_DYNAMIC_CAP_BY_LEVEL[level],
+      baseLimit + adaptiveBonus * FAIRNESS_LEVEL_DISTANCE_SCALE[level],
+    ),
+  );
+}
+
+function getInsightSpreadDuration(insight: any) {
+  return typeof insight?.spreadDuration === 'number'
+    ? insight.spreadDuration
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function getInsightFarthestDuration(insight: any) {
+  return typeof insight?.farthestDuration === 'number'
+    ? insight.farthestDuration
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function getInsightAverageDuration(insight: any) {
+  return typeof insight?.averageDuration === 'number'
+    ? insight.averageDuration
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function getInsightNumber(insight: any, key: string, fallback = 0) {
+  return typeof insight?.[key] === 'number' ? insight[key] : fallback;
+}
+
+function getInsightFairEfficiencyScore(insight: any, thrillLevel: number, participants: any[] = []) {
+  const spread = getInsightSpreadDuration(insight);
+  const average = getInsightAverageDuration(insight);
+  const farthest = getInsightFarthestDuration(insight);
+  const overage = Math.max(0, spread - getFairnessSpreadLimit(thrillLevel, participants));
+  const longTripPenalty =
+    Math.max(0, average - 48) * 0.85 + Math.max(0, farthest - 58) * 0.55;
+  const corridorDriftPenalty = getInsightCorridorDriftPenalty(insight);
+
+  return (
+    spread * 1.6 +
+    average * 0.85 +
+    farthest * 0.62 +
+    getInsightNumber(insight, 'centerDistance') * 0.8 +
+    getInsightNumber(insight, 'axisDistance') * 1.05 +
+    longTripPenalty +
+    corridorDriftPenalty +
+    overage * 10 +
+    overage * overage * 0.75 +
+    (insight?.allReachable === false ? 24 : 0) +
+    (insight?.categoryMatched === false ? 6 : 0)
+  );
+}
+
+function getInsightCorridorDriftPenalty(insight: any) {
+  const spread = getInsightSpreadDuration(insight);
+  const average = getInsightAverageDuration(insight);
+  const axisDrift = Math.max(0, getInsightNumber(insight, 'axisDistance') - 4.2);
+  const centerDrift = Math.max(0, getInsightNumber(insight, 'centerDistance') - 8);
+  const equalLongTripPenalty = spread <= 10 && average >= 34 ? (average - 33) * 2.2 : 0;
+
+  return axisDrift * 8.5 + centerDrift * 5.4 + equalLongTripPenalty;
+}
+
+function isDetachedFairnessTrap(insight: any) {
+  return (
+    getInsightNumber(insight, 'axisDistance') >= 6 &&
+    getInsightNumber(insight, 'centerDistance') >= 7.5 &&
+    getInsightAverageDuration(insight) >= 34 &&
+    getInsightSpreadDuration(insight) <= 15
+  );
+}
+
+function getFairnessBand(insight: any, thrillLevel: number, participants: any[] = []) {
+  const spread = getInsightSpreadDuration(insight);
+  const limit = getFairnessSpreadLimit(thrillLevel, participants);
+  const softLimit = Math.min(getFairnessSpreadLimit(5, participants), limit + 5);
+  const isDetached = isDetachedFairnessTrap(insight);
+
+  if (spread <= limit && !isDetached) {
+    return 0;
+  }
+
+  if (spread <= softLimit && !isDetached) {
+    return 1;
+  }
+
+  if (spread <= limit) {
+    return 2;
+  }
+
+  if (spread <= softLimit) {
+    return 3;
+  }
+
+  return 4;
+}
+
+function compareInsightsByFairness(
+  left: any,
+  right: any,
+  thrillLevel: number,
+  participants: any[] = [],
+) {
+  const leftSpread = getInsightSpreadDuration(left);
+  const rightSpread = getInsightSpreadDuration(right);
+  const leftBand = getFairnessBand(left, thrillLevel, participants);
+  const rightBand = getFairnessBand(right, thrillLevel, participants);
+
+  if (leftBand !== rightBand) {
+    return leftBand - rightBand;
+  }
+
+  const scoreDiff =
+    getInsightFairEfficiencyScore(left, thrillLevel, participants) -
+    getInsightFairEfficiencyScore(right, thrillLevel, participants);
+
+  if (Math.abs(scoreDiff) > 1) {
+    return scoreDiff;
+  }
+
+  if (leftSpread !== rightSpread) {
+    return leftSpread - rightSpread;
+  }
+
+  const leftFarthest = getInsightFarthestDuration(left);
+  const rightFarthest = getInsightFarthestDuration(right);
+
+  if (leftFarthest !== rightFarthest) {
+    return leftFarthest - rightFarthest;
+  }
+
+  return getInsightAverageDuration(left) - getInsightAverageDuration(right);
+}
+
+export function reorderCandidateIdsByFairness(
+  candidateIds: string[],
+  insights: any[],
+  thrillLevel: number,
+  participants: any[] = [],
+) {
+  const orderIndex = new Map(candidateIds.map((candidateId, index) => [candidateId, index]));
+
+  return candidateIds
+    .map((candidateId) => insights.find((insight) => getInsightCandidateId(insight) === candidateId))
+    .filter(Boolean)
+    .sort((left, right) => {
+      const fairnessDiff = compareInsightsByFairness(left, right, thrillLevel, participants);
+
+      if (fairnessDiff !== 0) {
+        return fairnessDiff;
+      }
+
+      return (
+        (orderIndex.get(getInsightCandidateId(left)) ?? Number.MAX_SAFE_INTEGER) -
+        (orderIndex.get(getInsightCandidateId(right)) ?? Number.MAX_SAFE_INTEGER)
+      );
+    })
+    .map((insight) => getInsightCandidateId(insight));
+}
+
 export function pickTargetCount(
   total: number,
   selectionMode: string,
@@ -60,7 +309,7 @@ export function pickTargetCount(
     return Math.max(1, Math.min(Math.round(requestedTargetCount), total));
   }
 
-  const baseCount = selectionMode === 'neighborhood' ? 7 : 6;
+  const baseCount = selectionMode === 'neighborhood' ? 7 : selectionMode === 'hotplace' ? 8 : 6;
   const thrillBonus = thrillLevel >= 5 ? 3 : thrillLevel >= 4 ? 2 : thrillLevel >= 3 ? 1 : 0;
   const scopeBonus = getCandidateScopeBonus(candidateScope);
   return Math.max(1, Math.min(baseCount + thrillBonus + scopeBonus, total));
@@ -94,10 +343,20 @@ export function buildFallbackCandidateIds(
       return true;
     });
 
-  return orderedIds.slice(
-    0,
-    pickTargetCount(orderedIds.length, selectionMode, thrillLevel, candidateScope, requestedTargetCount),
+  const targetCount = pickTargetCount(
+    orderedIds.length,
+    selectionMode,
+    thrillLevel,
+    candidateScope,
+    requestedTargetCount,
   );
+
+  const orderedForMode =
+    selectionMode === 'balance'
+      ? reorderCandidateIdsByFairness(orderedIds, insights, thrillLevel)
+      : orderedIds;
+
+  return orderedForMode.slice(0, targetCount);
 }
 
 function getInsightCandidateId(insight: any) {
@@ -271,6 +530,10 @@ export function ensureParticipantLocalCoverageIds(
 
   const isLocalHeavyMode = selectionMode === 'neighborhood' && thrillLevel >= 4;
   const isHouseFrontMode = selectionMode === 'neighborhood' && thrillLevel >= 5;
+
+  if (!isLocalHeavyMode) {
+    return nextIds.slice(0, targetLimit);
+  }
 
   if (isHouseFrontMode) {
     const requiredIds: string[] = [];
@@ -488,38 +751,83 @@ function buildSelectionPayload(
 ) {
   const isNearOnePersonMode = selectionMode === 'neighborhood' && thrillLevel >= 4;
   const isHouseFrontMode = selectionMode === 'neighborhood' && thrillLevel >= 5;
+  const isHotplaceMode = selectionMode === 'hotplace';
+  const isBalanceMode = selectionMode === 'balance';
+  const fairnessSpreadLimit = getFairnessSpreadLimit(thrillLevel, participants);
+  const categoryLabels: Record<string, string> = {
+    dining: '식사',
+    cafe: '카페',
+    drink: '술자리',
+    date: '데이트',
+    culture: '문화/산책',
+    activity: '액티비티',
+  };
+  const categoryLabel = categoryLabels[selectedCategory] ?? selectedCategory;
 
   return {
     selectionGoal:
-      'Select meetup area candidates across the Seoul Capital Area (Seoul, Gyeonggi, Incheon) near the middle of the group so everyone can reach them as fairly as possible.',
+      isHotplaceMode
+        ? 'Select attractive hotplace/commercial-area candidates across the Seoul Capital Area. Category fit and venue density are the main criteria.'
+        : isHouseFrontMode
+          ? 'Select explicit participant-local or house-front neighborhood candidates. The mix should be fair by participant bucket, not by travel-time spread.'
+          : 'Select meetup area candidates across the Seoul Capital Area (Seoul, Gyeonggi, Incheon) near the middle of the group so everyone can reach them as fairly as possible.',
     granularityRule:
       '수도권 약속 장소 후보를 고를 때는 시/구 단위가 아니라 실제 사람들이 약속을 잡는 동네/상권 단위로만 반환해라. 예: 수원 -> 수원역, 행궁동, 인계동. 예: 인천 -> 부평 문화의거리, 구월 로데오, 송도 센트럴파크. 예: 부천 -> 부천역, 상동, 중동. 너무 넓은 지역명(예: 부천, 수원, 인천, 성남)만 단독으로 반환하지 마라. 모든 후보는 네이버 지역 검색으로 바로 검색 가능한 이름이어야 한다.',
     rangeRule:
       '참여자 위치가 서로 가까우면 검색 범위를 넓히지 말고, 가까운 생활권 안의 구체적인 동네/상권 후보만 고른다. 후보가 부족하면 억지로 먼 유명 상권을 섞지 말고 제공된 가까운 후보 안에서만 선택한다.',
     fairnessRule:
-      '공정 모드에서는 centerDistance, axisDistance, spreadDuration, farthestDuration이 낮은 중간 후보를 최우선으로 고르되, 전체 후보 목록에는 각 참여자 근처 생활권 대표 후보도 비교용으로 일부 포함해라. 즉 중간 후보 코어 + 사람별 로컬 앵커가 함께 있어야 하며, 한 사람 근처 후보만 몰아주면 안 된다.',
+      isBalanceMode
+        ? `Lv${thrillLevel} 공정도는 참여자별 이동시간 편차(spreadDuration) ${fairnessSpreadLimit}분 이하가 기준이다. 이 기준 안의 후보를 우선하되, 모든 참여자가 똑같이 오래 이동해서 편차만 작아진 후보는 공평해 보이는 함정으로 낮게 평가해라. 중간에서 만나 모드에서는 spreadDuration뿐 아니라 averageDuration, farthestDuration, centerDistance, axisDistance를 함께 보고 실제 이동 부담이 낮은 후보를 우선해라. 공정 모드에서는 서울/경기/인천 지역 안배보다 이동 편차와 효율이 먼저이며, 지역 대표 후보를 억지로 넣어 편차나 총 이동 부담을 키우지 마라.`
+        : isHotplaceMode
+          ? '핫플에서 만나 모드에는 Lv 공정도를 적용하지 않는다. selectedCategory와 가장 어울리는 상권/동네 매력, 코스 밀도, 분위기를 우선하고 이동시간 편차는 탈락 기준으로 쓰지 마라. 다만 한 사람 집앞 후보나 단순 로컬 후보는 핫플이 아니므로 피하고, averageDuration/farthestDuration이 지나치게 비현실적인 후보만 뒤로 둬라.'
+          : '집앞 모드에는 Lv 공정도를 적용하지 않는다. 시간 편차보다 참여자별 로컬 후보 비율의 공정성이 중요하다. 한 참여자의 집앞 후보만 몰아주지 말고 각 참여자에게 적어도 하나씩 로컬/집앞 후보가 돌아가도록 고른다.',
+    twoPersonRule:
+      participants.length === 2 && isBalanceMode
+        ? '2명 모임에서는 후보가 애매하게 퍼지기 쉬우니 두 출발지를 잇는 이동축 근처, 그중에서도 한쪽 끝이 아니라 가운데 35~65% 구간에 가까운 후보를 우선해라. 편차가 낮아도 둘 다 오래 이동하거나 이동축에서 크게 벗어난 후보는 공평해 보이는 함정으로 보고 낮게 평가해라. 축에 가까운 후보가 편차 기준을 1~5분 정도 넘더라도 averageDuration/farthestDuration이 낮으면 그쪽을 더 현실적인 중간 후보로 봐라.'
+        : isBalanceMode
+          ? '3명 이상 모임에서는 전체 중심과 참여자별 편차를 함께 본다.'
+          : '비중간 모드에서는 2명이어도 이동축 중앙을 강제하지 말고, 모드의 후보 성격과 참여자별 후보 비율을 먼저 본다.',
+    categoryRule:
+      isHotplaceMode
+        ? `${categoryLabel} 카테고리에 잘 맞는 상권을 우선해라. 단순 프랜차이즈가 있는 곳이 아니라, 그 동네에서 실제로 ${categoryLabel} 코스를 짤 만한 식당/카페/바/전시/액티비티 밀도가 있는 후보를 고른다. 유명한 곳만 반복하지 말고 덜 유명해도 카테고리와 분위기가 강한 상권을 살려라.`
+        : isBalanceMode
+          ? `${categoryLabel} 카테고리에 잘 맞는 상권을 고르되, 카테고리 적합성은 공정성 다음 기준이다. 먼저 fairnessSpreadLimit 안에 있거나 spreadDuration이 작은 후보를 고르고, 그 안에서 selectedCategory와 tags/categories/bestFor가 잘 맞는 후보를 우선해라. 유명한 상권 하나로 몰지 말고, 덜 유명한 동네라도 ${categoryLabel}에 맞는 식당/카페/바/전시/액티비티 포인트가 있으면 공정한 후보로 살려라. 카테고리 때문에 한 참여자 근처로 과하게 쏠리는 선택은 피하라.`
+          : `${categoryLabel} 카테고리에 맞는 로컬 후보를 참여자별로 고르게 배분해라. 집앞 후보라도 카테고리와 전혀 맞지 않으면 뒤로 두고, 각 참여자 주변에서 실제 코스를 만들 수 있는 후보를 우선해라.`,
     localModeRule:
-      isHouseFrontMode
-        ? 'House-front mode is intentionally extreme: keep some fair midpoint candidates, but every participant must have at least one explicit local wildcard candidate in the final ids. Prefer exactly one thrill-hyper id per participant first, then use thrill-local or participant-near only as fallback. Do not give two house-front picks to one participant while another participant has none.'
+      isHotplaceMode
+        ? 'Hotplace mode: prefer lively, category-fitting commercial areas even if they are not the mathematically perfect midpoint. Do not include house-front, thrill-hyper, or participant-near wildcard picks unless the candidate is also a recognizable commercial area.'
+        : isHouseFrontMode
+        ? 'House-front mode is intentionally local: every participant must have at least one explicit local wildcard candidate in the final ids when possible. Prefer exactly one thrill-hyper id per participant first, then use thrill-local or participant-near as fallback. Do not give two house-front picks to one participant while another participant has none.'
         : isNearOnePersonMode
-          ? 'Near-one-person mode: keep the fair midpoint core, but include participant-near or thrill-local commercial areas across participants as evenly as possible. Do not use thrill-hyper unless it is level 5.'
-        : thrillLevel >= 3
+          ? 'Near-one-person mode: include participant-near or thrill-local commercial areas across participants as evenly as possible. Do not use thrill-hyper unless it is level 5.'
+        : isBalanceMode && thrillLevel >= 3
           ? 'Do not replace the balanced core with only local picks. Add local wildcard areas on top of the fair midpoint core.'
-        : 'Return only balanced midpoint recommendations.',
+        : isBalanceMode
+          ? 'Return only balanced midpoint recommendations.'
+          : 'Return mode-specific candidates without applying travel-time fairness levels.',
     candidateMixRule:
-      isHouseFrontMode
-        ? 'Classify the final set mentally as fair midpoint / participant-near neighborhood / house-front wildcard. The house-front wildcard bucket must be participant-fair: one local extreme anchor for each participant before adding extra picks.'
+      isHotplaceMode
+        ? 'Classify the final set mentally as hotplace appeal / category fit / route practicality. Hotplace appeal may beat perfect fairness.'
+        : isHouseFrontMode
+        ? 'Classify the final set mentally by participant-local buckets. The house-front wildcard bucket must be participant-fair: one local extreme anchor for each participant before adding extra picks.'
         : isNearOnePersonMode
           ? 'Classify the final set mentally as fair midpoint / participant-near neighborhood. Include a few one-person-near picks, but keep exact house-front picks out.'
         : 'Keep candidate selection centered on fair and realistic meetup areas.',
     selectedCategory,
+    categoryLabel,
     selectionMode,
     thrillLevel,
+    fairnessSpreadLimit: isBalanceMode ? fairnessSpreadLimit : null,
     candidateScope,
-    thrillHint: getThrillHint(thrillLevel),
+    thrillHint: isBalanceMode
+      ? getThrillHint(thrillLevel)
+      : isHotplaceMode
+        ? 'Do not use fairness level in hotplace mode. Choose distinct commercial-area candidates by category fit and appeal.'
+        : 'Do not use fairness level in house-front mode. Keep participant-local candidate counts balanced across members.',
     targetCount,
     participants: participants.map((participant) => ({
       name: participant?.name,
+      gender: participant?.gender,
       location: participant?.location,
       maxTravelTime: participant?.maxTravelTime,
     })),
@@ -533,12 +841,15 @@ function buildSelectionPayload(
       routeHint: insight?.candidate?.routeHint,
       tags: insight?.candidate?.tags,
       categories: insight?.candidate?.categories,
+      categoryMatched: Boolean(insight?.categoryMatched),
       averageDuration: insight?.averageDuration,
       maxDuration: insight?.maxDuration,
       spreadDuration: insight?.spreadDuration,
       allReachable: insight?.allReachable,
       centerDistance: insight?.centerDistance,
       axisDistance: insight?.axisDistance,
+      corridorDriftPenalty: Math.round(getInsightCorridorDriftPenalty(insight) * 10) / 10,
+      fairnessTrap: isDetachedFairnessTrap(insight),
       nearestParticipantName: insight?.nearestParticipantName,
       nearestDuration: insight?.nearestDuration,
       farthestParticipantName: insight?.farthestParticipantName,
@@ -622,7 +933,7 @@ export async function fetchOpenAiCandidateSelection({
         {
           role: 'system',
           content:
-            'You are selecting meeting area candidates for a Seoul Capital Area meetup app covering Seoul, Gyeonggi, and Incheon. Return JSON only. Choose only from the allowed candidate ids. Keep a fair midpoint core for the whole group, avoid over-favoring central Seoul by default, and include a small comparison anchor near each participant when enough candidates are requested. In balance mode, prioritize low centerDistance, low axisDistance, low spreadDuration, and low farthestDuration, but do not let every visible candidate be far from the same participant. In neighborhood thrill level 4, include participant-near or thrill-local candidates around one person. In neighborhood thrill level 5 house-front mode, every participant must get one explicit local extreme anchor: prefer one thrill-hyper id per participant, then use thrill-local or participant-near only as fallback. Do not give multiple house-front picks to one participant while another participant has none. If participants are close to each other, narrow the search to their nearby commercial areas and do not force distant famous hubs just to fill the count. Favor fairness across participants, travel plausibility, regional balance, and category fit. Candidates must be actual neighborhood/commercial-area names, not broad city/district names. Do not select broad names alone such as 부천, 수원, 인천, or 성남 when a more specific 상권/동네 candidate exists. Prefer Naver-searchable names like 수원역, 행궁동, 인계동, 부평 문화의거리, 구월 로데오, 송도 센트럴파크, 부천역, 상동, 중동.',
+            'You are selecting meeting area candidates for a Seoul Capital Area meetup app covering Seoul, Gyeonggi, and Incheon. Return JSON only. Choose only from the allowed candidate ids and follow the selectionMode rules in the user payload. In balance mode only, the primary fairness metric is spreadDuration, the difference between the slowest and fastest participant travel times. Respect fairnessSpreadLimit in balance mode, but do not treat spreadDuration alone as fairness; avoid low-spread candidates where everyone travels far. In hotplace mode, do not apply fairness levels as a hard constraint. Prefer category fit, recognizable commercial-area appeal, venue density, and route practicality. In house-front/neighborhood mode, do not preserve a fair midpoint core by default. Build participant-local buckets evenly so one member does not receive all local picks. Every candidate must be an actual neighborhood/commercial-area name, not a broad city or district name.',
         },
         {
           role: 'user',
@@ -742,7 +1053,7 @@ export async function fetchUpstageCandidateSelection({
         {
           role: 'system',
           content:
-            'Return a JSON object with keys candidate_ids and summary. candidate_ids must contain only allowed ids and match the requested targetCount. This is for the Seoul Capital Area including Seoul, Gyeonggi, and Incheon. Always preserve balanced midpoint recommendations, avoid defaulting to central Seoul only, and include a small comparison anchor near each participant when enough candidates are requested. In balance mode, prioritize low centerDistance, low axisDistance, low spreadDuration, and low farthestDuration. In neighborhood thrill level 4, include participant-near or thrill-local candidates around one person. In neighborhood thrill level 5 house-front mode, every participant must get one explicit local extreme anchor: prefer one thrill-hyper id per participant, then use thrill-local or participant-near only as fallback. Do not give multiple house-front picks to one participant while another participant has none. If participants are close to each other, narrow the search to their nearby commercial areas and do not force distant famous hubs just to fill the count. Candidates must be actual neighborhood/commercial-area names, not broad city/district names. Do not select broad names alone such as 부천, 수원, 인천, or 성남 when a more specific 상권/동네 candidate exists. Prefer Naver-searchable names like 수원역, 행궁동, 인계동, 부평 문화의거리, 구월 로데오, 송도 센트럴파크, 부천역, 상동, 중동.',
+            'Return a JSON object with keys candidate_ids and summary. candidate_ids must contain only allowed ids and match the requested targetCount. Follow the selectionMode rules in the user payload. In balance mode only, respect fairnessSpreadLimit and rank by spreadDuration together with averageDuration, farthestDuration, centerDistance, and axisDistance. Do not treat a low spreadDuration as fair if everyone is sent far away. In hotplace mode, do not apply fairness levels as a hard constraint; category fit, commercial-area appeal, venue density, and route practicality are primary. In house-front/neighborhood mode, do not preserve a fair midpoint core by default; balance the number of local picks across participants. Every candidate must be an actual neighborhood/commercial-area name, not a broad city or district name.',
         },
         {
           role: 'user',

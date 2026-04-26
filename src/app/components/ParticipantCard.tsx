@@ -1,5 +1,7 @@
 import { Car, MapPin, TrainFront, X } from 'lucide-react';
 import { Participant } from '../types';
+import { getParticipantGenderLabel } from '../lib/gender';
+import { getSafeLocationLabel } from '../lib/service-area';
 
 interface ParticipantCardProps {
   participant: Participant;
@@ -23,10 +25,18 @@ export function ParticipantCard({
     <div className="rounded-[1.25rem] border border-[#f0edf0] bg-white px-3 py-3 shadow-[0_8px_22px_rgba(26,26,46,0.05)]">
       <div className="flex items-center gap-3">
         <div
-          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-white shadow-sm"
+          className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full text-white shadow-sm"
           style={{ backgroundColor: color }}
         >
-          <span className="text-sm font-bold">{participant.name.charAt(0)}</span>
+          {participant.avatarUrl ? (
+            <img
+              src={participant.avatarUrl}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span className="text-sm font-bold">{participant.name.charAt(0)}</span>
+          )}
         </div>
 
         <div className="min-w-0 flex-1">
@@ -43,10 +53,15 @@ export function ParticipantCard({
 
           <div className="flex min-w-0 items-center gap-1.5 text-xs text-[#76777e]">
             <MapPin className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{participant.location}</span>
+            <span className="truncate">{getSafeLocationLabel(participant.location)}</span>
             {participant.locationSource === 'current' && (
               <span className="shrink-0 rounded-full bg-[#d9e2ff] px-2 py-0.5 text-[10px] text-[#3b4662]">
                 현재 위치
+              </span>
+            )}
+            {participant.gender && participant.gender !== 'unspecified' && (
+              <span className="shrink-0 rounded-full bg-[#f5f1eb] px-2 py-0.5 text-[10px] text-[#45464d]">
+                {getParticipantGenderLabel(participant.gender)}
               </span>
             )}
           </div>

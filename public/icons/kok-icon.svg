@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="KoK">
+  <rect width="512" height="512" rx="112" fill="#1f2a44"/>
+  <circle cx="256" cy="256" r="168" fill="#ff7468"/>
+  <circle cx="256" cy="256" r="126" fill="#fff6ef"/>
+  <path d="M256 128c-49 0-88 38-88 84 0 63 88 143 88 143s88-80 88-143c0-46-39-84-88-84Zm0 121c-22 0-40-17-40-38s18-38 40-38 40 17 40 38-18 38-40 38Z" fill="#1f2a44"/>
+  <text x="256" y="438" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="76" font-weight="800" fill="#ffffff">KoK</text>
+</svg>

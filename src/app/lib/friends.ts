@@ -1,4 +1,5 @@
 import { Participant, SavedFriend } from '../types';
+import { normalizeParticipantGender } from './gender';
 
 const SAVED_FRIENDS_KEY_PREFIX = 'randommeet.saved-friends.';
 export const DEFAULT_MAX_TRAVEL_TIME = 45;
@@ -29,7 +30,10 @@ function loadSavedFriendsFromStorage(userId: string) {
       return [] as SavedFriend[];
     }
 
-    return parsed as SavedFriend[];
+    return parsed.map((friend) => ({
+      ...(friend as SavedFriend),
+      gender: normalizeParticipantGender((friend as Partial<SavedFriend>).gender),
+    }));
   } catch {
     return [] as SavedFriend[];
   }
@@ -67,6 +71,7 @@ export function buildSavedFriendFromParticipant(participant: Participant): Saved
     coordinates: participant.coordinates,
     maxTravelTime: DEFAULT_MAX_TRAVEL_TIME,
     travelMode: participant.travelMode ?? 'transit',
+    gender: normalizeParticipantGender(participant.gender),
     locationSource: participant.locationSource,
   };
 }
@@ -85,6 +90,7 @@ export function createParticipantFromSavedFriend(friend: SavedFriend): Participa
     coordinates: friend.coordinates,
     maxTravelTime: friend.maxTravelTime || DEFAULT_MAX_TRAVEL_TIME,
     travelMode: friend.travelMode ?? 'transit',
+    gender: normalizeParticipantGender(friend.gender),
     locationSource: friend.locationSource,
     savedFriendId: friend.id,
   };

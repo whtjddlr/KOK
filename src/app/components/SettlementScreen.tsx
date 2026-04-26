@@ -124,12 +124,20 @@ export function SettlementScreen({ winner, participants, onBack }: SettlementScr
           <div className="space-y-3">
             {participants.map((participant, index) => (
               <div key={participant.id} className="flex items-center gap-3">
-                <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm flex-shrink-0"
-                  style={{ backgroundColor: PARTICIPANT_COLORS[index % PARTICIPANT_COLORS.length] }}
-                >
-                  {participant.name.charAt(0)}
-                </div>
+	                <div
+	                  className="w-8 h-8 rounded-full flex items-center justify-center overflow-hidden text-white text-sm flex-shrink-0"
+	                  style={{ backgroundColor: PARTICIPANT_COLORS[index % PARTICIPANT_COLORS.length] }}
+	                >
+	                  {participant.avatarUrl ? (
+	                    <img
+	                      src={participant.avatarUrl}
+	                      alt=""
+	                      className="h-full w-full object-cover"
+	                    />
+	                  ) : (
+	                    participant.name.charAt(0)
+	                  )}
+	                </div>
                 <div className="flex-1 text-sm text-[#1a1a2e]">{participant.name}</div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-[#6b7280]">₩</span>
@@ -186,14 +194,22 @@ export function SettlementScreen({ winner, participants, onBack }: SettlementScr
               return (
                 <div key={item.participant.id} className="bg-[#f9f7f4] rounded-2xl p-4">
                   <div className="flex items-center gap-3 mb-2">
-                    <div
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm"
-                      style={{
-                        backgroundColor: PARTICIPANT_COLORS[index % PARTICIPANT_COLORS.length],
-                      }}
-                    >
-                      {item.participant.name.charAt(0)}
-                    </div>
+	                    <div
+	                      className="w-8 h-8 rounded-full flex items-center justify-center overflow-hidden text-white text-sm"
+	                      style={{
+	                        backgroundColor: PARTICIPANT_COLORS[index % PARTICIPANT_COLORS.length],
+	                      }}
+	                    >
+	                      {item.participant.avatarUrl ? (
+	                        <img
+	                          src={item.participant.avatarUrl}
+	                          alt=""
+	                          className="h-full w-full object-cover"
+	                        />
+	                      ) : (
+	                        item.participant.name.charAt(0)
+	                      )}
+	                    </div>
                     <div className="flex-1">
                       <div className="text-sm text-[#1a1a2e]">{item.participant.name}</div>
                       <div className="text-xs text-[#9ca3af]">

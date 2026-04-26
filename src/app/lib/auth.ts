@@ -1,11 +1,16 @@
 import type { User } from '@supabase/supabase-js';
-import type { Coordinates, LocationSource } from '../types';
+import type { Coordinates, LocationSource, ParticipantGender } from '../types';
+import { normalizeParticipantGender } from './gender';
+import { getSafeLocationLabel } from './service-area';
 import { getSupabaseBrowserClient, isSupabaseConfigured } from './supabase';
 
 export interface AuthUser {
   id: string;
   name: string;
+  avatarUrl?: string | null;
+  loginId: string;
   email: string;
+  gender: ParticipantGender;
   preferences: UserPreferences;
   homeLocation: UserHomeLocation | null;
 }
@@ -27,7 +32,16 @@ interface ProfileRow {
   home_location_source?: string | null;
 }
 
-export type UserPreferenceVibe = 'trendy' | 'cozy' | 'quiet' | 'lively' | 'local';
+export type UserPreferenceVibe =
+  | 'trendy'
+  | 'cozy'
+  | 'quiet'
+  | 'lively'
+  | 'local'
+  | 'clean'
+  | 'romantic'
+  | 'retro'
+  | 'outdoor';
 
 export type UserPreferenceCategory =
   | 'restaurant'
@@ -50,9 +64,14 @@ export interface UserHomeLocation {
 
 export interface ProfileSettingsInput {
   name: string;
+  avatarUrl?: string | null;
+  gender?: ParticipantGender;
   preferences: Partial<UserPreferences>;
   homeLocation?: UserHomeLocation | null;
 }
+
+export const MAX_FAVORITE_CATEGORIES = 3;
+export const MAX_FAVORITE_KEYWORDS = 8;
 
 export const preferenceVibeOptions: Array<{ value: UserPreferenceVibe; label: string }> = [
   { value: 'trendy', label: '힙한 곳' },
@@ -60,6 +79,10 @@ export const preferenceVibeOptions: Array<{ value: UserPreferenceVibe; label: st
   { value: 'quiet', label: '조용한 곳' },
   { value: 'lively', label: '활기찬 곳' },
   { value: 'local', label: '로컬 느낌' },
+  { value: 'clean', label: '깔끔한 곳' },
+  { value: 'romantic', label: '데이트 느낌' },
+  { value: 'retro', label: '레트로' },
+  { value: 'outdoor', label: '야외 느낌' },
 ];
 
 export const preferenceCategoryOptions: Array<{
@@ -78,14 +101,33 @@ export const preferenceKeywordOptions = [
   '고기',
   '브런치',
   '디저트',
+  '파스타',
+  '초밥',
+  '중식',
+  '분식',
+  '해산물',
+  '베이커리',
+  '커피',
   '와인바',
   '칵테일',
+  '이자카야',
+  '포차',
+  '루프탑',
   '전시',
+  '영화',
+  '공방',
+  '쇼핑',
   '산책',
   '방탈출',
   '보드게임',
+  '노래방',
+  '볼링',
+  '사진',
   '뷰 좋은',
+  '야경',
   '가성비',
+  '역 가까운',
+  '주차 편한',
 ] as const;
 
 const USERS_KEY = 'randommeet.auth.users';
@@ -93,6 +135,7 @@ const SESSION_KEY = 'randommeet.auth.session';
 const PROFILE_SETTINGS_KEY_PREFIX = 'randommeet.profile.';
 const PROFILE_BASE_SELECT = 'id, email, name, favorite_categories, vibe, favorite_keywords';
 const PROFILE_HOME_SELECT = 'home_location, home_latitude, home_longitude, home_location_source';
+const SYNTHETIC_EMAIL_DOMAIN = 'drop.local';
 
 let canPersistProfileHomeLocation: boolean | null = null;
 
@@ -131,7 +174,7 @@ function normalizePreferences(input?: Partial<UserPreferences> | null): UserPref
   const favoriteKeywords = Array.isArray(input?.favoriteKeywords)
     ? input.favoriteKeywords
         .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-        .slice(0, 4)
+        .slice(0, MAX_FAVORITE_KEYWORDS)
     : [];
   const vibe =
     typeof input?.vibe === 'string' &&
@@ -141,7 +184,7 @@ function normalizePreferences(input?: Partial<UserPreferences> | null): UserPref
 
   return {
     favoriteCategories: favoriteCategories.length
-      ? favoriteCategories.slice(0, 2)
+      ? favoriteCategories.slice(0, MAX_FAVORITE_CATEGORIES)
       : defaults.favoriteCategories,
     vibe,
     favoriteKeywords: favoriteKeywords.length ? favoriteKeywords : defaults.favoriteKeywords,
@@ -165,13 +208,31 @@ function normalizeHomeLocation(input?: Partial<UserHomeLocation> | null) {
   }
 
   return {
-    location,
+    location: getSafeLocationLabel(location),
     coordinates: {
       lat,
       lng,
     },
     locationSource,
   };
+}
+
+function normalizeAvatarUrl(input?: unknown) {
+  const value = typeof input === 'string' ? input.trim() : '';
+
+  if (!value) {
+    return null as string | null;
+  }
+
+  if (
+    value.startsWith('data:image/') ||
+    value.startsWith('https://') ||
+    value.startsWith('http://')
+  ) {
+    return value;
+  }
+
+  return null as string | null;
 }
 
 function canUseStorage() {
@@ -184,6 +245,70 @@ function normalizeEmail(email: string) {
 
 function isValidEmail(email: string) {
   return /\S+@\S+\.\S+/.test(email);
+}
+
+async function hashStableText(value: string) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(value);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function normalizeAuthIdentifier(identifierInput: string) {
+  const rawIdentifier = identifierInput.trim();
+  const compactIdentifier = rawIdentifier.replace(/\s+/g, '');
+  const lowerIdentifier = compactIdentifier.toLowerCase();
+
+  if (!compactIdentifier) {
+    return { error: '아이디를 입력해 주세요.' };
+  }
+
+  if (rawIdentifier.includes('@')) {
+    const email = normalizeEmail(rawIdentifier);
+
+    if (!isValidEmail(email)) {
+      return { error: '이메일 형식이 올바르지 않아요.' };
+    }
+
+    return {
+      email,
+      loginId: email,
+    };
+  }
+
+  if (compactIdentifier.length < 3 || compactIdentifier.length > 24) {
+    return { error: '아이디는 3자 이상 24자 이하로 입력해 주세요.' };
+  }
+
+  if (!/^[0-9a-zA-Z._\-\u3131-\u318E\uAC00-\uD7A3]+$/.test(compactIdentifier)) {
+    return { error: '아이디는 한글, 영문, 숫자, 점, 밑줄, 하이픈만 쓸 수 있어요.' };
+  }
+
+  const emailLocalPart = /^[0-9a-z._-]+$/.test(lowerIdentifier)
+    ? lowerIdentifier
+    : `u-${(await hashStableText(lowerIdentifier)).slice(0, 40)}`;
+
+  return {
+    email: `${emailLocalPart}@${SYNTHETIC_EMAIL_DOMAIN}`,
+    loginId: compactIdentifier,
+  };
+}
+
+function getLoginIdFromEmail(email?: string | null) {
+  if (!email) {
+    return '';
+  }
+
+  const suffix = `@${SYNTHETIC_EMAIL_DOMAIN}`;
+
+  if (email.endsWith(suffix)) {
+    return email.slice(0, -suffix.length);
+  }
+
+  return email;
 }
 
 function readStoredUsers() {
@@ -206,6 +331,11 @@ function readStoredUsers() {
 
     return parsed.map((user) => ({
       ...(user as StoredAuthUser),
+      loginId:
+        (user as Partial<StoredAuthUser>).loginId ||
+        getLoginIdFromEmail((user as Partial<StoredAuthUser>).email),
+      gender: normalizeParticipantGender((user as Partial<StoredAuthUser>).gender),
+      avatarUrl: normalizeAvatarUrl((user as Partial<StoredAuthUser>).avatarUrl),
       preferences: normalizePreferences((user as StoredAuthUser).preferences),
       homeLocation: normalizeHomeLocation((user as StoredAuthUser).homeLocation),
     }));
@@ -244,6 +374,8 @@ function readStoredProfileSettings(userId: string) {
     return undefined as
       | {
           name?: string;
+          avatarUrl?: string | null;
+          gender?: ParticipantGender;
           preferences?: Partial<UserPreferences>;
           homeLocation?: Partial<UserHomeLocation> | null;
         }
@@ -265,6 +397,8 @@ function readStoredProfileSettings(userId: string) {
 
     return parsed as {
       name?: string;
+      avatarUrl?: string | null;
+      gender?: ParticipantGender;
       preferences?: Partial<UserPreferences>;
       homeLocation?: Partial<UserHomeLocation> | null;
     };
@@ -277,6 +411,8 @@ function persistStoredProfileSettings(
   userId: string,
   input: {
     name: string;
+    avatarUrl?: string | null;
+    gender: ParticipantGender;
     preferences: UserPreferences;
     homeLocation: UserHomeLocation | null;
   },
@@ -310,6 +446,18 @@ function getNameFromMetadata(user: User) {
   );
 }
 
+function getLoginIdFromMetadata(user: User) {
+  const metadata = user.user_metadata ?? {};
+  const metadataLoginId =
+    typeof metadata.loginId === 'string'
+      ? metadata.loginId.trim()
+      : typeof metadata.username === 'string'
+        ? metadata.username.trim()
+        : '';
+
+  return metadataLoginId || getLoginIdFromEmail(user.email);
+}
+
 function getPreferencesFromMetadata(user: User) {
   const metadata = user.user_metadata ?? {};
 
@@ -320,6 +468,17 @@ function getHomeLocationFromMetadata(user: User) {
   const metadata = user.user_metadata ?? {};
 
   return normalizeHomeLocation(metadata.homeLocation as Partial<UserHomeLocation> | undefined);
+}
+
+function getGenderFromMetadata(user: User) {
+  const metadata = user.user_metadata ?? {};
+  return normalizeParticipantGender(metadata.gender);
+}
+
+function getAvatarUrlFromMetadata(user: User) {
+  const metadata = user.user_metadata ?? {};
+
+  return normalizeAvatarUrl(metadata.avatarUrl ?? metadata.avatar_url ?? metadata.picture);
 }
 
 function mapProfileRowToPreferences(profile: ProfileRow | null | undefined) {
@@ -354,6 +513,14 @@ function mapSupabaseUser(user: User, profile?: ProfileRow | null): AuthUser {
   const profileHomeLocation = mapProfileRowToHomeLocation(profile);
   const storedProfile = readStoredProfileSettings(user.id);
   const storedName = typeof storedProfile?.name === 'string' ? storedProfile.name.trim() : '';
+  const storedAvatarUrl =
+    storedProfile && 'avatarUrl' in storedProfile
+      ? normalizeAvatarUrl(storedProfile.avatarUrl)
+      : undefined;
+  const storedGender =
+    storedProfile && 'gender' in storedProfile
+      ? normalizeParticipantGender(storedProfile.gender)
+      : undefined;
   const storedHomeLocation =
     storedProfile && 'homeLocation' in storedProfile
       ? normalizeHomeLocation(storedProfile.homeLocation)
@@ -362,7 +529,10 @@ function mapSupabaseUser(user: User, profile?: ProfileRow | null): AuthUser {
   return {
     id: user.id,
     name: storedName || profile?.name?.trim() || getNameFromMetadata(user),
+    avatarUrl: storedAvatarUrl !== undefined ? storedAvatarUrl : getAvatarUrlFromMetadata(user),
+    loginId: getLoginIdFromMetadata(user),
     email: user.email ?? profile?.email ?? '',
+    gender: storedGender ?? getGenderFromMetadata(user),
     preferences: storedProfile?.preferences
       ? normalizePreferences(storedProfile.preferences)
       : profilePreferences ?? getPreferencesFromMetadata(user),
@@ -491,6 +661,16 @@ async function ensureProfile(user: User) {
   );
 }
 
+async function clearStaleSupabaseSession() {
+  const supabase = getSupabaseBrowserClient();
+
+  try {
+    await supabase?.auth.signOut({ scope: 'local' });
+  } catch {
+    // 만료된 로컬 세션 정리는 실패해도 화면 흐름을 막지 않는다.
+  }
+}
+
 export async function loadSessionUser() {
   if (isSupabaseConfigured()) {
     const supabase = getSupabaseBrowserClient();
@@ -502,6 +682,10 @@ export async function loadSessionUser() {
     const { data, error } = await supabase.auth.getUser();
 
     if (error || !data.user) {
+      if (error) {
+        await clearStaleSupabaseSession();
+      }
+
       return null as AuthUser | null;
     }
 
@@ -528,7 +712,10 @@ export async function loadSessionUser() {
   return {
     id: matchedUser.id,
     name: matchedUser.name,
+    avatarUrl: normalizeAvatarUrl(matchedUser.avatarUrl),
+    loginId: matchedUser.loginId || getLoginIdFromEmail(matchedUser.email),
     email: matchedUser.email,
+    gender: normalizeParticipantGender(matchedUser.gender),
     preferences: normalizePreferences(matchedUser.preferences),
     homeLocation: normalizeHomeLocation(matchedUser.homeLocation),
   };
@@ -584,11 +771,13 @@ export async function updateProfileSettings(
   input: ProfileSettingsInput,
 ) {
   const name = input.name.trim();
+  const avatarUrl = normalizeAvatarUrl(input.avatarUrl);
+  const gender = normalizeParticipantGender(input.gender);
   const preferences = normalizePreferences(input.preferences);
   const homeLocation = normalizeHomeLocation(input.homeLocation);
 
   if (!name) {
-    return { error: '이름을 입력해 주세요.' };
+    return { error: '닉네임을 입력해 주세요.' };
   }
 
   if (isSupabaseConfigured()) {
@@ -607,6 +796,9 @@ export async function updateProfileSettings(
     const { data: updatedAuth, error: updateError } = await supabase.auth.updateUser({
       data: {
         name,
+        loginId: getLoginIdFromMetadata(authData.user),
+        avatarUrl,
+        gender,
         preferences,
         homeLocation,
       },
@@ -619,6 +811,8 @@ export async function updateProfileSettings(
     const authUser = updatedAuth.user ?? authData.user;
     persistStoredProfileSettings(authUser.id, {
       name,
+      avatarUrl,
+      gender,
       preferences,
       homeLocation,
     });
@@ -628,6 +822,8 @@ export async function updateProfileSettings(
     return {
       user: {
         ...mapSupabaseUser(authUser),
+        avatarUrl,
+        gender,
         homeLocation,
       } satisfies AuthUser,
     };
@@ -643,6 +839,8 @@ export async function updateProfileSettings(
   const updatedUser: StoredAuthUser = {
     ...nextUser,
     name,
+    avatarUrl,
+    gender,
     preferences,
     homeLocation,
   };
@@ -653,7 +851,10 @@ export async function updateProfileSettings(
     user: {
       id: updatedUser.id,
       name: updatedUser.name,
+      avatarUrl: normalizeAvatarUrl(updatedUser.avatarUrl),
+      loginId: updatedUser.loginId || getLoginIdFromEmail(updatedUser.email),
       email: updatedUser.email,
+      gender: normalizeParticipantGender(updatedUser.gender),
       preferences: updatedUser.preferences,
       homeLocation,
     } satisfies AuthUser,
@@ -662,26 +863,32 @@ export async function updateProfileSettings(
 
 export async function signUp(input: {
   name: string;
-  email: string;
+  identifier: string;
   password: string;
+  gender?: ParticipantGender;
   preferences?: Partial<UserPreferences>;
+  homeLocation?: UserHomeLocation | null;
 }) {
   const name = input.name.trim();
-  const email = normalizeEmail(input.email);
+  const authIdentifier = await normalizeAuthIdentifier(input.identifier);
   const password = input.password.trim();
+  const gender = normalizeParticipantGender(input.gender);
   const preferences = normalizePreferences(input.preferences);
+  const homeLocation = normalizeHomeLocation(input.homeLocation);
 
   if (!name) {
-    return { error: '이름을 입력해 주세요.' };
+    return { error: '닉네임을 입력해 주세요.' };
   }
 
-  if (!isValidEmail(email)) {
-    return { error: '이메일 형식이 올바르지 않아요.' };
+  if ('error' in authIdentifier) {
+    return { error: authIdentifier.error };
   }
 
   if (password.length < 6) {
     return { error: '비밀번호는 6자 이상으로 입력해 주세요.' };
   }
+
+  const { email, loginId } = authIdentifier;
 
   if (isSupabaseConfigured()) {
     const supabase = getSupabaseBrowserClient();
@@ -696,7 +903,10 @@ export async function signUp(input: {
       options: {
         data: {
           name,
+          loginId,
+          gender,
           preferences,
+          homeLocation,
         },
         emailRedirectTo: window.location.origin,
       },
@@ -713,17 +923,18 @@ export async function signUp(input: {
     if (!data.session) {
       return {
         error:
-          'Supabase Confirm email이 켜져 있어요. 테스트용이면 Authentication에서 Confirm email을 꺼 주세요.',
+          'Supabase 이메일 확인이 켜져 있어요. 아이디 로그인 테스트에서는 Authentication에서 Confirm email을 꺼 주세요.',
       };
     }
 
     persistStoredProfileSettings(data.user.id, {
       name,
+      gender,
       preferences,
-      homeLocation: null,
+      homeLocation,
     });
 
-    void upsertProfile(data.user, name, preferences);
+    void upsertProfile(data.user, name, preferences, homeLocation);
 
     return {
       user: mapSupabaseUser(data.user) satisfies AuthUser,
@@ -733,15 +944,18 @@ export async function signUp(input: {
   const users = readStoredUsers();
 
   if (users.some((user) => user.email === email)) {
-    return { error: '이미 가입된 이메일이에요.' };
+    return { error: '이미 가입된 아이디예요.' };
   }
 
   const nextUser: StoredAuthUser = {
     id: `user-${Date.now()}`,
     name,
+    avatarUrl: null,
+    loginId,
     email,
+    gender,
     preferences,
-    homeLocation: null,
+    homeLocation,
     passwordHash: await hashPassword(password),
   };
 
@@ -752,24 +966,29 @@ export async function signUp(input: {
     user: {
       id: nextUser.id,
       name: nextUser.name,
+      avatarUrl: normalizeAvatarUrl(nextUser.avatarUrl),
+      loginId: nextUser.loginId,
       email: nextUser.email,
+      gender: normalizeParticipantGender(nextUser.gender),
       preferences: normalizePreferences(nextUser.preferences),
-      homeLocation: null,
+      homeLocation,
     } satisfies AuthUser,
   };
 }
 
-export async function signIn(input: { email: string; password: string }) {
-  const email = normalizeEmail(input.email);
+export async function signIn(input: { identifier: string; password: string }) {
+  const authIdentifier = await normalizeAuthIdentifier(input.identifier);
   const password = input.password.trim();
 
-  if (!isValidEmail(email)) {
-    return { error: '이메일 형식이 올바르지 않아요.' };
+  if ('error' in authIdentifier) {
+    return { error: authIdentifier.error };
   }
 
   if (!password) {
     return { error: '비밀번호를 입력해 주세요.' };
   }
+
+  const { email } = authIdentifier;
 
   if (isSupabaseConfigured()) {
     const supabase = getSupabaseBrowserClient();
@@ -815,7 +1034,10 @@ export async function signIn(input: { email: string; password: string }) {
     user: {
       id: matchedUser.id,
       name: matchedUser.name,
+      avatarUrl: normalizeAvatarUrl(matchedUser.avatarUrl),
+      loginId: matchedUser.loginId || getLoginIdFromEmail(matchedUser.email),
       email: matchedUser.email,
+      gender: normalizeParticipantGender(matchedUser.gender),
       preferences: normalizePreferences(matchedUser.preferences),
       homeLocation: normalizeHomeLocation(matchedUser.homeLocation),
     } satisfies AuthUser,

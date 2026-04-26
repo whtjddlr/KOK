@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
-import { CheckCircle2, LoaderCircle, MapPin, Search, Trash2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Camera, CheckCircle2, LoaderCircle, MapPin, Search, Trash2, X } from 'lucide-react';
 import {
   AuthUser,
+  MAX_FAVORITE_CATEGORIES,
+  MAX_FAVORITE_KEYWORDS,
   preferenceCategoryOptions,
   preferenceKeywordOptions,
   preferenceVibeOptions,
@@ -10,7 +12,17 @@ import {
   UserPreferenceCategory,
   UserPreferenceVibe,
 } from '../lib/auth';
+import { participantGenderOptions } from '../lib/gender';
+import type { ParticipantGender } from '../types';
 import { searchAddress, type AddressSearchResult } from '../lib/naver-map';
+import {
+  filterSupportedServiceAreaResults,
+  getAddressResultLocationLabel,
+  getSafeLocationLabel,
+  isSupportedServiceAreaLocation,
+  looksLikeUnsupportedServiceAreaQuery,
+  SERVICE_AREA_UNSUPPORTED_MESSAGE,
+} from '../lib/service-area';
 
 interface ProfileSheetProps {
   open: boolean;
@@ -34,11 +46,71 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error('이미지를 읽지 못했어요.'));
+    };
+    reader.onerror = () => reject(new Error('이미지를 읽지 못했어요.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('이미지 파일을 확인하지 못했어요.'));
+    image.src = src;
+  });
+}
+
+async function createAvatarPreview(file: File) {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('이미지 파일만 올릴 수 있어요.');
+  }
+
+  if (file.size > 8 * 1024 * 1024) {
+    throw new Error('8MB 이하의 이미지를 선택해 주세요.');
+  }
+
+  const dataUrl = await readFileAsDataUrl(file);
+  const image = await loadImage(dataUrl);
+  const size = 320;
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    throw new Error('이미지를 처리하지 못했어요.');
+  }
+
+  canvas.width = size;
+  canvas.height = size;
+
+  const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
+  const sourceX = (image.naturalWidth - sourceSize) / 2;
+  const sourceY = (image.naturalHeight - sourceSize) / 2;
+
+  context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size);
+
+  return canvas.toDataURL('image/jpeg', 0.82);
+}
+
 export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileSheetProps) {
   const [name, setName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [favoriteCategories, setFavoriteCategories] = useState<UserPreferenceCategory[]>([]);
   const [favoriteKeywords, setFavoriteKeywords] = useState<string[]>([]);
   const [vibe, setVibe] = useState<UserPreferenceVibe>('trendy');
+  const [gender, setGender] = useState<ParticipantGender>('unspecified');
   const [homeLocation, setHomeLocation] = useState<UserHomeLocation | null>(null);
   const [locationQuery, setLocationQuery] = useState('');
   const [locationResults, setLocationResults] = useState<AddressSearchResult[]>([]);
@@ -46,6 +118,8 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAvatarProcessing, setIsAvatarProcessing] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open || !currentUser) {
@@ -55,9 +129,11 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
     }
 
     setName(currentUser.name);
+    setAvatarUrl(currentUser.avatarUrl ?? null);
     setFavoriteCategories(currentUser.preferences.favoriteCategories);
     setFavoriteKeywords(currentUser.preferences.favoriteKeywords);
     setVibe(currentUser.preferences.vibe);
+    setGender(currentUser.gender ?? 'unspecified');
     setHomeLocation(currentUser.homeLocation);
     setLocationQuery(currentUser.homeLocation?.location ?? '');
     setLocationResults([]);
@@ -76,8 +152,8 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
         return current.length === 1 ? current : current.filter((item) => item !== category);
       }
 
-      if (current.length >= 2) {
-        return [current[1], category];
+      if (current.length >= MAX_FAVORITE_CATEGORIES) {
+        return [...current.slice(1), category];
       }
 
       return [...current, category];
@@ -90,7 +166,7 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
         return current.filter((item) => item !== keyword);
       }
 
-      if (current.length >= 4) {
+      if (current.length >= MAX_FAVORITE_KEYWORDS) {
         return [...current.slice(1), keyword];
       }
 
@@ -99,6 +175,11 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
   };
 
   const handleSave = async () => {
+    if (homeLocation && !isSupportedServiceAreaLocation(homeLocation)) {
+      setError(SERVICE_AREA_UNSUPPORTED_MESSAGE);
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     setSuccess(null);
@@ -107,6 +188,8 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
       const result = await withTimeout(
         onSave({
           name,
+          avatarUrl,
+          gender,
           preferences: {
             favoriteCategories,
             favoriteKeywords,
@@ -136,6 +219,32 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
     }
   };
 
+  const handleAvatarChange = async (file?: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    setIsAvatarProcessing(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      setAvatarUrl(await createAvatarPreview(file));
+      setSuccess('프로필 사진이 준비됐어요. 저장을 눌러 확정해 주세요.');
+    } catch (avatarError) {
+      setError(
+        avatarError instanceof Error
+          ? avatarError.message
+          : '프로필 사진을 처리하지 못했어요.',
+      );
+    } finally {
+      setIsAvatarProcessing(false);
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = '';
+      }
+    }
+  };
+
   const handleLocationSearch = async () => {
     const query = locationQuery.trim();
 
@@ -150,10 +259,20 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
     setLocationResults([]);
 
     try {
-      const results = await searchAddress(query);
+      if (looksLikeUnsupportedServiceAreaQuery(query)) {
+        setError(SERVICE_AREA_UNSUPPORTED_MESSAGE);
+        return;
+      }
+
+      const rawResults = await searchAddress(query);
+      const results = filterSupportedServiceAreaResults(rawResults);
 
       if (!results.length) {
-        setError('위치 검색 결과가 없어요. 역 이름이나 장소명으로 다시 검색해 주세요.');
+        setError(
+          rawResults.length
+            ? SERVICE_AREA_UNSUPPORTED_MESSAGE
+            : '위치 검색 결과가 없어요. 역 이름이나 장소명으로 다시 검색해 주세요.',
+        );
         return;
       }
 
@@ -170,19 +289,21 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
   };
 
   const handleSelectLocation = (result: AddressSearchResult) => {
+    const locationLabel = getAddressResultLocationLabel(result);
+
     setHomeLocation({
-      location: result.title,
+      location: locationLabel,
       coordinates: result.coordinates,
       locationSource: 'address',
     });
-    setLocationQuery(result.title);
+    setLocationQuery(locationLabel);
     setLocationResults([]);
     setError(null);
     setSuccess('기본 출발지가 선택됐어요. 저장을 눌러 확정해 주세요.');
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(18,28,45,0.42)] px-4 pb-4 pt-10 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[120] isolate flex items-end justify-center bg-[#f5f1eb] px-4 pb-4 pt-10">
       <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-[32px] bg-white p-6 shadow-2xl">
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
@@ -202,16 +323,107 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
         </div>
 
         <div className="space-y-3">
+          <div className="rounded-[24px] bg-[#f9f7f4] p-4">
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#1f2a44] text-2xl font-black text-white shadow-[0_12px_30px_rgba(26,26,46,0.14)] transition-transform active:scale-95"
+                aria-label="프로필 사진 선택"
+              >
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span>{name.trim().charAt(0) || currentUser.name.charAt(0)}</span>
+                )}
+                <span className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#ff7b6b] text-white">
+                  {isAvatarProcessing ? (
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Camera className="h-3.5 w-3.5" />
+                  )}
+                </span>
+              </button>
+
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-[#1a1a2e]">프로필 사진</div>
+                <div className="mt-1 text-xs leading-relaxed text-[#8a94a2]">
+                  정사각형으로 작게 줄여 저장해요.
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    disabled={isAvatarProcessing}
+                    className="h-9 rounded-full bg-white px-3 text-xs font-semibold text-[#1f2a44] shadow-sm transition-transform active:scale-95 disabled:opacity-60"
+                  >
+                    사진 선택
+                  </button>
+                  {avatarUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAvatarUrl(null);
+                        setSuccess(null);
+                      }}
+                      className="h-9 rounded-full bg-white px-3 text-xs font-semibold text-[#8a94a2] shadow-sm transition-transform active:scale-95"
+                    >
+                      삭제
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => {
+                  void handleAvatarChange(event.target.files?.[0]);
+                }}
+              />
+            </div>
+          </div>
+
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="이름"
+            placeholder="닉네임"
             className="h-12 w-full rounded-2xl bg-[#f9f7f4] px-4 text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:ring-2 focus:ring-[#2d3561]/20"
           />
 
           <div className="rounded-2xl bg-[#f9f7f4] px-4 py-3">
-            <div className="text-xs text-[#8a94a2]">이메일</div>
-            <div className="mt-1 text-sm text-[#1a1a2e]">{currentUser.email}</div>
+            <div className="mb-2 text-xs text-[#8a94a2]">성별</div>
+            <div className="flex flex-wrap gap-2">
+              {participantGenderOptions.map((option) => {
+                const active = gender === option.value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setGender(option.value)}
+                    className={`rounded-full px-3 py-1.5 text-xs transition-all ${
+                      active ? 'bg-[#1f2a44] text-white shadow-sm' : 'bg-white text-[#44505b]'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-[#f9f7f4] px-4 py-3">
+            <div className="text-xs text-[#8a94a2]">계정 아이디</div>
+            <div className="mt-1 text-sm text-[#1a1a2e]">
+              {currentUser.loginId || currentUser.email}
+            </div>
           </div>
 
           <div className="rounded-[24px] border border-[#e8edf3] bg-[#f8fbfd] p-4">
@@ -244,9 +456,8 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
 
             {homeLocation && (
               <div className="mb-3 rounded-2xl bg-white px-4 py-3">
-                <div className="text-sm text-[#1a1a2e]">{homeLocation.location}</div>
-                <div className="mt-1 text-xs text-[#8a94a2]">
-                  {homeLocation.coordinates.lat.toFixed(4)}, {homeLocation.coordinates.lng.toFixed(4)}
+                <div className="text-sm text-[#1a1a2e]">
+                  {getSafeLocationLabel(homeLocation.location)}
                 </div>
               </div>
             )}
@@ -294,7 +505,9 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
                     onClick={() => handleSelectLocation(result)}
                     className="w-full rounded-2xl border border-[#e8edf3] bg-white px-4 py-3 text-left transition-all hover:border-[#2d3561]"
                   >
-                    <div className="text-sm text-[#1a1a2e]">{result.title}</div>
+                    <div className="text-sm text-[#1a1a2e]">
+                      {getAddressResultLocationLabel(result)}
+                    </div>
                     {(result.roadAddress || result.jibunAddress) && (
                       <div className="mt-1 text-xs text-[#6b7280]">
                         {result.roadAddress || result.jibunAddress}
@@ -311,7 +524,7 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
           <div>
             <div className="flex items-center justify-between text-sm text-[#1a1a2e]">
               <span>자주 찾는 카테고리</span>
-              <span className="text-xs text-[#8a94a2]">최대 2개</span>
+              <span className="text-xs text-[#8a94a2]">최대 {MAX_FAVORITE_CATEGORIES}개</span>
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               {preferenceCategoryOptions.map((option) => {
@@ -358,7 +571,7 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
           <div>
             <div className="flex items-center justify-between text-sm text-[#1a1a2e]">
               <span>관심 키워드</span>
-              <span className="text-xs text-[#8a94a2]">최대 4개</span>
+              <span className="text-xs text-[#8a94a2]">최대 {MAX_FAVORITE_KEYWORDS}개</span>
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               {preferenceKeywordOptions.map((keyword) => {

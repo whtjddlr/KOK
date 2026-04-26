@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Download, X } from 'lucide-react';
 import { HomeScreen } from './components/HomeScreen';
 import { PlannerScreen } from './components/PlannerScreen';
 import { ResultScreen } from './components/ResultScreen';
@@ -13,18 +14,20 @@ import {
   updateProfileSettings,
 } from './lib/auth';
 import {
-  addRoomParticipant,
   createMeetingRoom,
+  deleteOwnedMeetingRoom,
+  deleteOwnedMeetingRooms,
   getCurrentRoomActorIds,
+  getParticipantActorKey,
   getRedrawRequiredVotes,
   loadMeetingRoomByCode,
-  rememberLocalRoomParticipant,
+  loadOwnedMeetingRooms,
   requestRoomRedrawVote,
   resetRoomSelection,
+  subscribeToRoomState,
 } from './lib/rooms';
 import {
   Candidate,
-  CandidateScopeKey,
   DrawProof,
   MeetingRoom,
   MeetCategoryKey,
@@ -34,6 +37,118 @@ import {
 } from './types';
 
 type Screen = 'home' | 'planner' | 'result';
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{
+    outcome: 'accepted' | 'dismissed';
+    platform: string;
+  }>;
+}
+
+function isStandaloneApp() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const navigatorWithStandalone = window.navigator as Navigator & { standalone?: boolean };
+
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    navigatorWithStandalone.standalone === true
+  );
+}
+
+function InstallAppButton() {
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+
+  useEffect(() => {
+    setIsInstalled(isStandaloneApp());
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setDeferredPrompt(event as BeforeInstallPromptEvent);
+    };
+
+    const handleAppInstalled = () => {
+      setDeferredPrompt(null);
+      setIsInstalled(true);
+      setGuideOpen(false);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) {
+      setGuideOpen(true);
+      return;
+    }
+
+    await deferredPrompt.prompt();
+    const choice = await deferredPrompt.userChoice;
+
+    if (choice.outcome === 'accepted') {
+      setIsInstalled(true);
+    }
+
+    setDeferredPrompt(null);
+  };
+
+  if (isInstalled) {
+    return null;
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          void handleInstallClick();
+        }}
+        className="fixed left-4 top-4 z-50 inline-flex h-11 items-center gap-2 rounded-full border border-white/80 bg-white/92 px-4 text-sm font-extrabold tracking-[-0.03em] text-[#1f2a44] shadow-[0_12px_30px_rgba(26,26,46,0.14)] backdrop-blur-md transition-transform active:scale-95"
+        aria-label="KoK 앱 설치"
+      >
+        <Download className="h-4 w-4" />
+        설치
+      </button>
+
+      {guideOpen && (
+        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-[#1f2a44]/30 px-4 pb-4 backdrop-blur-sm sm:items-center sm:pb-0">
+          <section className="w-full max-w-[420px] rounded-[1.75rem] bg-white p-6 text-[#1f2a44] shadow-[0_30px_80px_rgba(26,26,46,0.24)]">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-bold text-[#ff7468]">KoK 설치</p>
+                <h2 className="mt-1 text-2xl font-black tracking-[-0.06em]">앱처럼 열기</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGuideOpen(false)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#f5f1eb] text-[#1f2a44]"
+                aria-label="설치 안내 닫기"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-3 text-base font-semibold leading-relaxed tracking-[-0.04em] text-[#666b78]">
+              <p>Chrome/Edge에서는 주소창의 설치 아이콘이나 브라우저 메뉴의 “앱 설치”를 누르면 돼요.</p>
+              <p>iPhone은 Safari 공유 버튼에서 “홈 화면에 추가”를 선택하면 됩니다.</p>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
 
 function getActionErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) {
@@ -67,14 +182,64 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
+function getRoomCodeFromUrl() {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  return new URLSearchParams(window.location.search).get('room')?.trim().toUpperCase() ?? '';
+}
+
+function getAuthUserSignature(user: AuthUser | null) {
+  if (!user) {
+    return '';
+  }
+
+  return JSON.stringify({
+    id: user.id,
+    name: user.name,
+    avatarUrl: user.avatarUrl ?? null,
+    loginId: user.loginId,
+    email: user.email,
+    gender: user.gender,
+    preferences: user.preferences,
+    homeLocation: user.homeLocation,
+  });
+}
+
+function getMeetingRoomSignature(room: MeetingRoom | null) {
+  if (!room) {
+    return '';
+  }
+
+  return JSON.stringify({
+    id: room.id,
+    code: room.code,
+    ownerId: room.ownerId,
+    drawControllerId: room.drawControllerId,
+    drawReadyIds: [...room.drawReadyIds].sort(),
+    redrawVotes: [...room.redrawVotes].sort(),
+    redrawRequestedAt: room.redrawRequestedAt,
+    selectedCategory: room.selectedCategory,
+    selectedCandidate: room.selectedCandidate,
+    status: room.status,
+    updatedAt: room.updatedAt,
+    memberCount: room.memberCount ?? null,
+    members: room.members ?? [],
+  });
+}
+
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>('signup');
-  const [authRedirectToPlanner, setAuthRedirectToPlanner] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [activeRoom, setActiveRoom] = useState<MeetingRoom | null>(null);
+  const [ownedRooms, setOwnedRooms] = useState<MeetingRoom[]>([]);
+  const [isLoadingOwnedRooms, setIsLoadingOwnedRooms] = useState(false);
+  const [deletingRoomIds, setDeletingRoomIds] = useState<string[]>([]);
+  const [ownedRoomsError, setOwnedRoomsError] = useState<string | null>(null);
   const [isOpeningRoom, setIsOpeningRoom] = useState(false);
   const [isRequestingRedraw, setIsRequestingRedraw] = useState(false);
   const [roomError, setRoomError] = useState<string | null>(null);
@@ -83,22 +248,32 @@ export default function App() {
   const [currentParticipants, setCurrentParticipants] = useState<Participant[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<MeetCategoryKey>('dining');
   const [selectionMode, setSelectionMode] = useState<SelectionModeKey>('balance');
-  const [thrillLevel, setThrillLevel] = useState<ThrillLevel>(2);
-  const [candidateScope, setCandidateScope] = useState<CandidateScopeKey>('wide');
-  const [candidateTargetCount, setCandidateTargetCount] = useState(10);
+  const [thrillLevel, setThrillLevel] = useState<ThrillLevel>(1);
+  const currentUserSignatureRef = useRef('');
+
+  const setCurrentUserIfChanged = (user: AuthUser | null) => {
+    const nextSignature = getAuthUserSignature(user);
+
+    if (currentUserSignatureRef.current === nextSignature) {
+      return;
+    }
+
+    currentUserSignatureRef.current = nextSignature;
+    setCurrentUser(user);
+  };
 
   useEffect(() => {
     let mounted = true;
 
     loadSessionUser().then((user) => {
       if (mounted) {
-        setCurrentUser(user);
+        setCurrentUserIfChanged(user);
       }
     });
 
     const unsubscribe = subscribeToAuthChanges((user) => {
       if (mounted) {
-        setCurrentUser(user);
+        setCurrentUserIfChanged(user);
       }
     });
 
@@ -108,12 +283,48 @@ export default function App() {
     };
   }, []);
 
+  const refreshOwnedRooms = async (userId = currentUser?.id ?? '') => {
+    if (!userId) {
+      setOwnedRooms([]);
+      setOwnedRoomsError(null);
+      return;
+    }
+
+    setIsLoadingOwnedRooms(true);
+    setOwnedRoomsError(null);
+
+    try {
+      const rooms = await withTimeout(
+        loadOwnedMeetingRooms(userId),
+        7000,
+        '기존 방 목록 응답이 지연되고 있어요.',
+      );
+
+      setOwnedRooms(rooms);
+    } catch (error) {
+      setOwnedRooms([]);
+      setOwnedRoomsError(getActionErrorMessage(error, '기존 방 목록을 불러오지 못했어요.'));
+    } finally {
+      setIsLoadingOwnedRooms(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!currentUser) {
+      setOwnedRooms([]);
+      setOwnedRoomsError(null);
+      return;
+    }
+
+    void refreshOwnedRooms(currentUser.id);
+  }, [currentUser?.id]);
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
 
-    const code = new URLSearchParams(window.location.search).get('room');
+    const code = getRoomCodeFromUrl();
 
     if (!code) {
       return;
@@ -154,20 +365,30 @@ export default function App() {
 
     let active = true;
 
+    const applyRoomUpdate = (room: MeetingRoom) => {
+      if (!active) {
+        return;
+      }
+
+      setActiveRoom((current) =>
+        getMeetingRoomSignature(current) === getMeetingRoomSignature(room) ? current : room,
+      );
+
+      if (room.status === 'planning' && !room.selectedCandidate) {
+        setSelectedWinner(null);
+        setDrawProof(null);
+        setCurrentScreen('planner');
+      }
+    };
+
     const syncResultRoom = () => {
       void loadMeetingRoomByCode(activeRoom.code)
         .then((room) => {
-          if (!active || !room) {
+          if (!room) {
             return;
           }
 
-          setActiveRoom(room);
-
-          if (room.status === 'planning' && !room.selectedCandidate) {
-            setSelectedWinner(null);
-            setDrawProof(null);
-            setCurrentScreen('planner');
-          }
+          applyRoomUpdate(room);
         })
         .catch(() => {
           // 결과 화면에서는 일시적인 동기화 실패로 사용자를 튕기지 않는다.
@@ -175,13 +396,15 @@ export default function App() {
     };
 
     syncResultRoom();
+    const unsubscribe = subscribeToRoomState(activeRoom.id, applyRoomUpdate);
     const intervalId = window.setInterval(syncResultRoom, 2500);
 
     return () => {
       active = false;
+      unsubscribe();
       window.clearInterval(intervalId);
     };
-  }, [activeRoom?.code, currentScreen]);
+  }, [activeRoom?.code, activeRoom?.id, currentScreen]);
 
   const syncRoomUrl = (room: MeetingRoom | null) => {
     if (typeof window === 'undefined') {
@@ -199,9 +422,8 @@ export default function App() {
     window.history.replaceState({}, '', url.toString());
   };
 
-  const openAuth = (mode: AuthMode, redirectToPlanner = false) => {
+  const openAuth = (mode: AuthMode) => {
     setAuthMode(mode);
-    setAuthRedirectToPlanner(redirectToPlanner);
     setAuthOpen(true);
   };
 
@@ -214,70 +436,43 @@ export default function App() {
     setProfileOpen(true);
   };
 
-  const handleCreateRoom = () => {
+  const openOnlineRoom = async ({
+    ownerId,
+    timeoutMessage = '온라인 방 생성 응답이 지연되고 있어요.',
+    fallbackMessage = '온라인 방을 만들지 못했어요. 잠시 후 다시 시도해 주세요.',
+  }: {
+    ownerId: string | null;
+    timeoutMessage?: string;
+    fallbackMessage?: string;
+  }) => {
     setIsOpeningRoom(true);
     setRoomError(null);
     setCurrentParticipants([]);
+    setSelectedWinner(null);
+    setDrawProof(null);
     setActiveRoom(null);
     syncRoomUrl(null);
-
-    void withTimeout(
-      createMeetingRoom({
-        ownerId: currentUser?.id ?? null,
-        selectedCategory,
-      }),
-      7000,
-      '온라인 방 생성 응답이 지연되고 있어요.',
-    )
-      .then((room) => {
-        setActiveRoom(room);
-        syncRoomUrl(room);
-        setRoomError(null);
-        setCurrentScreen('planner');
-      })
-      .catch((error) => {
-        setActiveRoom(null);
-        syncRoomUrl(null);
-        setRoomError(
-          getActionErrorMessage(error, '온라인 방을 만들지 못했어요. 잠시 후 다시 시도해 주세요.'),
-        );
-      })
-      .finally(() => {
-        setIsOpeningRoom(false);
-      });
-  };
-
-  const handleCreateRoomFromPlanner = async (participants: Participant[]) => {
-    setIsOpeningRoom(true);
-    setRoomError(null);
 
     try {
       const room = await withTimeout(
         createMeetingRoom({
-          ownerId: currentUser?.id ?? null,
+          ownerId,
           selectedCategory,
         }),
         7000,
-        '공유 방 생성 응답이 지연되고 있어요.',
-      );
-
-      await Promise.all(
-        participants.map((participant) => {
-          rememberLocalRoomParticipant(room.id, participant.id);
-
-          return addRoomParticipant({
-            roomId: room.id,
-            participant,
-            userId: currentUser?.id ?? null,
-          });
-        }),
+        timeoutMessage,
       );
 
       setActiveRoom(room);
       syncRoomUrl(room);
+      setRoomError(null);
+      setCurrentScreen('planner');
+      void refreshOwnedRooms(ownerId ?? undefined);
     } catch (error) {
-      setRoomError(getActionErrorMessage(error, '공유 방을 만들지 못했어요.'));
-      throw error;
+      setActiveRoom(null);
+      syncRoomUrl(null);
+      setRoomError(getActionErrorMessage(error, fallbackMessage));
+      setCurrentScreen('home');
     } finally {
       setIsOpeningRoom(false);
     }
@@ -288,6 +483,102 @@ export default function App() {
     syncRoomUrl(null);
     setCurrentParticipants([]);
     setCurrentScreen('planner');
+  };
+
+  const handleCreateRoomFromHome = () => {
+    if (!currentUser) {
+      openAuth('login');
+      return;
+    }
+
+    void openOnlineRoom({
+      ownerId: currentUser.id,
+    });
+  };
+
+  const handleOpenExistingRoom = (room: MeetingRoom) => {
+    void handleJoinRoom(room.code);
+  };
+
+  const handleDeleteExistingRoom = async (room: MeetingRoom) => {
+    if (!currentUser) {
+      openAuth('login');
+      return;
+    }
+
+    const memberCount = room.memberCount ?? room.members?.length ?? 0;
+    const confirmed = window.confirm(
+      memberCount > 1
+        ? `${room.code} 방에서 나갈까요? 다른 사람이 남아 있으면 방은 유지됩니다.`
+        : `${room.code} 방을 삭제할까요? 남은 사람이 없으면 방이 삭제됩니다.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingRoomIds([room.id]);
+    setOwnedRoomsError(null);
+
+    try {
+      await withTimeout(
+        deleteOwnedMeetingRoom({
+          roomId: room.id,
+          ownerId: currentUser.id,
+        }),
+        7000,
+        '방 삭제 응답이 지연되고 있어요.',
+      );
+
+      setOwnedRooms((current) => current.filter((item) => item.id !== room.id));
+    } catch (error) {
+      setOwnedRoomsError(getActionErrorMessage(error, '방을 정리하지 못했어요.'));
+    } finally {
+      setDeletingRoomIds([]);
+    }
+  };
+
+  const handleDeleteExistingRooms = async (rooms: MeetingRoom[]) => {
+    if (!currentUser) {
+      openAuth('login');
+      return;
+    }
+
+    const targetRooms = rooms;
+
+    if (!targetRooms.length) {
+      setOwnedRoomsError('정리할 수 있는 방이 없어요.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${targetRooms.length}개 방을 정리할까요? 다른 사람이 남아 있는 방은 나가기로 처리됩니다.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const targetRoomIds = targetRooms.map((room) => room.id);
+    setDeletingRoomIds(targetRoomIds);
+    setOwnedRoomsError(null);
+
+    try {
+      await withTimeout(
+        deleteOwnedMeetingRooms({
+          roomIds: targetRoomIds,
+          ownerId: currentUser.id,
+        }),
+        7000,
+        '방 삭제 응답이 지연되고 있어요.',
+      );
+
+      setOwnedRooms((current) => current.filter((item) => !targetRoomIds.includes(item.id)));
+    } catch (error) {
+      setOwnedRoomsError(getActionErrorMessage(error, '선택한 방을 정리하지 못했어요.'));
+    } finally {
+      setDeletingRoomIds([]);
+    }
   };
 
   const handleJoinRoom = async (code: string) => {
@@ -345,22 +636,31 @@ export default function App() {
         participants: currentParticipants,
       })
     : [];
+  const roomParticipantActorIds = activeRoom
+    ? [...new Set(currentParticipants.map((participant) => getParticipantActorKey(participant)))]
+    : [];
   const currentRoomVoterId = currentRoomActorIds[0] ?? null;
   const redrawRequiredVotes = activeRoom
-    ? getRedrawRequiredVotes(currentParticipants.length)
+    ? getRedrawRequiredVotes(roomParticipantActorIds.length)
     : 0;
-  const redrawVoteCount = activeRoom?.redrawVotes.length ?? 0;
+  const redrawVoteCount = activeRoom
+    ? activeRoom.redrawVotes.filter((voteId) => roomParticipantActorIds.includes(voteId)).length
+    : 0;
+  const isSoloOnlineResult = Boolean(
+    activeRoom && roomParticipantActorIds.length > 0 && roomParticipantActorIds.length === 1,
+  );
   const hasRedrawMajority = activeRoom
-    ? redrawVoteCount >= redrawRequiredVotes
+    ? isSoloOnlineResult || redrawVoteCount >= redrawRequiredVotes
     : true;
   const hasRequestedRedraw = activeRoom
     ? activeRoom.redrawVotes.some((voteId) => currentRoomActorIds.includes(voteId))
     : false;
   const canControlCurrentRoomDraw =
     !activeRoom ||
-    (activeRoom.drawControllerId
-      ? currentRoomActorIds.includes(activeRoom.drawControllerId)
-      : !activeRoom.ownerId || activeRoom.ownerId === currentUser?.id);
+    isSoloOnlineResult ||
+    Boolean(currentRoomVoterId) ||
+    !activeRoom.ownerId ||
+    activeRoom.ownerId === currentUser?.id;
 
   const handleRequestRedrawVote = async () => {
     if (!activeRoom) {
@@ -368,7 +668,7 @@ export default function App() {
     }
 
     if (!currentRoomVoterId) {
-      setRoomError('다시뽑기 동의 전에 내 위치를 먼저 방에 추가해 주세요.');
+      setRoomError('방에 참여한 사람만 다시뽑기를 요청할 수 있어요.');
       return;
     }
 
@@ -404,7 +704,7 @@ export default function App() {
         }
 
         if (!canControlCurrentRoomDraw) {
-          setRoomError('과반 동의는 완료됐고, 추첨 담당자만 다시뽑기를 열 수 있어요.');
+          setRoomError('과반 동의는 완료됐고, 참여자가 다시뽑기를 열 수 있어요.');
           return;
         }
       }
@@ -413,31 +713,38 @@ export default function App() {
         ...roomToReset,
         selectedCandidate: null,
         status: 'planning' as const,
+        drawControllerId: null,
+        drawReadyIds: roomToReset.status === 'decided' ? roomToReset.drawReadyIds : [],
         redrawVotes: [],
         redrawRequestedAt: null,
         updatedAt: new Date().toISOString(),
       };
 
       setActiveRoom(optimisticRoom);
+      setIsRequestingRedraw(true);
+      setRoomError(null);
 
       void withTimeout(
         resetRoomSelection({
           roomId: roomToReset.id,
           selectedCategory,
+          preserveReadiness: roomToReset.status === 'decided',
         }),
         5000,
         '방 상태를 초기화하는 응답이 지연되고 있어요.',
       )
         .then((room) => {
           setActiveRoom(room);
-        })
-        .catch(() => {
-          setActiveRoom(optimisticRoom);
-        })
-        .finally(() => {
           setSelectedWinner(null);
           setDrawProof(null);
           setCurrentScreen('planner');
+        })
+        .catch((error) => {
+          setActiveRoom(roomToReset);
+          setRoomError(getActionErrorMessage(error, '방 상태를 다시 연결하지 못했어요.'));
+        })
+        .finally(() => {
+          setIsRequestingRedraw(false);
         });
       return;
     }
@@ -460,22 +767,49 @@ export default function App() {
     }
   };
 
+  const handleGoHome = () => {
+    setActiveRoom(null);
+    setSelectedWinner(null);
+    setDrawProof(null);
+    setCurrentParticipants([]);
+    setRoomError(null);
+    syncRoomUrl(null);
+    setCurrentScreen('home');
+  };
+
   const handleAuthSuccess = (user: AuthUser) => {
-    setCurrentUser(user);
+    setCurrentUserIfChanged(user);
     setAuthOpen(false);
 
-    if (authRedirectToPlanner) {
-      setCurrentParticipants([]);
-      setActiveRoom(null);
-      syncRoomUrl(null);
-      setCurrentScreen('planner');
-      setAuthRedirectToPlanner(false);
+    if (activeRoom) {
+      void refreshOwnedRooms(user.id);
+      return;
     }
+
+    const roomCodeFromUrl = getRoomCodeFromUrl();
+
+    if (roomCodeFromUrl) {
+      void handleJoinRoom(roomCodeFromUrl);
+      void refreshOwnedRooms(user.id);
+      return;
+    }
+
+    if (authMode === 'login') {
+      setCurrentScreen('home');
+      void refreshOwnedRooms(user.id);
+      return;
+    }
+
+    void openOnlineRoom({
+      ownerId: user.id,
+      timeoutMessage: '로그인 후 방을 만드는 응답이 지연되고 있어요.',
+      fallbackMessage: '로그인은 됐지만 온라인 방을 만들지 못했어요. 잠시 후 다시 로그인해 주세요.',
+    });
   };
 
   const handleSignOut = () => {
     void signOut();
-    setCurrentUser(null);
+    setCurrentUserIfChanged(null);
     setProfileOpen(false);
     setCurrentScreen('home');
   };
@@ -488,7 +822,7 @@ export default function App() {
     const result = await updateProfileSettings(currentUser, input);
 
     if (result.user) {
-      setCurrentUser(result.user);
+      setCurrentUserIfChanged(result.user);
     }
 
     return result;
@@ -496,11 +830,23 @@ export default function App() {
 
   return (
     <div className="min-h-screen w-full bg-[#f5f1eb] text-[#1f2a44]">
+      {currentScreen === 'home' && <InstallAppButton />}
+
       {currentScreen === 'home' && (
         <HomeScreen
           currentUser={currentUser}
-          onCreateRoom={handleCreateRoom}
           onContinueAsGuest={handleContinueAsGuest}
+          onCreateRoom={handleCreateRoomFromHome}
+          createdRooms={ownedRooms}
+          isLoadingCreatedRooms={isLoadingOwnedRooms}
+          createdRoomsError={ownedRoomsError}
+          deletingRoomIds={deletingRoomIds}
+          onRefreshRooms={() => {
+            void refreshOwnedRooms();
+          }}
+          onOpenExistingRoom={handleOpenExistingRoom}
+          onDeleteExistingRoom={handleDeleteExistingRoom}
+          onDeleteExistingRooms={handleDeleteExistingRooms}
           onJoinRoom={handleJoinRoom}
           onOpenAuth={openAuth}
           onOpenProfile={openProfile}
@@ -514,11 +860,10 @@ export default function App() {
         <PlannerScreen
           currentUserId={currentUser?.id ?? ''}
           currentUserName={currentUser?.name ?? '게스트'}
+          currentUserAvatarUrl={currentUser?.avatarUrl ?? null}
+          currentUserGender={currentUser?.gender ?? 'unspecified'}
           currentUserHomeLocation={currentUser?.homeLocation ?? null}
           onlineRoom={activeRoom}
-          isOpeningRoom={isOpeningRoom}
-          roomError={roomError}
-          onCreateOnlineRoom={handleCreateRoomFromPlanner}
           onOpenProfile={currentUser ? openProfile : undefined}
           initialParticipants={currentParticipants}
           selectedCategory={selectedCategory}
@@ -527,10 +872,6 @@ export default function App() {
           onSelectionModeChange={setSelectionMode}
           thrillLevel={thrillLevel}
           onThrillLevelChange={setThrillLevel}
-          candidateScope={candidateScope}
-          onCandidateScopeChange={setCandidateScope}
-          candidateTargetCount={candidateTargetCount}
-          onCandidateTargetCountChange={setCandidateTargetCount}
           onBack={handleBack}
           onComplete={handlePlannerComplete}
         />
@@ -560,6 +901,7 @@ export default function App() {
           }
           onBack={handleBackToPlanner}
           onNewDraw={handleBackToPlanner}
+          onHome={handleGoHome}
         />
       )}
 
@@ -569,7 +911,6 @@ export default function App() {
         onModeChange={setAuthMode}
         onClose={() => {
           setAuthOpen(false);
-          setAuthRedirectToPlanner(false);
         }}
         onSuccess={handleAuthSuccess}
       />

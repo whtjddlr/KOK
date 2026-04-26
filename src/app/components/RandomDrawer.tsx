@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Crosshair, Layers3, MapPin, MousePointer2, ScanLine, X } from 'lucide-react';
 import {
@@ -7,10 +8,12 @@ import {
   CandidateScopeKey,
   DrawPlan,
   DrawProof,
+  Participant,
   SelectionModeKey,
   ThrillLevel,
 } from '../types';
 import { buildDrawPlan } from '../lib/meeting';
+import { loadNaverMapSdk } from '../lib/naver-map';
 
 interface RandomDrawerProps {
   candidateInsights: CandidateInsight[];
@@ -19,12 +22,17 @@ interface RandomDrawerProps {
   selectionMode?: SelectionModeKey;
   thrillLevel?: ThrillLevel;
   candidateScope?: CandidateScopeKey;
+  participants?: Participant[];
+  drawSeed?: string;
+  lockedWinner?: CandidateInsight | null;
+  canChoose?: boolean;
+  waitingMessage?: string;
   onComplete: (winner: Candidate, proof: DrawProof) => void;
   onClose: () => void;
 }
 
 type DrawPhase = 'choosing' | 'boot' | 'dropping' | 'settling' | 'impact' | 'revealed';
-type DrawVariant = 'card-shuffle' | 'shell-game' | 'dart-map';
+type DrawVariant = 'card-shuffle' | 'shell-game' | 'ladder-game' | 'spin-wheel' | 'dart-map';
 
 type PlacedCandidate = {
   insight: CandidateInsight;
@@ -52,24 +60,32 @@ function clamp(value: number, min: number, max: number) {
 
 const drawVariants: DrawVariant[] = [
   'card-shuffle',
-  'shell-game',
-  'dart-map',
+  'ladder-game',
+  'spin-wheel',
 ];
 
 const drawVariantAccents: Record<DrawVariant, string> = {
   'card-shuffle': '#f59e0b',
   'shell-game': '#a78bfa',
+  'ladder-game': '#22c55e',
+  'spin-wheel': '#5dd9d0',
   'dart-map': '#ef4444',
 };
 
 const drawVariantDisplayLabels: Record<DrawVariant, string> = {
   'card-shuffle': '카드 셔플',
   'shell-game': '야바위',
-  'dart-map': '지도 다트',
+  'ladder-game': '사다리타기',
+  'spin-wheel': '돌림판',
+  'dart-map': '지도 사인펜',
 };
 
 function getRandomVariant(): DrawVariant {
   return drawVariants[Math.floor(Math.random() * drawVariants.length)] ?? 'card-shuffle';
+}
+
+function getSeededVariant(seed: string): DrawVariant {
+  return drawVariants[Math.floor(seededNumber(seed, 'variant') * drawVariants.length)] ?? 'card-shuffle';
 }
 
 function getChoiceDisplayLabel(variant: DrawVariant, slot: DrawChoiceSlot, index: number) {
@@ -81,8 +97,16 @@ function getChoiceDisplayLabel(variant: DrawVariant, slot: DrawChoiceSlot, index
     return `카드 ${slot.label}`;
   }
 
+  if (variant === 'ladder-game') {
+    return `사다리 ${slot.label}`;
+  }
+
+  if (variant === 'spin-wheel') {
+    return `칸 ${slot.label}`;
+  }
+
   if (variant === 'dart-map') {
-    return `타깃 ${slot.label}`;
+    return `사인펜 ${slot.label}`;
   }
 
   return `${slot.label}번`;
@@ -103,6 +127,223 @@ function seededNumber(seed: string, key: number | string) {
   return parseInt(hashText(`${seed}:${key}`).slice(0, 8), 16) / 0xffffffff;
 }
 
+function getLadderColumnX(index: number, count: number) {
+  if (count <= 0) {
+    return 50;
+  }
+
+  return ((index + 0.5) * 100) / count;
+}
+
+type LadderBar = {
+  id: string;
+  leftIndex: number;
+  source?: 'auto' | 'user';
+  y: number;
+};
+
+type LadderPathSegment =
+  | { type: 'vertical'; x: number; y1: number; y2: number }
+  | { type: 'horizontal'; x1: number; x2: number; y: number };
+
+function getLadderBars(lock: DrawChoiceLock): LadderBar[] {
+  const count = lock.slots.length;
+
+  if (count <= 1) {
+    return [];
+  }
+
+  const rowCount = Math.max(4, Math.min(7, count + 2));
+  let previousLeftIndex = -10;
+
+  return Array.from({ length: rowCount }, (_, rowIndex) => {
+    const candidates = Array.from({ length: count - 1 }, (_, index) => index).filter(
+      (index) => Math.abs(index - previousLeftIndex) > 0,
+    );
+    const leftIndex =
+      candidates[
+        Math.floor(seededNumber(lock.seed, `ladder-bar-${rowIndex}`) * candidates.length)
+      ] ?? 0;
+    previousLeftIndex = leftIndex;
+
+    return {
+      id: `${lock.seed}-${rowIndex}-${leftIndex}`,
+      leftIndex,
+      source: 'auto',
+      y: 16 + (rowIndex * 68) / Math.max(rowCount - 1, 1),
+    };
+  });
+}
+
+function sortLadderBars(bars: LadderBar[]) {
+  return [...bars].sort((first, second) => first.y - second.y);
+}
+
+function getLadderResultIndex(
+  lock: DrawChoiceLock,
+  startIndex: number,
+  bars: LadderBar[] = getLadderBars(lock),
+) {
+  const count = lock.slots.length;
+  let currentIndex = clamp(Math.round(startIndex), 0, Math.max(count - 1, 0));
+
+  sortLadderBars(bars).forEach((bar) => {
+    if (bar.leftIndex === currentIndex) {
+      currentIndex += 1;
+    } else if (bar.leftIndex + 1 === currentIndex) {
+      currentIndex -= 1;
+    }
+  });
+
+  return clamp(currentIndex, 0, Math.max(count - 1, 0));
+}
+
+function getLadderResultSlot(
+  lock: DrawChoiceLock,
+  startIndex: number,
+  bars: LadderBar[] = getLadderBars(lock),
+) {
+  return lock.slots[getLadderResultIndex(lock, startIndex, bars)] ?? lock.slots[startIndex] ?? null;
+}
+
+function getLadderPathSegments(
+  lock: DrawChoiceLock,
+  startIndex: number,
+  bars: LadderBar[] = getLadderBars(lock),
+): LadderPathSegment[] {
+  const count = lock.slots.length;
+  let currentIndex = clamp(Math.round(startIndex), 0, Math.max(count - 1, 0));
+  let currentX = getLadderColumnX(currentIndex, count);
+  let lastY = 0;
+  const segments: LadderPathSegment[] = [];
+
+  sortLadderBars(bars).forEach((bar) => {
+    const nextIndex =
+      bar.leftIndex === currentIndex
+        ? currentIndex + 1
+        : bar.leftIndex + 1 === currentIndex
+          ? currentIndex - 1
+          : currentIndex;
+    const nextX = getLadderColumnX(nextIndex, count);
+
+    segments.push({ type: 'vertical', x: currentX, y1: lastY, y2: bar.y });
+
+    if (nextIndex !== currentIndex) {
+      segments.push({ type: 'horizontal', x1: currentX, x2: nextX, y: bar.y });
+      currentIndex = nextIndex;
+      currentX = nextX;
+    }
+
+    lastY = bar.y;
+  });
+
+  segments.push({ type: 'vertical', x: currentX, y1: lastY, y2: 100 });
+
+  return segments;
+}
+
+function getLadderBarFromPoint(lock: DrawChoiceLock, x: number, y: number): LadderBar | null {
+  const count = lock.slots.length;
+
+  if (count <= 1) {
+    return null;
+  }
+
+  let closestLeftIndex = 0;
+  let closestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < count - 1; index += 1) {
+    const centerX = (getLadderColumnX(index, count) + getLadderColumnX(index + 1, count)) / 2;
+    const distance = Math.abs(x - centerX);
+
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestLeftIndex = index;
+    }
+  }
+
+  const snappedY = Math.round(clamp(y, 12, 88) / 4) * 4;
+
+  return {
+    id: `user-${closestLeftIndex}-${snappedY}-${Date.now().toString(36)}`,
+    leftIndex: closestLeftIndex,
+    source: 'user',
+    y: snappedY,
+  };
+}
+
+function shouldAddLadderBar(bars: LadderBar[], nextBar: LadderBar) {
+  return !bars.some(
+    (bar) =>
+      Math.abs(bar.y - nextBar.y) < 5 &&
+      Math.abs(bar.leftIndex - nextBar.leftIndex) <= 1,
+  );
+}
+
+const wheelColors = [
+  '#ff7b6b',
+  '#f59e0b',
+  '#22c55e',
+  '#5dd9d0',
+  '#60a5fa',
+  '#a78bfa',
+  '#f472b6',
+  '#84cc16',
+  '#fb7185',
+  '#38bdf8',
+];
+
+function getShortestAngleDelta(from: number, to: number) {
+  return ((((to - from) % 360) + 540) % 360) - 180;
+}
+
+function getPointerAngle(event: ReactPointerEvent<HTMLElement>, element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+
+  return (Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180) / Math.PI + 90;
+}
+
+function getWheelSelectedIndex(rotation: number, count: number) {
+  if (count <= 0) {
+    return 0;
+  }
+
+  const segmentAngle = 360 / count;
+  const normalizedRotation = ((rotation % 360) + 360) % 360;
+
+  return Math.floor(((360 - normalizedRotation) % 360) / segmentAngle);
+}
+
+function getWheelRotationForIndex(index: number, count: number, nearRotation = 0) {
+  if (count <= 0) {
+    return 0;
+  }
+
+  const segmentAngle = 360 / count;
+  const targetRotation = -(index * segmentAngle + segmentAngle / 2);
+
+  return targetRotation + Math.round((nearRotation - targetRotation) / 360) * 360;
+}
+
+function getWheelBackground(count: number) {
+  if (count <= 0) {
+    return '#f8fafc';
+  }
+
+  const segmentAngle = 360 / count;
+  const stops = Array.from({ length: count }, (_, index) => {
+    const start = index * segmentAngle;
+    const end = (index + 1) * segmentAngle;
+    const color = wheelColors[index % wheelColors.length];
+
+    return `${color} ${start}deg ${end}deg`;
+  });
+
+  return `conic-gradient(${stops.join(', ')})`;
+}
+
 function createChoiceSeed() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
@@ -111,27 +352,23 @@ function createChoiceSeed() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function getChoiceCount(variant: DrawVariant) {
-  if (variant === 'shell-game') {
-    return 3;
-  }
-
-  if (variant === 'card-shuffle') {
-    return 8;
-  }
-
+function getChoiceCount(variant: DrawVariant, sourceLength: number) {
   if (variant === 'dart-map') {
-    return 6;
+    return Math.min(6, Math.max(sourceLength, 1));
   }
 
-  return 3;
+  return Math.max(sourceLength, 1);
 }
 
-function buildChoiceLock(insights: CandidateInsight[], variant: DrawVariant): DrawChoiceLock {
-  const seed = createChoiceSeed();
+function buildChoiceLock(
+  insights: CandidateInsight[],
+  variant: DrawVariant,
+  seedOverride?: string,
+): DrawChoiceLock {
+  const seed = seedOverride ?? createChoiceSeed();
   const uniqueInsights = getUniqueInsights(insights);
   const source = uniqueInsights.length ? uniqueInsights : insights;
-  const count = Math.min(getChoiceCount(variant), Math.max(source.length, 1));
+  const count = getChoiceCount(variant, source.length);
   const shuffled = [...source].sort((a, b) => {
     const aValue = seededNumber(seed, `${a.candidate.id}:${a.candidate.name}`);
     const bValue = seededNumber(seed, `${b.candidate.id}:${b.candidate.name}`);
@@ -487,7 +724,7 @@ function CardShuffleStage({
                     {isWinner ? insight.candidate.name : '?'}
                   </div>
                   <div className="mt-2 text-xs opacity-70">
-                    {isWinner ? insight.candidate.district : '뒤집는 중'}
+                    {isWinner ? '선택 완료' : '뒤집는 중'}
                   </div>
                 </div>
               </motion.div>
@@ -775,6 +1012,14 @@ function DrawVariantIcon({
     return <Crosshair className={className} />;
   }
 
+  if (variant === 'ladder-game') {
+    return <ScanLine className={className} />;
+  }
+
+  if (variant === 'spin-wheel') {
+    return <Crosshair className={className} />;
+  }
+
   return <MapPin className={className} />;
 }
 
@@ -815,6 +1060,473 @@ function CardBackGraphic({
   );
 }
 
+function TarotChoiceCard({
+  slot,
+  index,
+  accent,
+  compact = false,
+  active = false,
+  revealed = false,
+  dimmed = false,
+  onChoose,
+}: {
+  slot: DrawChoiceSlot;
+  index: number;
+  accent: string;
+  compact?: boolean;
+  active?: boolean;
+  revealed?: boolean;
+  dimmed?: boolean;
+  onChoose?: (index: number) => void;
+}) {
+  const choiceLabel = getChoiceDisplayLabel('card-shuffle', slot, index);
+  const showFront = revealed;
+  const ranks = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5'];
+  const suits = ['♠', '♥', '♦', '♣'];
+  const rank = ranks[index % ranks.length] ?? `${index + 1}`;
+  const suit = suits[index % suits.length] ?? '♠';
+  const isRedSuit = suit === '♥' || suit === '♦';
+
+  return (
+    <motion.button
+      type="button"
+      onClick={() => onChoose?.(index)}
+      disabled={!onChoose}
+      className={`group relative aspect-[5/7] w-full text-left [perspective:900px] transition-opacity ${
+        dimmed ? 'opacity-35' : 'opacity-100'
+      } ${compact ? 'max-h-40' : ''}`}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{
+        opacity: dimmed ? 0.35 : 1,
+        y: active && !revealed ? -3 : 0,
+        scale: active ? 1.02 : 1,
+      }}
+      whileHover={onChoose ? { y: -3, scale: 1.015 } : undefined}
+      transition={{
+        delay: onChoose ? index * 0.035 : 0,
+        duration: 0.28,
+      }}
+      aria-label={`${choiceLabel} 선택`}
+    >
+      <motion.div
+        className={`relative h-full rounded-[1.05rem] border bg-white p-1.5 shadow-[0_14px_28px_rgba(31,42,68,0.12)] [transform-style:preserve-3d] ${
+          active && revealed ? 'border-[#1f2a44]' : 'border-[#e8edf3]'
+        }`}
+        animate={{ rotateY: showFront ? 180 : 0 }}
+        transition={{ duration: 0.82, ease: [0.16, 1, 0.3, 1] }}
+      >
+        <div
+          className="absolute inset-0 overflow-hidden rounded-[1.05rem] bg-white p-2 [backface-visibility:hidden]"
+          style={{ backfaceVisibility: 'hidden' }}
+        >
+          <div
+            className="relative h-full overflow-hidden rounded-[0.78rem] bg-[#1f2a44]"
+            style={{
+              boxShadow: `inset 0 0 0 1px ${accent}22`,
+            }}
+          >
+            <div className="absolute inset-[0.48rem] rounded-[0.55rem] border border-white/20" />
+            <div className="absolute inset-[1rem] rounded-[0.45rem] border border-white/10" />
+            <div className="absolute left-3 top-2.5 text-center text-[13px] font-black leading-none text-white">
+              <div>{rank}</div>
+              <div className="mt-0.5 text-[11px]" style={{ color: isRedSuit ? '#ff7b6b' : '#ffffff' }}>
+                {suit}
+              </div>
+            </div>
+            <div className="absolute bottom-2.5 right-3 rotate-180 text-center text-[13px] font-black leading-none text-white">
+              <div>{rank}</div>
+              <div className="mt-0.5 text-[11px]" style={{ color: isRedSuit ? '#ff7b6b' : '#ffffff' }}>
+                {suit}
+              </div>
+            </div>
+            <div className="absolute left-1/2 top-1/2 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-white/10 text-2xl font-black text-white">
+              ?
+            </div>
+            {active && !revealed ? (
+              <motion.div
+                className="absolute inset-0"
+                style={{ boxShadow: `inset 0 0 0 3px ${accent}` }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.18 }}
+              />
+            ) : null}
+          </div>
+        </div>
+
+        <div
+          className={`absolute inset-0 flex flex-col justify-between rounded-[1.05rem] border p-3 text-center [backface-visibility:hidden] ${
+            active && revealed ? 'bg-[#1f2a44] text-white' : 'bg-white text-[#1f2a44]'
+          }`}
+          style={{
+            backfaceVisibility: 'hidden',
+            transform: 'rotateY(180deg)',
+          }}
+        >
+          <div
+            className={`text-left text-base font-black leading-none ${active && revealed ? 'text-white/80' : isRedSuit ? 'text-[#ff7b6b]' : 'text-[#1f2a44]'}`}
+          >
+            <div>{rank}</div>
+            <div className="mt-0.5 text-sm">{suit}</div>
+          </div>
+          <motion.div
+            className="min-w-0"
+            initial={false}
+            animate={{ opacity: showFront ? 1 : 0, y: showFront ? 0 : 8 }}
+            transition={{ delay: 0.45, duration: 0.45 }}
+          >
+            <div className="line-clamp-2 text-base font-black leading-tight tracking-[-0.05em]">
+              {slot.insight.candidate.name}
+            </div>
+          </motion.div>
+          <div className={`self-end rotate-180 text-base font-black leading-none ${active && revealed ? 'text-white/80' : isRedSuit ? 'text-[#ff7b6b]' : 'text-[#1f2a44]'}`}>
+            <div>{rank}</div>
+            <div className="mt-0.5 text-sm">{suit}</div>
+          </div>
+        </div>
+      </motion.div>
+    </motion.button>
+  );
+}
+
+function TarotCardGrid({
+  lock,
+  accent,
+  selectedIndex = null,
+  revealed = false,
+  onChoose,
+}: {
+  lock: DrawChoiceLock;
+  accent: string;
+  selectedIndex?: number | null;
+  revealed?: boolean;
+  onChoose?: (index: number) => void;
+}) {
+  const compact = lock.slots.length >= 7;
+
+  return (
+    <div className="max-h-[calc(100vh-5rem)] overflow-y-auto px-1 py-2">
+      <div
+        className={`mx-auto grid max-w-3xl grid-cols-2 gap-3 sm:gap-4 ${
+          lock.slots.length <= 4 ? 'sm:grid-cols-4' : 'sm:grid-cols-5'
+        }`}
+      >
+        {lock.slots.map((slot, index) => {
+          const active = selectedIndex === index;
+
+          return (
+            <TarotChoiceCard
+              key={slot.id}
+              slot={slot}
+              index={index}
+              accent={accent}
+              compact={compact}
+              active={active}
+              revealed={revealed}
+              dimmed={selectedIndex !== null && !active && !revealed}
+              onChoose={onChoose}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function WheelFace({
+  lock,
+  accent,
+  rotation,
+  selectedIndex = null,
+  revealed = false,
+  dragStrength = 0,
+  isDragging = false,
+  isSpinning = false,
+  spinDuration = 0.5,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+}: {
+  lock: DrawChoiceLock;
+  accent: string;
+  rotation: number;
+  selectedIndex?: number | null;
+  revealed?: boolean;
+  dragStrength?: number;
+  isDragging?: boolean;
+  isSpinning?: boolean;
+  spinDuration?: number;
+  onPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerMove?: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerUp?: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerCancel?: (event: ReactPointerEvent<HTMLDivElement>) => void;
+}) {
+  const count = Math.max(lock.slots.length, 1);
+  const selectedSlot = selectedIndex === null ? null : lock.slots[selectedIndex] ?? null;
+
+  return (
+    <div className="relative mx-auto w-full max-w-sm">
+      <div className="absolute left-1/2 top-0 z-20 h-0 w-0 -translate-x-1/2 -translate-y-2 border-x-[13px] border-t-[24px] border-x-transparent border-t-[#1f2a44] drop-shadow-[0_8px_12px_rgba(31,42,68,0.2)]" />
+      <div
+        role={onPointerDown ? 'slider' : 'img'}
+        aria-label="드래그해서 돌림판 돌리기"
+        tabIndex={onPointerDown ? 0 : -1}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        className={`relative mx-auto flex h-72 w-72 touch-none select-none items-center justify-center rounded-full border-[10px] border-white bg-white shadow-[0_28px_70px_rgba(31,42,68,0.18)] ${
+          onPointerDown ? 'cursor-grab active:cursor-grabbing' : ''
+        }`}
+      >
+        <motion.div
+          className="absolute inset-0 overflow-hidden rounded-full"
+          style={{ background: getWheelBackground(count) }}
+          animate={{ rotate: rotation }}
+          transition={
+            isDragging
+              ? { duration: 0 }
+              : isSpinning
+                ? { duration: spinDuration, ease: [0.16, 1, 0.3, 1] }
+                : { duration: 0.42, ease: 'easeOut' }
+          }
+        >
+          {lock.slots.map((slot, index) => {
+            const angle = (360 / count) * index + 180 / count;
+            const active = selectedIndex === index;
+
+            return (
+              <div
+                key={`wheel-label-${slot.id}`}
+                className={`absolute left-1/2 top-1/2 flex h-8 w-8 items-center justify-center rounded-full text-xs font-black shadow-sm ${
+                  active && revealed ? 'bg-[#1f2a44] text-white' : 'bg-white/88 text-[#1f2a44]'
+                }`}
+                style={{
+                  transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-6.8rem) rotate(${-angle}deg)`,
+                }}
+              >
+                {index + 1}
+              </div>
+            );
+          })}
+          <div className="absolute inset-[4.15rem] rounded-full border border-white/45 bg-white/16" />
+        </motion.div>
+
+        <div className="relative z-10 flex h-28 w-28 flex-col items-center justify-center rounded-full border border-white/80 bg-white/94 px-3 text-center shadow-[0_18px_38px_rgba(31,42,68,0.18)]">
+          {revealed && selectedSlot ? (
+            <motion.div
+              initial={{ opacity: 0, y: 8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.5 }}
+              className="min-w-0"
+            >
+              <div className="text-[10px] font-black" style={{ color: accent }}>
+                {selectedIndex !== null ? `${selectedIndex + 1}번` : '결과'}
+              </div>
+              <div className="mt-1 line-clamp-2 text-base font-black leading-tight tracking-[-0.05em] text-[#1f2a44]">
+                {selectedSlot.insight.candidate.name}
+              </div>
+            </motion.div>
+          ) : isSpinning ? (
+            <>
+              <div className="text-xs font-bold text-[#8a94a2]">돌아가는 중</div>
+              <motion.div
+                className="mt-2 h-2 w-14 overflow-hidden rounded-full bg-[#f0edf0]"
+                animate={{ opacity: [0.65, 1, 0.65] }}
+                transition={{ duration: 0.75, repeat: Infinity }}
+              >
+                <div className="h-full rounded-full" style={{ width: '70%', backgroundColor: accent }} />
+              </motion.div>
+            </>
+          ) : (
+            <>
+              <div className="text-xs font-bold text-[#8a94a2]">
+                {isDragging ? '힘 조절 중' : '드래그'}
+              </div>
+              <div className="mt-1 text-2xl font-black text-[#1f2a44]">돌림</div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="mx-auto mt-4 max-w-xs rounded-2xl bg-white/82 px-4 py-3 shadow-sm">
+        <div className="flex items-center justify-between text-xs font-bold text-[#76777e]">
+          <span>세기</span>
+          <span>{Math.round(dragStrength * 100)}%</span>
+        </div>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#e7edf2]">
+          <motion.div
+            className="h-full rounded-full"
+            style={{ backgroundColor: accent }}
+            animate={{ width: `${Math.max(dragStrength * 100, isDragging ? 8 : 0)}%` }}
+            transition={{ duration: 0.14 }}
+          />
+        </div>
+      </div>
+
+      {revealed ? (
+        <div className="mt-3 max-h-24 overflow-y-auto rounded-2xl bg-white/70 p-2">
+          <div className="grid grid-cols-2 gap-1.5">
+            {lock.slots.map((slot, index) => (
+              <div
+                key={`wheel-option-${slot.id}`}
+                className={`min-w-0 rounded-full px-2.5 py-1.5 text-[11px] font-semibold ${
+                  selectedIndex === index
+                    ? 'bg-[#1f2a44] text-white'
+                    : 'bg-white text-[#1f2a44]'
+                }`}
+              >
+                <span className="mr-1 font-black">{index + 1}</span>
+                <span className="align-middle">{slot.insight.candidate.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 rounded-2xl bg-white/70 px-4 py-3 text-center text-xs font-semibold text-[#76777e] shadow-sm">
+          잡고 끌었다 놓으면 회전 세기가 정해져요.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SpinWheelChoice({
+  lock,
+  accent,
+  onChoose,
+}: {
+  lock: DrawChoiceLock;
+  accent: string;
+  onChoose?: (index: number) => void;
+}) {
+  const dragRef = useRef({ lastAngle: 0, totalDelta: 0 });
+  const rotationRef = useRef(0);
+  const strengthRef = useRef(0);
+  const frameRef = useRef<number | null>(null);
+  const pendingRotationRef = useRef(0);
+  const isDraggingRef = useRef(false);
+  const isSpinningRef = useRef(false);
+  const timeoutRef = useRef<number | null>(null);
+  const [rotation, setRotation] = useState(0);
+  const [dragStrength, setDragStrength] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isSpinning, setIsSpinning] = useState(false);
+  const [spinDuration, setSpinDuration] = useState(0.5);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current);
+      }
+
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+      }
+    },
+    [],
+  );
+
+  const updateRotation = (nextRotation: number) => {
+    rotationRef.current = nextRotation;
+    pendingRotationRef.current = nextRotation;
+
+    if (frameRef.current !== null) {
+      return;
+    }
+
+    frameRef.current = window.requestAnimationFrame(() => {
+      frameRef.current = null;
+      setRotation(pendingRotationRef.current);
+    });
+  };
+
+  const updateStrength = (nextStrength: number) => {
+    if (Math.abs(nextStrength - strengthRef.current) < 0.025 && nextStrength < 1) {
+      return;
+    }
+
+    strengthRef.current = nextStrength;
+    setDragStrength(nextStrength);
+  };
+
+  const finishSpin = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current || isSpinningRef.current) {
+      return;
+    }
+
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    isDraggingRef.current = false;
+    setIsDragging(false);
+
+    const totalDelta = dragRef.current.totalDelta;
+    const direction = totalDelta >= 0 ? 1 : -1;
+    const strength = clamp(Math.abs(totalDelta) / 520, 0.25, 1);
+    const bonus = seededNumber(lock.seed, `wheel-${Math.round(rotationRef.current)}-${Math.round(totalDelta)}`) * 180;
+    const rawFinalRotation = rotationRef.current + direction * (900 + strength * 1900 + bonus);
+    const nextSelectedIndex = getWheelSelectedIndex(rawFinalRotation, lock.slots.length);
+    const finalRotation = getWheelRotationForIndex(nextSelectedIndex, lock.slots.length, rawFinalRotation);
+    const duration = clamp(2.1 + strength * 2.4, 2.1, 4.6);
+
+    setDragStrength(strength);
+    setSpinDuration(duration);
+    isSpinningRef.current = true;
+    setIsSpinning(true);
+    setSelectedIndex(nextSelectedIndex);
+    updateRotation(finalRotation);
+
+    timeoutRef.current = window.setTimeout(() => {
+      onChoose?.(nextSelectedIndex);
+    }, duration * 1000 + 120);
+  };
+
+  return (
+    <WheelFace
+      lock={lock}
+      accent={accent}
+      rotation={rotation}
+      selectedIndex={selectedIndex}
+      dragStrength={dragStrength}
+      isDragging={isDragging}
+      isSpinning={isSpinning}
+      spinDuration={spinDuration}
+      onPointerDown={(event) => {
+        if (isSpinning || !onChoose) {
+          return;
+        }
+
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        const startAngle = getPointerAngle(event, event.currentTarget);
+        dragRef.current = { lastAngle: startAngle, totalDelta: 0 };
+        isDraggingRef.current = true;
+        strengthRef.current = 0;
+        setSelectedIndex(null);
+        setDragStrength(0);
+        setIsDragging(true);
+      }}
+      onPointerMove={(event) => {
+        if (!isDragging || isSpinning) {
+          return;
+        }
+
+        const nextAngle = getPointerAngle(event, event.currentTarget);
+        const delta = getShortestAngleDelta(dragRef.current.lastAngle, nextAngle);
+        const nextRotation = rotationRef.current + delta;
+        dragRef.current = {
+          lastAngle: nextAngle,
+          totalDelta: dragRef.current.totalDelta + delta,
+        };
+        updateRotation(nextRotation);
+        updateStrength(clamp(Math.abs(dragRef.current.totalDelta) / 520, 0.05, 1));
+      }}
+      onPointerUp={finishSpin}
+      onPointerCancel={finishSpin}
+    />
+  );
+}
+
 function CupGraphic({
   label,
   active = true,
@@ -843,6 +1555,218 @@ function CupGraphic({
   );
 }
 
+function LadderBoard({
+  lock,
+  accent,
+  bars,
+  selectedIndex = null,
+  revealed = false,
+  onBarsChange,
+  onChoose,
+}: {
+  lock: DrawChoiceLock;
+  accent: string;
+  bars: LadderBar[];
+  selectedIndex?: number | null;
+  revealed?: boolean;
+  onBarsChange?: (bars: LadderBar[]) => void;
+  onChoose?: (index: number) => void;
+}) {
+  const count = lock.slots.length;
+  const sortedBars = useMemo(() => sortLadderBars(bars), [bars]);
+  const resultIndex =
+    selectedIndex === null ? null : getLadderResultIndex(lock, selectedIndex, sortedBars);
+  const pathSegments =
+    selectedIndex === null ? [] : getLadderPathSegments(lock, selectedIndex, sortedBars);
+  const canEditBars = Boolean(onBarsChange && selectedIndex === null && !revealed);
+  const isDense = count >= 6;
+  const isVeryDense = count >= 8;
+  const topButtonClass = isVeryDense
+    ? 'h-9 text-xs'
+    : isDense
+      ? 'h-9 text-xs'
+      : 'h-10 text-sm';
+  const resultChipClass = isVeryDense
+    ? 'h-10 px-1 text-[9px]'
+    : isDense
+      ? 'h-10 px-1 text-[10px]'
+      : 'h-11 px-2 text-[11px]';
+  const hiddenResultChipClass = isVeryDense
+    ? 'h-10 text-xs'
+    : isDense
+      ? 'h-10 text-sm'
+      : 'h-11 text-sm';
+  const boardHeightClass = isVeryDense ? 'h-[25rem] sm:h-[29rem]' : 'h-[26rem] sm:h-[30rem]';
+  const slotGridStyle = {
+    gridTemplateColumns: `repeat(${Math.max(count, 1)}, minmax(0, 1fr))`,
+  };
+  const addBarFromPointer = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (!canEditBars || !onBarsChange) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * 100;
+    const y = ((event.clientY - rect.top) / Math.max(rect.height, 1)) * 100;
+    const nextBar = getLadderBarFromPoint(lock, x, y);
+
+    if (!nextBar || !shouldAddLadderBar(sortedBars, nextBar)) {
+      return;
+    }
+
+    onBarsChange(sortLadderBars([...sortedBars, nextBar]));
+  };
+
+  return (
+    <div className={`relative mx-auto w-full max-w-4xl overflow-visible bg-transparent ${boardHeightClass}`}>
+      <div
+        className="absolute inset-x-0 top-0 z-10 grid gap-2 px-1"
+        style={slotGridStyle}
+      >
+          {lock.slots.map((slot, index) => {
+            const active = selectedIndex === index;
+
+            return (
+              <button
+                key={slot.id}
+                type="button"
+                onClick={() => onChoose?.(index)}
+                disabled={!onChoose}
+                className={`flex min-w-0 items-center justify-center rounded-xl border font-bold shadow-sm transition-transform active:scale-95 ${topButtonClass} ${
+                  active
+                    ? 'border-[#1f2a44] bg-[#1f2a44] text-white'
+                    : 'border-[#dbe3ea] bg-white text-[#1f2a44] disabled:text-[#1f2a44]'
+                }`}
+              >
+                <span className="block truncate px-1">{slot.label}</span>
+              </button>
+            );
+          })}
+      </div>
+
+      <div className="absolute inset-x-0 bottom-16 top-14 z-0">
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+          className={`h-full w-full touch-none overflow-visible ${
+              canEditBars ? 'cursor-crosshair' : ''
+            }`}
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture?.(event.pointerId);
+              addBarFromPointer(event);
+            }}
+            onPointerMove={(event) => {
+              if (event.buttons === 1) {
+                addBarFromPointer(event);
+              }
+            }}
+          >
+            <rect width="100" height="100" fill="transparent" />
+            {lock.slots.map((slot, index) => {
+              const x = getLadderColumnX(index, count);
+
+              return (
+                <line
+                  key={`column-${slot.id}`}
+                  x1={x}
+                  x2={x}
+                  y1="0"
+                  y2="100"
+                  stroke="rgba(31,42,68,0.38)"
+                  strokeWidth="1.35"
+                  strokeLinecap="round"
+                />
+              );
+            })}
+
+            {sortedBars.map((bar) => {
+              const x1 = getLadderColumnX(bar.leftIndex, count);
+              const x2 = getLadderColumnX(bar.leftIndex + 1, count);
+
+              return (
+                <line
+                  key={bar.id}
+                  x1={x1}
+                  x2={x2}
+                  y1={bar.y}
+                  y2={bar.y}
+                  stroke="rgba(31,42,68,0.38)"
+                  strokeWidth="1.55"
+                  strokeLinecap="round"
+                />
+              );
+            })}
+
+            {pathSegments.map((segment, index) => {
+              const path =
+                segment.type === 'vertical'
+                  ? `M ${segment.x} ${segment.y1} L ${segment.x} ${segment.y2}`
+                  : `M ${segment.x1} ${segment.y} L ${segment.x2} ${segment.y}`;
+
+              return (
+                <motion.path
+                  key={`${segment.type}-${index}`}
+                  d={path}
+                  fill="none"
+                  stroke={accent}
+                  strokeWidth="3.2"
+                  strokeLinecap="round"
+                  initial={revealed ? false : { pathLength: 0, opacity: 0.1 }}
+                  animate={{
+                    pathLength: 1,
+                    opacity: 1,
+                  }}
+                  transition={{ duration: 0.9, delay: index * 0.22, ease: 'easeInOut' }}
+                />
+              );
+            })}
+          </svg>
+      </div>
+
+      <div
+        className="absolute inset-x-0 bottom-0 z-10 grid gap-2 px-1"
+        style={slotGridStyle}
+      >
+          {lock.slots.map((slot, index) => {
+            const active = resultIndex === index;
+
+            return (
+              <div
+                key={`result-${slot.id}`}
+              className={`flex min-w-0 items-center justify-center overflow-hidden rounded-xl border text-center font-semibold leading-tight shadow-sm ${
+                  revealed ? resultChipClass : hiddenResultChipClass
+                } ${
+                  active && revealed
+                    ? 'border-[#1f2a44] bg-[#1f2a44] text-white'
+                    : revealed
+                      ? 'border-[#dbe3ea] bg-white text-[#1f2a44]'
+                      : 'border-[#edf2f5] bg-white text-[#8a94a2]'
+                }`}
+              >
+                {revealed ? (
+                  <motion.span
+                    className="line-clamp-2"
+                    initial={active ? { clipPath: 'inset(0 100% 0 0)', opacity: 0 } : { opacity: 0 }}
+                    animate={active ? { clipPath: 'inset(0 0% 0 0)', opacity: 1 } : { opacity: 1 }}
+                    transition={{
+                      delay: active ? 0.55 : 0.9,
+                      duration: active ? 1.05 : 0.35,
+                      ease: 'easeOut',
+                    }}
+                  >
+                    {slot.insight.candidate.name}
+                  </motion.span>
+                ) : (
+                  <span className="text-base">?</span>
+                )}
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
+
 function DartGraphic({ compact = false }: { compact?: boolean }) {
   return (
     <div className={`relative ${compact ? 'h-12 w-16' : 'h-20 w-28'} rotate-[-28deg]`}>
@@ -855,152 +1779,483 @@ function DartGraphic({ compact = false }: { compact?: boolean }) {
   );
 }
 
+function MarkerPenGraphic({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className={`relative ${compact ? 'h-12 w-28' : 'h-16 w-40'}`}>
+      <div
+        className={`absolute left-0 top-1/2 h-0 w-0 -translate-y-1/2 border-y-transparent ${
+          compact
+            ? 'border-y-[6px] border-r-[18px] border-r-[#1f2a44]'
+            : 'border-y-[8px] border-r-[24px] border-r-[#1f2a44]'
+        }`}
+      />
+      <div
+        className={`absolute top-1/2 -translate-y-1/2 rounded-r-full rounded-l-md bg-[#1f2a44] shadow-[0_18px_34px_rgba(31,42,68,0.24)] ${
+          compact ? 'left-4 h-5 w-20' : 'left-5 h-7 w-28'
+        }`}
+      >
+        <div className="absolute inset-y-1 left-5 right-3 rounded-full bg-white/12" />
+        <div className="absolute bottom-1.5 left-6 right-8 h-1 rounded-full bg-white/22" />
+      </div>
+      <div
+        className={`absolute top-1/2 -translate-y-1/2 rounded-r-full bg-[#ff7b6b] ${
+          compact ? 'left-[5.7rem] h-7 w-8' : 'left-[7.5rem] h-9 w-11'
+        }`}
+      />
+      <div
+        className={`absolute top-1/2 -translate-y-1/2 rounded-full border border-white/70 bg-[#f8fafc] ${
+          compact ? 'left-[6.9rem] h-6 w-4' : 'left-[9.2rem] h-8 w-5'
+        }`}
+      />
+    </div>
+  );
+}
+
+function MapSnapshotLayer({
+  points,
+  winnerId,
+  activeId,
+  showLabelLimit = 7,
+}: {
+  points: PlacedCandidate[];
+  winnerId?: string | null;
+  activeId?: string | null;
+  showLabelLimit?: number;
+}) {
+  return (
+    <div className="absolute inset-0 overflow-hidden rounded-[1.5rem] bg-[#f6f2e9]">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
+        <path
+          d="M-8 62 C12 51, 22 69, 38 58 S62 45, 78 54 S101 47, 110 56 L110 100 L-8 100 Z"
+          fill="rgba(122,190,214,0.42)"
+        />
+        <path
+          d="M12 9 C25 3, 39 8, 43 20 C47 34, 30 43, 19 37 C8 31, 0 16, 12 9 Z"
+          fill="rgba(116,180,107,0.22)"
+        />
+        <path
+          d="M66 7 C79 5, 91 14, 93 27 C95 42, 75 46, 67 34 C60 24, 55 11, 66 7 Z"
+          fill="rgba(116,180,107,0.2)"
+        />
+        <path
+          d="M-3 33 C15 26, 29 39, 44 34 S73 18, 103 27"
+          fill="none"
+          stroke="rgba(243,167,61,0.8)"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+        />
+        <path
+          d="M-3 33 C15 26, 29 39, 44 34 S73 18, 103 27"
+          fill="none"
+          stroke="rgba(255,247,230,0.92)"
+          strokeWidth="1.35"
+          strokeLinecap="round"
+        />
+        <path
+          d="M5 78 C24 68, 38 78, 53 68 S78 54, 100 62"
+          fill="none"
+          stroke="rgba(243,167,61,0.72)"
+          strokeWidth="2.6"
+          strokeLinecap="round"
+        />
+        <path
+          d="M16 -5 C21 18, 28 35, 20 58 S19 82, 31 105"
+          fill="none"
+          stroke="rgba(243,167,61,0.55)"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <path
+          d="M58 -5 C52 18, 60 39, 55 57 S48 78, 56 105"
+          fill="none"
+          stroke="rgba(243,167,61,0.45)"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+        <path
+          d="M6 48 L19 41 L32 47 L47 39 L63 45 L79 37 L93 43"
+          fill="none"
+          stroke="rgba(31,42,68,0.14)"
+          strokeWidth="0.9"
+          strokeDasharray="2 3"
+        />
+        <path
+          d="M8 18 L22 23 L36 18 L51 25 L66 19 L84 24"
+          fill="none"
+          stroke="rgba(31,42,68,0.11)"
+          strokeWidth="0.8"
+          strokeDasharray="2 3"
+        />
+        <text x="13" y="33" fontSize="5" fontWeight="700" fill="rgba(31,42,68,0.3)">
+          은평
+        </text>
+        <text x="39" y="45" fontSize="5" fontWeight="700" fill="rgba(31,42,68,0.28)">
+          종로
+        </text>
+        <text x="65" y="52" fontSize="5" fontWeight="700" fill="rgba(31,42,68,0.28)">
+          성동
+        </text>
+        <text x="45" y="78" fontSize="5" fontWeight="700" fill="rgba(31,42,68,0.28)">
+          용산
+        </text>
+      </svg>
+
+      <div className="absolute left-3 top-3 rounded-full bg-white/86 px-3 py-1.5 text-[11px] font-semibold text-[#1f2a44] shadow-sm">
+        후보 지도 캡처
+      </div>
+      <div className="absolute bottom-3 left-3 rounded-full bg-white/88 px-3 py-1.5 text-xs text-[#6b7280] shadow-sm">
+        Zoom 11
+      </div>
+
+      {points.map((point, index) => {
+        const candidateId = point.insight.candidate.id;
+        const isWinner = candidateId === winnerId;
+        const isActive = candidateId === activeId;
+        const showLabel = isWinner || isActive || index < showLabelLimit;
+
+        return (
+          <div
+            key={`snapshot-${candidateId}`}
+            className="absolute -translate-x-1/2 -translate-y-1/2"
+            style={{ left: `${point.x}%`, top: `${point.y}%` }}
+          >
+            <motion.div
+              className={`relative flex h-6 w-6 items-center justify-center rounded-full border-[3px] shadow-[0_8px_18px_rgba(31,42,68,0.16)] ${
+                isWinner
+                  ? 'border-white bg-[#ff7b6b]'
+                  : isActive
+                    ? 'border-white bg-[#1f2a44]'
+                    : 'border-white bg-[#4f7cff]'
+              }`}
+              animate={{
+                scale: isWinner ? [1, 1.34, 1.08] : isActive ? [1, 1.18, 1] : 1,
+              }}
+              transition={{ duration: 0.6, repeat: isWinner ? Infinity : 0 }}
+            >
+              <span className="text-[10px] font-bold text-white">{index + 1}</span>
+              {isWinner && (
+                <motion.span
+                  className="absolute inset-[-12px] rounded-full border-2 border-[#ff7b6b]"
+                  initial={{ scale: 0.3, opacity: 0.65 }}
+                  animate={{ scale: 1.9, opacity: 0 }}
+                  transition={{ duration: 0.8, repeat: Infinity, ease: 'easeOut' }}
+                />
+              )}
+            </motion.div>
+
+            {showLabel && (
+              <div
+                className={`absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] shadow-sm ${
+                  isWinner ? 'bg-[#ff7b6b] text-white' : 'bg-white/92 text-[#1f2a44]'
+                }`}
+              >
+                {point.insight.candidate.name}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function escapeMapLabel(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function createLiveCandidateMarkerIcon(
+  name: string,
+  index: number,
+  state: 'normal' | 'active' | 'winner',
+) {
+  const isWinner = state === 'winner';
+  const isActive = state === 'active';
+  const markerColor = isWinner ? '#ff7b6b' : isActive ? '#1f2a44' : '#2f6df6';
+  const label = escapeMapLabel(name);
+
+  return {
+    content: `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;transform:translateY(-8px);">
+        <div style="position:relative;display:flex;align-items:center;justify-content:center;width:${isWinner ? 34 : 28}px;height:${isWinner ? 34 : 28}px;border-radius:9999px;background:${markerColor};color:white;border:3px solid rgba(255,255,255,0.96);box-shadow:0 12px 26px rgba(31,42,68,0.22);font-size:12px;font-weight:800;">
+          ${index + 1}
+          ${isWinner ? '<span style="position:absolute;inset:-12px;border:2px solid rgba(255,123,107,0.72);border-radius:9999px;"></span>' : ''}
+        </div>
+        <div style="max-width:124px;padding:4px 8px;border-radius:9999px;background:${isWinner ? 'rgba(255,123,107,0.96)' : 'rgba(255,255,255,0.94)'};color:${isWinner ? '#ffffff' : '#1f2a44'};font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 8px 18px rgba(31,42,68,0.12);">
+          ${label}
+        </div>
+      </div>
+    `,
+    size: new window.naver.maps.Size(140, isWinner ? 68 : 60),
+    anchor: new window.naver.maps.Point(70, isWinner ? 34 : 30),
+  };
+}
+
+function LiveCandidateMapLayer({
+  points,
+  winnerId,
+  activeId,
+}: {
+  points: PlacedCandidate[];
+  winnerId?: string | null;
+  activeId?: string | null;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<any>(null);
+  const overlaysRef = useRef<any[]>([]);
+  const [sdkError, setSdkError] = useState<string | null>(null);
+  const [sdkReady, setSdkReady] = useState(false);
+  const pointSignature = useMemo(
+    () =>
+      JSON.stringify(
+        points.map((point) => [
+          point.insight.candidate.id,
+          point.insight.candidate.coordinates.lat,
+          point.insight.candidate.coordinates.lng,
+        ]),
+      ),
+    [points],
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    let resizeObserver: ResizeObserver | null = null;
+
+    loadNaverMapSdk()
+      .then((maps) => {
+        if (!mounted || !containerRef.current) {
+          return;
+        }
+
+        const initializeOrResizeMap = () => {
+          if (!containerRef.current) {
+            return false;
+          }
+
+          const rect = containerRef.current.getBoundingClientRect();
+          const width = Math.max(1, Math.round(rect.width));
+          const height = Math.max(1, Math.round(rect.height));
+
+          if (width <= 1 || height <= 1) {
+            return false;
+          }
+
+          const firstPoint = points[0]?.insight.candidate.coordinates ?? { lat: 37.5665, lng: 126.978 };
+
+          if (!mapRef.current) {
+            mapRef.current = new maps.Map(containerRef.current, {
+              center: new maps.LatLng(firstPoint.lat, firstPoint.lng),
+              zoom: 11,
+              minZoom: 8,
+              maxZoom: 17,
+              size: new maps.Size(width, height),
+              zoomControl: false,
+              mapDataControl: false,
+              scaleControl: false,
+              logoControl: false,
+              keyboardShortcuts: false,
+              scrollWheel: false,
+              draggable: false,
+              pinchZoom: false,
+              disableDoubleTapZoom: true,
+              disableDoubleClickZoom: true,
+            });
+          } else {
+            mapRef.current.setSize(new maps.Size(width, height));
+          }
+
+          setSdkReady(true);
+          return true;
+        };
+
+        if (!initializeOrResizeMap() && containerRef.current && typeof ResizeObserver !== 'undefined') {
+          resizeObserver = new ResizeObserver(() => {
+            if (initializeOrResizeMap()) {
+              resizeObserver?.disconnect();
+            }
+          });
+          resizeObserver.observe(containerRef.current);
+          return;
+        }
+
+        if (containerRef.current && typeof ResizeObserver !== 'undefined') {
+          resizeObserver = new ResizeObserver(() => {
+            initializeOrResizeMap();
+          });
+          resizeObserver.observe(containerRef.current);
+        }
+      })
+      .catch((error: Error) => {
+        if (mounted) {
+          setSdkError(error.message);
+        }
+      });
+
+    return () => {
+      mounted = false;
+      resizeObserver?.disconnect();
+      overlaysRef.current.forEach((overlay) => overlay.setMap(null));
+      overlaysRef.current = [];
+    };
+  }, [pointSignature, points]);
+
+  useEffect(() => {
+    if (!sdkReady || !mapRef.current || !window.naver?.maps || !points.length) {
+      return;
+    }
+
+    const map = mapRef.current;
+    const maps = window.naver.maps;
+
+    overlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    overlaysRef.current = [];
+
+    const bounds = new maps.LatLngBounds();
+
+    points.forEach((point, index) => {
+      const candidate = point.insight.candidate;
+      const position = new maps.LatLng(candidate.coordinates.lat, candidate.coordinates.lng);
+      const state =
+        candidate.id === winnerId
+          ? 'winner'
+          : candidate.id === activeId
+            ? 'active'
+            : 'normal';
+
+      bounds.extend(position);
+
+      const marker = new maps.Marker({
+        map,
+        position,
+        title: candidate.name,
+        icon: createLiveCandidateMarkerIcon(candidate.name, index, state),
+      });
+
+      overlaysRef.current.push(marker);
+    });
+
+    if (points.length > 1) {
+      map.fitBounds(bounds, {
+        top: 46,
+        right: 34,
+        bottom: 64,
+        left: 34,
+      });
+    } else {
+      const only = points[0].insight.candidate.coordinates;
+      map.setCenter(new maps.LatLng(only.lat, only.lng));
+      map.setZoom(12);
+    }
+
+    return () => {
+      overlaysRef.current.forEach((overlay) => overlay.setMap(null));
+      overlaysRef.current = [];
+    };
+  }, [activeId, pointSignature, points, sdkReady, winnerId]);
+
+  if (sdkError) {
+    return <MapSnapshotLayer points={points} winnerId={winnerId} activeId={activeId} />;
+  }
+
+  return (
+    <div className="absolute inset-0 overflow-hidden rounded-[1.5rem] bg-[#eef3f7]">
+      <div ref={containerRef} className="absolute inset-0" />
+      {!sdkReady && (
+        <MapSnapshotLayer points={points} winnerId={winnerId} activeId={activeId} />
+      )}
+      <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-[#1f2a44] shadow-sm">
+        실시간 후보 지도
+      </div>
+    </div>
+  );
+}
+
 function DrawChoiceStage({
   variant,
   lock,
+  ladderBars,
+  candidatePoints = [],
+  onLadderBarsChange,
   onChoose,
+  waitingMessage,
 }: {
   variant: DrawVariant;
   lock: DrawChoiceLock;
-  onChoose: (index: number) => void;
+  ladderBars: LadderBar[];
+  candidatePoints?: PlacedCandidate[];
+  onLadderBarsChange?: (bars: LadderBar[]) => void;
+  onChoose?: (index: number) => void;
+  waitingMessage?: string;
 }) {
   const accent = drawVariantAccents[variant];
-  const isMapChoice = variant === 'dart-map' || variant === 'radar-scan';
-  const title =
-    variant === 'card-shuffle'
-      ? '한 장 뽑기'
-      : variant === 'shell-game'
-        ? '하나 고르기'
-        : '한 곳 찍기';
+  const isMapChoice = variant === 'dart-map';
+  const isLadder = variant === 'ladder-game';
+  const fallbackMapPoints: PlacedCandidate[] = lock.slots.map((slot) => ({
+    insight: slot.insight,
+    x: slot.x,
+    y: slot.y,
+  }));
+  const mapPoints = candidatePoints.length ? candidatePoints : fallbackMapPoints;
+  const canChoose = Boolean(onChoose);
   const action =
     variant === 'card-shuffle'
       ? '이 카드 뽑기'
       : variant === 'shell-game'
         ? '이 컵 열기'
-        : '여기로 던지기';
+        : variant === 'ladder-game'
+          ? '이 사다리 타기'
+          : variant === 'spin-wheel'
+            ? '돌림판 돌리기'
+            : '사인펜 찍기';
 
   return (
-    <div className="relative overflow-hidden rounded-[2rem] border border-white/80 bg-[#f5f1eb] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5)]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(255,123,107,0.2),transparent_34%),radial-gradient(circle_at_82%_80%,rgba(93,217,208,0.14),transparent_28%)]" />
-      <div className="absolute inset-0 opacity-40 bg-[linear-gradient(135deg,rgba(255,255,255,0.5)_1px,transparent_1px)] bg-[size:30px_30px]" />
-      <motion.div
-        className="absolute -left-20 top-16 h-44 w-44 rounded-full blur-3xl"
-        style={{ backgroundColor: `${accent}55` }}
-        animate={{ x: [0, 34, -10, 0], y: [0, 24, -12, 0], opacity: [0.32, 0.62, 0.4] }}
-        transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
-      />
-      <motion.div
-        className="absolute -right-16 bottom-8 h-36 w-36 rounded-full bg-white/18 blur-3xl"
-        animate={{ scale: [1, 1.25, 1], opacity: [0.22, 0.48, 0.22] }}
-        transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
-      />
-
-      <div className="relative min-h-[25rem] px-4 py-5 sm:min-h-[29rem] sm:px-6">
-        <div className="mb-5 flex items-start justify-center gap-4 text-center">
-          <div>
-            <div className="mt-2 text-3xl font-black tracking-[-0.06em] text-[#1f2a44]">
-              {title}
-            </div>
-            <div className="mt-2 text-sm font-medium text-[#76777e]">
-              운명의 선택지 하나를 골라보세요
-            </div>
-          </div>
-          <div
-            className="hidden h-16 w-16 items-center justify-center rounded-3xl text-[#1f2a44] sm:flex"
-            style={{ backgroundColor: `${accent}22` }}
-          >
-            <DrawVariantIcon variant={variant} className="h-7 w-7" />
-          </div>
-        </div>
-
+    <div className="relative overflow-visible">
+      <div
+        className={
+          isLadder
+            ? 'relative min-h-[22rem] p-1.5 sm:min-h-[24rem] sm:p-2'
+            : variant === 'spin-wheel'
+              ? 'relative min-h-[24rem] px-2 py-4 sm:min-h-[26rem] sm:px-4'
+              : 'relative px-1 py-2 sm:px-2'
+        }
+      >
         {isMapChoice ? (
-          <div className="relative h-[18rem] overflow-hidden rounded-[1.5rem] border border-white/12 bg-[#dfe8df] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.32)]">
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
-              <path d="M0 52 C18 42, 32 60, 46 50 S75 36, 100 48 L100 100 L0 100 Z" fill="rgba(100,181,176,0.32)" />
-              <path d="M7 20 L28 10 L46 19 L64 9 L91 22 L86 42 L94 65 L77 86 L54 79 L31 91 L10 76 L15 54 Z" fill="rgba(255,255,255,0.64)" stroke="rgba(31,42,68,0.1)" strokeWidth="0.8" />
-              <path d="M10 39 L29 34 L43 42 L61 32 L82 38" fill="none" stroke="rgba(31,42,68,0.17)" strokeWidth="1.1" strokeDasharray="3 3" />
-              <path d="M15 70 L33 60 L51 68 L69 56 L88 63" fill="none" stroke="rgba(31,42,68,0.13)" strokeWidth="1.1" strokeDasharray="3 3" />
-              <path d="M12 55 C28 44, 37 66, 52 53 S74 39, 91 53" fill="none" stroke="rgba(78,205,196,0.62)" strokeWidth="2.4" strokeLinecap="round" />
-            </svg>
+          <div className="relative h-[19rem] overflow-hidden rounded-[1.5rem] border border-white/70 bg-[#dfe8df] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.42)]">
+            <LiveCandidateMapLayer points={mapPoints} />
             <motion.div
-              className="pointer-events-none absolute right-5 top-4"
-              animate={{ x: [0, -12, 0], y: [0, 7, 0], rotate: [-28, -20, -28] }}
+              className="pointer-events-none absolute right-6 top-5 origin-left"
+              animate={{ x: [0, -12, 0], y: [0, 7, 0], rotate: [-26, -18, -26] }}
               transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
             >
-              <DartGraphic compact />
+              <MarkerPenGraphic compact />
             </motion.div>
 
-            {lock.slots.map((slot, index) => {
-              const choiceLabel = getChoiceDisplayLabel(variant, slot, index);
-
-              return (
-                <motion.button
-                  key={slot.id}
-                  type="button"
-                  onClick={() => onChoose(index)}
-                  className="absolute flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-[5px] border-white bg-white text-sm font-semibold text-[#1f2a44] shadow-[0_18px_35px_rgba(0,0,0,0.22)] transition-transform active:scale-95"
-                  style={{ left: `${slot.x}%`, top: `${slot.y}%` }}
-                  animate={{ scale: [1, 1.12, 1] }}
-                  transition={{ delay: index * 0.12, duration: 1.2, repeat: Infinity }}
-                  aria-label={`${action} ${choiceLabel}`}
-                >
-                  <motion.span
-                    className="absolute inset-[-12px] rounded-full border"
-                    style={{ borderColor: accent }}
-                    animate={{ scale: [0.7, 1.5], opacity: [0.6, 0] }}
-                    transition={{ delay: index * 0.12, duration: 1.2, repeat: Infinity }}
-                  />
-                  <span className="absolute inset-1 rounded-full border-4" style={{ borderColor: accent }} />
-                  <span className="absolute inset-4 rounded-full" style={{ backgroundColor: accent }} />
-                  <span className="relative text-white">{slot.label}</span>
-                </motion.button>
-              );
-            })}
+            <button
+              type="button"
+              onClick={() => onChoose?.(Math.floor(Math.random() * lock.slots.length))}
+              disabled={!canChoose}
+              className="absolute bottom-4 left-1/2 inline-flex h-12 -translate-x-1/2 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-5 text-sm font-semibold text-white shadow-[0_18px_34px_rgba(31,42,68,0.22)] transition-transform active:scale-95 disabled:opacity-50"
+            >
+              <Crosshair className="h-4 w-4" />
+              {action}
+            </button>
           </div>
         ) : variant === 'card-shuffle' ? (
-          <div className="relative h-[19rem] overflow-x-auto overflow-y-visible px-3 py-8 [perspective:1200px]">
-            <div
-              className="relative mx-auto h-56"
-              style={{
-                width: `${Math.max(23, lock.slots.length * 5.2 + 8)}rem`,
-              }}
-            >
-              {lock.slots.map((slot, index) => {
-                const choiceLabel = getChoiceDisplayLabel(variant, slot, index);
-                const center = (lock.slots.length - 1) / 2;
-                const offset = index - center;
-
-                return (
-                  <motion.button
-                    key={slot.id}
-                    type="button"
-                    onClick={() => onChoose(index)}
-                    className="group absolute top-3 w-36 origin-bottom overflow-visible transition-transform active:scale-95"
-                    style={{
-                      left: `${index * 5.2}rem`,
-                      zIndex: index + 1,
-                    }}
-                    initial={{ opacity: 0, y: 34, rotate: offset * 3.2 }}
-                    animate={{
-                      opacity: 1,
-                      y: Math.abs(offset) * 5,
-                      rotate: offset * 3.2,
-                    }}
-                    whileHover={{
-                      y: -24,
-                      rotate: 0,
-                      scale: 1.06,
-                      zIndex: 50,
-                    }}
-                    transition={{ delay: index * 0.045, type: 'spring', stiffness: 230, damping: 20 }}
-                    aria-label={`${action} ${choiceLabel}`}
-                  >
-                    <CardBackGraphic label={choiceLabel} accent={accent} />
-                  </motion.button>
-                );
-              })}
-            </div>
-          </div>
+          <TarotCardGrid lock={lock} accent={accent} onChoose={onChoose} />
+        ) : variant === 'ladder-game' ? (
+          <LadderBoard
+            lock={lock}
+            accent={accent}
+            bars={ladderBars}
+            onBarsChange={onLadderBarsChange}
+            onChoose={onChoose}
+          />
+        ) : variant === 'spin-wheel' ? (
+          <SpinWheelChoice lock={lock} accent={accent} onChoose={onChoose} />
         ) : (
           <div
             className={`grid gap-3 ${
@@ -1014,7 +2269,8 @@ function DrawChoiceStage({
                 <motion.button
                   key={slot.id}
                   type="button"
-                  onClick={() => onChoose(index)}
+                  onClick={() => onChoose?.(index)}
+                  disabled={!canChoose}
                   className={`group relative min-h-[10rem] overflow-hidden border p-4 text-left transition-transform active:scale-95 ${
                     variant === 'shell-game'
                       ? 'rounded-[1.4rem] border-white/0 bg-transparent shadow-none'
@@ -1029,7 +2285,7 @@ function DrawChoiceStage({
                     x: variant === 'shell-game' ? [0, index % 2 === 0 ? 10 : -10, 0] : 0,
                     rotate: variant === 'card-shuffle' ? (index % 2 === 0 ? -2 : 2) : 0,
                   }}
-                  whileHover={{ y: -8, rotate: 0 }}
+                  whileHover={canChoose ? { y: -8, rotate: 0 } : undefined}
                   transition={{
                     delay: index * 0.06,
                     duration: variant === 'shell-game' ? 1.05 : 0.34,
@@ -1050,6 +2306,12 @@ function DrawChoiceStage({
             })}
           </div>
         )}
+
+        {!canChoose && waitingMessage ? (
+          <div className="absolute inset-x-4 bottom-4 z-20 rounded-2xl border border-white/80 bg-white/95 px-4 py-3 text-center text-sm font-semibold text-[#1f2a44] shadow-[0_18px_42px_rgba(31,42,68,0.14)]">
+            {waitingMessage}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -1058,28 +2320,44 @@ function DrawChoiceStage({
 function PickedChoiceStage({
   variant,
   slot,
+  selectedIndex = 0,
   choiceLabel,
   lock,
+  ladderBars,
+  plan,
+  candidatePoints = [],
+  winnerPoint,
   phase,
 }: {
   variant: DrawVariant;
   slot: DrawChoiceSlot;
+  selectedIndex?: number;
   choiceLabel: string;
   lock: DrawChoiceLock;
+  ladderBars: LadderBar[];
+  plan: DrawPlan;
+  candidatePoints?: PlacedCandidate[];
+  winnerPoint: PlacedCandidate | null;
   phase: DrawPhase;
 }) {
   const accent = drawVariantAccents[variant];
-  const candidate = slot.insight.candidate;
+  const candidate = variant === 'dart-map' ? plan.winner.candidate : slot.insight.candidate;
   const isRevealed = phase === 'revealed';
+  const fallbackWinnerPoint = {
+    insight: plan.winner,
+    x: slot.x,
+    y: slot.y,
+  };
+  const mapWinnerPoint = winnerPoint ?? fallbackWinnerPoint;
+  const mapPoints = candidatePoints.length ? candidatePoints : [fallbackWinnerPoint];
+  const isLadder = variant === 'ladder-game';
 
   return (
-    <div className="relative overflow-hidden rounded-[2rem] border border-white/80 bg-[#f5f1eb] shadow-inner">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(255,123,107,0.2),transparent_34%),radial-gradient(circle_at_82%_80%,rgba(93,217,208,0.14),transparent_28%)]" />
-      <div className="absolute inset-0 opacity-50 bg-[linear-gradient(135deg,rgba(255,255,255,0.5)_1px,transparent_1px)] bg-[size:30px_30px]" />
+    <div className="relative overflow-visible">
       {isRevealed ? (
         <>
           <motion.div
-            className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/55"
+            className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#22c55e]/15"
             initial={{ scale: 0.3, opacity: 0.65 }}
             animate={{ scale: 1.8, opacity: 0 }}
             transition={{ duration: 0.78, ease: 'easeOut' }}
@@ -1090,7 +2368,7 @@ function PickedChoiceStage({
             return (
               <motion.div
                 key={index}
-                className="absolute left-1/2 top-1/2 h-2 w-2 rounded-full bg-white"
+                className="absolute left-1/2 top-1/2 h-1.5 w-1.5 rounded-full bg-[#22c55e]/40"
                 initial={{ x: 0, y: 0, scale: 0.6, opacity: 0.9 }}
                 animate={{
                   x: Math.cos(angle) * 150,
@@ -1105,19 +2383,26 @@ function PickedChoiceStage({
         </>
       ) : null}
 
-      <div className="relative flex min-h-[25rem] flex-col justify-between px-4 py-5 sm:min-h-[29rem] sm:px-6">
-        <div className="flex items-center justify-between gap-3">
-          <div className="hidden rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/70">
-            LOCK {lock.code}
-          </div>
-          <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-[#1f2a44] shadow-sm">
-            <DrawVariantIcon variant={variant} className="h-3.5 w-3.5" />
-            {choiceLabel}
-          </div>
-        </div>
-
-        <div className="flex flex-1 items-center justify-center py-8">
-          {variant === 'shell-game' ? (
+      <div
+        className={`relative flex flex-col ${
+          isLadder
+            ? 'min-h-[21.75rem] p-1.5 sm:min-h-[23.5rem] sm:p-2'
+            : variant === 'spin-wheel'
+              ? 'min-h-[24rem] justify-between px-2 py-4 sm:min-h-[26rem] sm:px-4'
+              : 'min-h-[20rem] justify-between px-1 py-2 sm:min-h-[22rem] sm:px-2'
+        }`}
+      >
+        <div className={`${isLadder ? 'flex flex-1 items-stretch justify-center' : 'flex flex-1 items-center justify-center'}`}>
+          {variant === 'card-shuffle' ? (
+            <div className="w-full max-w-3xl">
+              <TarotCardGrid
+                lock={lock}
+                accent={accent}
+                selectedIndex={selectedIndex}
+                revealed={isRevealed}
+              />
+            </div>
+          ) : variant === 'shell-game' ? (
             <div className="grid w-full max-w-xl grid-cols-3 gap-3">
               {Array.from({ length: 3 }, (_, index) => {
                 const active = `${index + 1}` === slot.label;
@@ -1170,61 +2455,101 @@ function PickedChoiceStage({
                 );
               })}
             </div>
+          ) : variant === 'ladder-game' ? (
+            <div className="w-full">
+              <LadderBoard
+                lock={lock}
+                accent={accent}
+                bars={ladderBars}
+                selectedIndex={selectedIndex}
+                revealed={isRevealed}
+              />
+            </div>
+          ) : variant === 'spin-wheel' ? (
+            <div className="w-full max-w-xl">
+              <WheelFace
+                lock={lock}
+                accent={accent}
+                rotation={getWheelRotationForIndex(selectedIndex, lock.slots.length)}
+                selectedIndex={selectedIndex}
+                revealed={isRevealed}
+                dragStrength={1}
+              />
+            </div>
           ) : variant === 'dart-map' ? (
-            <div className="relative h-[18rem] w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-white/12 bg-[#eef3f7]">
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
-                <path d="M0 52 C18 42, 32 60, 46 50 S75 36, 100 48 L100 100 L0 100 Z" fill="rgba(100,181,176,0.32)" />
-                <path d="M7 20 L28 10 L46 19 L64 9 L91 22 L86 42 L94 65 L77 86 L54 79 L31 91 L10 76 L15 54 Z" fill="rgba(255,255,255,0.66)" stroke="rgba(31,42,68,0.1)" strokeWidth="0.8" />
-                <path d="M10 39 L29 34 L43 42 L61 32 L82 38" fill="none" stroke="rgba(31,42,68,0.17)" strokeWidth="1.1" strokeDasharray="3 3" />
-                <path d="M15 70 L33 60 L51 68 L69 56 L88 63" fill="none" stroke="rgba(31,42,68,0.13)" strokeWidth="1.1" strokeDasharray="3 3" />
-                <path d="M12 55 C28 44, 37 66, 52 53 S74 39, 91 53" fill="none" stroke="rgba(78,205,196,0.62)" strokeWidth="2.4" strokeLinecap="round" />
-              </svg>
+            <div className="relative h-[20rem] w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-white/70 bg-[#dfe8df] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.42)]">
               <motion.div
-                className="absolute flex h-20 w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-[6px] border-white bg-white text-white shadow-[0_20px_42px_rgba(0,0,0,0.22)]"
-                style={{ left: `${slot.x}%`, top: `${slot.y}%` }}
-                initial={{ scale: 1.4, opacity: 0 }}
-                animate={{ scale: isRevealed ? 1 : [1.2, 0.9, 1], opacity: 1 }}
-                transition={{ duration: 0.56 }}
+                className="absolute inset-3 origin-center overflow-hidden rounded-[1.5rem]"
+                initial={{ rotate: -4, scale: 0.96 }}
+                animate={
+                  isRevealed
+                    ? { rotate: -1.5, x: 0, y: 0, scale: 1 }
+                    : {
+                        rotate: [-6, 18, -21, 15, -8, 3, -1.5],
+                        x: [0, -10, 9, -7, 5, -2, 0],
+                        y: [0, 6, -6, 4, -3, 1, 0],
+                        scale: [0.96, 1.01, 0.97, 1.01, 0.99, 1],
+                      }
+                }
+                transition={{ duration: isRevealed ? 0.38 : 2.05, ease: 'easeInOut' }}
               >
-                <motion.span
-                  className="absolute inset-[-28px] rounded-full border-2"
-                  style={{ borderColor: accent }}
-                  initial={{ scale: 0.25, opacity: 0.8 }}
-                  animate={{ scale: isRevealed ? 1.8 : 1.2, opacity: isRevealed ? 0 : 0.24 }}
-                  transition={{ duration: 0.62, ease: 'easeOut' }}
+                <LiveCandidateMapLayer
+                  points={mapPoints}
+                  winnerId={isRevealed ? plan.winner.candidate.id : null}
+                  activeId={!isRevealed ? plan.winner.candidate.id : null}
                 />
-                <span className="absolute inset-2 rounded-full border-[5px]" style={{ borderColor: accent }} />
-                <span className="absolute inset-6 rounded-full" style={{ backgroundColor: accent }} />
               </motion.div>
+
               <motion.div
-                className="absolute"
+                className="absolute z-20 origin-left"
+                style={{ transformOrigin: '0% 50%' }}
                 initial={{
-                  left: '105%',
-                  top: '106%',
-                  rotate: -36,
-                  scale: 1.45,
+                  left: '58%',
+                  top: '-10%',
+                  rotate: -34,
+                  scale: 1.18,
                   opacity: 0,
                 }}
-                animate={{
-                  left: `${slot.x}%`,
-                  top: `${slot.y}%`,
-                  rotate: -28,
-                  scale: isRevealed ? 0.82 : 1,
-                  opacity: 1,
-                }}
-                transition={{ duration: 0.58, ease: [0.16, 1, 0.3, 1] }}
+                animate={
+                  isRevealed
+                    ? {
+                        left: `${mapWinnerPoint.x}%`,
+                        top: `${mapWinnerPoint.y}%`,
+                        rotate: -24,
+                        scale: 0.92,
+                        opacity: 1,
+                      }
+                    : {
+                        left: ['58%', '42%', '70%', '34%', `${mapWinnerPoint.x}%`],
+                        top: ['-10%', '34%', '22%', '62%', `${mapWinnerPoint.y}%`],
+                        rotate: [-34, 12, -28, 18, -24],
+                        scale: [1.18, 1.05, 1.12, 1.02, 0.94],
+                        opacity: [0, 1, 1, 1, 1],
+                      }
+                }
+                transition={{ duration: isRevealed ? 0.34 : 2.05, ease: [0.16, 1, 0.3, 1] }}
               >
-                <div className="-translate-x-[62%] -translate-y-[48%]">
-                  <DartGraphic />
-                </div>
+                <MarkerPenGraphic />
               </motion.div>
+
+              {(phase === 'impact' || isRevealed) && (
+                <motion.div
+                  className="absolute z-10 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#ff7b6b] bg-[#ff7b6b]/18"
+                  style={{ left: `${mapWinnerPoint.x}%`, top: `${mapWinnerPoint.y}%` }}
+                  initial={{ opacity: 0.8, scale: 0.18 }}
+                  animate={{ opacity: 0, scale: 2.8 }}
+                  transition={{ duration: 0.68, ease: 'easeOut' }}
+                />
+              )}
+
               {isRevealed ? (
                 <motion.div
                   initial={{ opacity: 0, y: 18, scale: 0.96 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  className="absolute bottom-4 left-4 right-4 rounded-2xl bg-white px-4 py-3 text-center text-[#1a1a2e] shadow-sm"
+                  className="absolute bottom-4 left-4 right-4 z-30 rounded-2xl bg-white/94 px-4 py-3 text-center text-[#1a1a2e] shadow-sm backdrop-blur-sm"
                 >
-                  {candidate.name}
+                  <div className="text-xs font-semibold text-[#ff7b6b]">사인펜이 찍은 곳</div>
+                  <div className="mt-1 text-xl font-bold tracking-[-0.04em]">{candidate.name}</div>
                 </motion.div>
               ) : null}
             </div>
@@ -1306,18 +2631,38 @@ export function RandomDrawer({
   selectionMode = 'balance',
   thrillLevel = 1,
   candidateScope = 'standard',
+  participants = [],
+  drawSeed,
+  lockedWinner = null,
+  canChoose = true,
+  waitingMessage,
   onComplete,
   onClose,
 }: RandomDrawerProps) {
-  const [variant] = useState<DrawVariant>(() => getRandomVariant());
-  const [choiceLock] = useState<DrawChoiceLock>(() => buildChoiceLock(candidateInsights, variant));
+  const [variant] = useState<DrawVariant>(() =>
+    drawSeed ? getSeededVariant(drawSeed) : getRandomVariant(),
+  );
+  const [choiceLock] = useState<DrawChoiceLock>(() =>
+    buildChoiceLock(candidateInsights, variant, drawSeed),
+  );
+  const [ladderBars, setLadderBars] = useState<LadderBar[]>(() => getLadderBars(choiceLock));
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
-  const selectedChoice =
+  const selectedStartSlot =
     selectedSlotIndex === null ? null : choiceLock.slots[selectedSlotIndex] ?? null;
+  const selectedChoice =
+    selectedSlotIndex === null
+      ? null
+      : variant === 'ladder-game'
+        ? getLadderResultSlot(choiceLock, selectedSlotIndex, ladderBars)
+        : selectedStartSlot;
   const selectedChoiceLabel =
-    selectedChoice === null
+    selectedSlotIndex === null || selectedStartSlot === null
       ? '-'
-      : getChoiceDisplayLabel(variant, selectedChoice, selectedSlotIndex ?? 0);
+      : variant === 'dart-map'
+        ? '지도판 사인펜'
+        : getChoiceDisplayLabel(variant, selectedStartSlot, selectedSlotIndex);
+  const lockedChoiceInsight =
+    lockedWinner ?? (variant === 'dart-map' ? null : selectedChoice?.insight ?? null);
   const plan = useMemo(
     () =>
       buildDrawPlan(
@@ -1325,12 +2670,14 @@ export function RandomDrawer({
         selectionMode,
         thrillLevel,
         candidateScope,
-        selectedChoice?.insight ?? null,
+        lockedChoiceInsight,
+        participants,
       ),
     [
       candidateInsights,
       candidateScope,
-      selectedChoice?.insight,
+      lockedChoiceInsight,
+      participants,
       selectionMode,
       thrillLevel,
     ],
@@ -1343,6 +2690,14 @@ export function RandomDrawer({
   const [dropKey, setDropKey] = useState(0);
   const [landedIds, setLandedIds] = useState<Set<string>>(() => new Set());
   const autoCompleteRef = useRef(false);
+  const completePayloadRef = useRef({
+    lockCode: choiceLock.code,
+    onComplete,
+    selectedChoiceLabel,
+    variant,
+    variantLabel: drawVariantDisplayLabels[variant],
+    winner: plan.winner.candidate,
+  });
 
   const placedCandidates = useMemo(() => layoutCandidates(candidateInsights), [candidateInsights]);
   const visiblePoints = useMemo(() => getUniqueVisiblePoints(placedCandidates), [placedCandidates]);
@@ -1351,6 +2706,19 @@ export function RandomDrawer({
   const cameraState = useMemo(() => getPinCameraState(activePoint, phase), [activePoint, phase]);
   const progress = plan.sequence.length ? (stepIndex + 1) / plan.sequence.length : 0;
   const variantLabel = variant ? drawVariantDisplayLabels[variant] : '게임 선택';
+  const winnerCandidateId = plan.winner.candidate.id;
+  const isLadderVariant = variant === 'ladder-game';
+
+  useEffect(() => {
+    completePayloadRef.current = {
+      lockCode: choiceLock.code,
+      onComplete,
+      selectedChoiceLabel,
+      variant,
+      variantLabel,
+      winner: plan.winner.candidate,
+    };
+  });
 
   useEffect(() => {
     if (selectedSlotIndex === null) {
@@ -1359,26 +2727,56 @@ export function RandomDrawer({
     }
 
     let cancelled = false;
-    let timeoutId = 0;
+    const timeoutIds: number[] = [];
     autoCompleteRef.current = false;
 
-    setPhase('impact');
+    setPhase(variant === 'dart-map' ? 'boot' : 'impact');
     setStepIndex(0);
     setCurrentInsight(plan.winner);
-    setDropKey(0);
+    setDropKey((current) => current + 1);
     setLandedIds(new Set([plan.winner.candidate.id]));
 
-    timeoutId = window.setTimeout(() => {
+    if (variant === 'dart-map') {
+      timeoutIds.push(
+        window.setTimeout(() => {
+          if (!cancelled) {
+            setPhase('dropping');
+          }
+        }, 140),
+        window.setTimeout(() => {
+          if (!cancelled) {
+            setPhase('settling');
+          }
+        }, 1120),
+        window.setTimeout(() => {
+          if (!cancelled) {
+            setPhase('impact');
+          }
+        }, 1880),
+        window.setTimeout(() => {
+          if (!cancelled) {
+            setPhase('revealed');
+          }
+        }, 2520),
+      );
+
+      return () => {
+        cancelled = true;
+        timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      };
+    }
+
+    timeoutIds.push(window.setTimeout(() => {
       if (!cancelled) {
         setPhase('revealed');
       }
-    }, 620);
+    }, variant === 'spin-wheel' ? 180 : variant === 'ladder-game' ? 3900 : 1550));
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timeoutId);
+      timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
     };
-  }, [plan.winner, selectedSlotIndex]);
+  }, [selectedSlotIndex, variant, winnerCandidateId]);
 
   useEffect(() => {
     if (phase !== 'revealed' || autoCompleteRef.current) {
@@ -1387,39 +2785,41 @@ export function RandomDrawer({
 
     autoCompleteRef.current = true;
     const timeoutId = window.setTimeout(() => {
-      onComplete(plan.winner.candidate, {
-        variantLabel,
-        choiceLabel: selectedChoiceLabel,
-        lockCode: choiceLock.code,
+      const payload = completePayloadRef.current;
+
+      payload.onComplete(payload.winner, {
+        variantLabel: payload.variantLabel,
+        choiceLabel: payload.selectedChoiceLabel,
+        lockCode: payload.lockCode,
       });
-    }, 900);
+    }, variant === 'dart-map' ? 1400 : variant === 'ladder-game' ? 2300 : variant === 'spin-wheel' ? 900 : 1900);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [choiceLock.code, onComplete, phase, plan.winner.candidate, selectedChoiceLabel, variantLabel]);
+  }, [phase, variant]);
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto px-4 py-4 sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto px-2 py-2 sm:items-center"
     >
       <div
-        className="absolute inset-0 bg-[radial-gradient(circle_at_50%_38%,rgba(255,123,107,0.18),transparent_30rem),linear-gradient(180deg,rgba(245,241,235,0.98),rgba(251,248,251,0.98))]"
+        className="absolute inset-0 bg-white/82 backdrop-blur-sm"
         onClick={phase === 'choosing' || phase === 'revealed' ? onClose : undefined}
       />
 
       <motion.div
         initial={{ scale: 0.96, y: 18 }}
         animate={{ scale: 1, y: 0 }}
-        className="relative my-auto w-full max-w-3xl"
+        className={`relative my-auto w-full ${isLadderVariant ? 'max-w-2xl' : 'max-w-4xl'}`}
       >
         <button
           type="button"
           onClick={phase === 'choosing' || phase === 'revealed' ? onClose : undefined}
-          className={`absolute right-3 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-full border transition-colors ${
+          className={`fixed right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full border shadow-sm transition-colors ${
             phase === 'choosing' || phase === 'revealed'
               ? 'border-[#e8edf3] bg-white text-[#1f2a44]'
               : 'border-white/40 bg-white/30 text-[#1f2a44]/35'
@@ -1429,66 +2829,54 @@ export function RandomDrawer({
           <X className="h-5 w-5" />
         </button>
 
-        <div className="overflow-hidden rounded-[2.25rem] border border-white/80 bg-[#fbf8fb] shadow-[0_28px_80px_rgba(31,42,68,0.16)]">
-          <div className="px-5 pb-2 pt-4 sm:px-6">
-            <div className="flex items-center justify-between gap-3 pr-12">
-              <div className="inline-flex items-center gap-2 rounded-full bg-[#f5f1eb] px-3 py-2 text-xs font-semibold text-[#1f2a44] shadow-sm">
-                {variant === 'card-shuffle' && <Layers3 className="h-3.5 w-3.5 text-[#ff7b6b]" />}
-                {variant === 'shell-game' && <MapPin className="h-3.5 w-3.5 text-[#a78bfa]" />}
-                {variant === 'dart-map' && <Crosshair className="h-3.5 w-3.5 text-[#ff7b6b]" />}
-                {variantLabel}
-              </div>
-            </div>
-          </div>
-
-          <div className="p-3 sm:p-5">
+        <div>
+          <div className={isLadderVariant ? 'p-1.5 sm:p-2' : 'p-2 sm:p-3'}>
             {phase === 'choosing' ? (
               <DrawChoiceStage
                 variant={variant}
                 lock={choiceLock}
-                onChoose={(index) => {
-                  setSelectedSlotIndex(index);
-                }}
+                ladderBars={ladderBars}
+                candidatePoints={visiblePoints}
+                onLadderBarsChange={canChoose ? setLadderBars : undefined}
+                onChoose={
+                  canChoose
+                    ? (index) => {
+                        setSelectedSlotIndex(index);
+                      }
+                    : undefined
+                }
+                waitingMessage={waitingMessage}
               />
             ) : selectedChoice ? (
               <PickedChoiceStage
-                variant={variant}
-                slot={selectedChoice}
-                choiceLabel={selectedChoiceLabel}
+	                variant={variant}
+	                slot={selectedChoice}
+	                selectedIndex={selectedSlotIndex ?? 0}
+	                choiceLabel={selectedChoiceLabel}
                 lock={choiceLock}
+                ladderBars={ladderBars}
+                plan={plan}
+                candidatePoints={visiblePoints}
+                winnerPoint={winnerPoint}
                 phase={phase}
               />
             ) : (
               <DrawChoiceStage
                 variant={variant}
                 lock={choiceLock}
-                onChoose={(index) => {
-                  setSelectedSlotIndex(index);
-                }}
+                ladderBars={ladderBars}
+                candidatePoints={visiblePoints}
+                onLadderBarsChange={canChoose ? setLadderBars : undefined}
+                onChoose={
+                  canChoose
+                    ? (index) => {
+                        setSelectedSlotIndex(index);
+                      }
+                    : undefined
+                }
+                waitingMessage={waitingMessage}
               />
             )}
-
-            <AnimatePresence mode="wait">
-              {phase === 'revealed' ? (
-                <motion.div
-                  key="result"
-                  initial={{ opacity: 0, y: 10, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -12 }}
-                  className="mt-3 rounded-[1.25rem] bg-white px-5 py-5 text-center shadow-sm"
-                >
-                  <div className="text-4xl font-semibold tracking-[-0.04em] text-[#1a1a2e]">
-                    {plan.winner.candidate.name}
-                  </div>
-                  <div className="mt-2 text-sm text-[#8a94a2]">
-                    {plan.winner.candidate.district} · 평균 {plan.winner.averageDuration}분
-                  </div>
-                  <div className="mt-4 hidden rounded-full bg-[#f5f1eb] px-3 py-1.5 text-xs text-[#6b7280]">
-                    선택 {selectedChoiceLabel} · 잠금 코드 {choiceLock.code}
-                  </div>
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
 
           </div>
         </div>

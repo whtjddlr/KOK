@@ -115,8 +115,327 @@ function normalizeTargetCount(total: number, requestedTargetCount?: number) {
   return Math.max(1, Math.min(Math.round(requestedTargetCount), total));
 }
 
+function toThrillLevel(value: number): ThrillLevel {
+  return clamp(Math.round(value), 1, 5) as ThrillLevel;
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+const FAIRNESS_SPREAD_LIMIT_BY_LEVEL: Record<ThrillLevel, number> = {
+  1: 10,
+  2: 15,
+  3: 20,
+  4: 25,
+  5: 35,
+};
+
+const MIN_BALANCE_DRAW_POOL_SIZE = 3;
+const PREFERRED_BALANCE_DRAW_POOL_SIZE = 4;
+const FAIRNESS_LEVEL_DISTANCE_SCALE: Record<ThrillLevel, number> = {
+  1: 0.55,
+  2: 0.72,
+  3: 0.88,
+  4: 1,
+  5: 1.15,
+};
+const FAIRNESS_DYNAMIC_CAP_BY_LEVEL: Record<ThrillLevel, number> = {
+  1: 42,
+  2: 50,
+  3: 58,
+  4: 66,
+  5: 76,
+};
+
+function getAdaptiveFairnessSpreadBonus(participants: Participant[] = []) {
+  if (participants.length < 2) {
+    return 0;
+  }
+
+  const center = getBalancedParticipantCenter(participants, 'balance');
+  const pairDistanceKm = getMaxParticipantPairDistanceKm(participants);
+  const spreadKm = getParticipantSpreadKm(participants, center);
+  const pairBaseKm = participants.length >= 3 ? 18 : 16;
+  const pairBonus = Math.max(0, pairDistanceKm - pairBaseKm) * (participants.length >= 3 ? 0.42 : 0.32);
+  const spreadBonus = Math.max(0, spreadKm - 8) * (participants.length >= 3 ? 0.55 : 0.35);
+  const complexityBonus = Math.max(0, participants.length - 2) * 3;
+
+  return Math.min(30, Math.round(pairBonus + spreadBonus + complexityBonus));
+}
+
+export function getFairnessSpreadLimit(
+  level: ThrillLevel = 1,
+  participants: Participant[] = [],
+) {
+  const baseLimit = FAIRNESS_SPREAD_LIMIT_BY_LEVEL[level] ?? FAIRNESS_SPREAD_LIMIT_BY_LEVEL[1];
+  const adaptiveBonus = getAdaptiveFairnessSpreadBonus(participants);
+
+  if (!adaptiveBonus) {
+    return baseLimit;
+  }
+
+  return Math.round(
+    Math.min(
+      FAIRNESS_DYNAMIC_CAP_BY_LEVEL[level],
+      baseLimit + adaptiveBonus * FAIRNESS_LEVEL_DISTANCE_SCALE[level],
+    ),
+  );
+}
+
+function getFairnessOverage(
+  insight: CandidateInsight,
+  level: ThrillLevel = 1,
+  participants: Participant[] = [],
+) {
+  return Math.max(0, getEffectiveFairnessSpread(insight, participants) - getFairnessSpreadLimit(level, participants));
+}
+
+export interface MinorityBenefitProfile {
+  beneficiaryCount: number;
+  majorityCount: number;
+  majoritySpread: number;
+  effectiveSpread: number;
+  beneficiaryGap: number;
+}
+
+export function getMinorityBenefitProfile(
+  insight: Pick<CandidateInsight, 'travelInfo' | 'spreadDuration'>,
+  participants: Participant[] = [],
+): MinorityBenefitProfile | null {
+  const sortedDurations = [...insight.travelInfo]
+    .map((info) => info.duration)
+    .filter((duration) => Number.isFinite(duration))
+    .sort((left, right) => left - right);
+  const participantCount = sortedDurations.length;
+
+  if (participantCount < 3) {
+    return null;
+  }
+
+  const maxBeneficiaryCount = Math.max(
+    1,
+    Math.min(2, Math.floor(participantCount * (participantCount >= 6 ? 0.28 : 0.25))),
+  );
+  let bestProfile: MinorityBenefitProfile | null = null;
+
+  for (let beneficiaryCount = 1; beneficiaryCount <= maxBeneficiaryCount; beneficiaryCount += 1) {
+    const majorityDurations = sortedDurations.slice(beneficiaryCount);
+    const majorityCount = majorityDurations.length;
+
+    if (majorityCount < Math.max(2, Math.ceil(participantCount * 0.65))) {
+      continue;
+    }
+
+    const beneficiaryMax = sortedDurations[beneficiaryCount - 1];
+    const majorityMin = majorityDurations[0];
+    const majorityMax = majorityDurations[majorityDurations.length - 1];
+    const majorityMedian = majorityDurations[Math.floor((majorityDurations.length - 1) / 2)];
+    const beneficiaryGap = majorityMin - beneficiaryMax;
+    const requiredGap = Math.max(10, Math.round(majorityMedian * (participantCount >= 5 ? 0.2 : 0.24)));
+    const majoritySpread = majorityMax - majorityMin;
+    const majoritySpreadLimit = Math.max(
+      12,
+      Math.min(24, Math.round(majorityMedian * (participantCount >= 5 ? 0.38 : 0.34))),
+    );
+
+    if (beneficiaryGap < requiredGap || majoritySpread > majoritySpreadLimit) {
+      continue;
+    }
+
+    const beneficiaryPenalty = Math.min(12, Math.round(beneficiaryGap * (participantCount >= 5 ? 0.22 : 0.28)));
+    const crowdBonus = participantCount >= 5 ? Math.min(4, participantCount - 4) : 0;
+    const effectiveSpread = Math.max(
+      majoritySpread,
+      Math.round(majoritySpread + beneficiaryPenalty - crowdBonus),
+    );
+    const nextProfile = {
+      beneficiaryCount,
+      majorityCount,
+      majoritySpread,
+      effectiveSpread,
+      beneficiaryGap,
+    };
+
+    if (!bestProfile || nextProfile.effectiveSpread < bestProfile.effectiveSpread) {
+      bestProfile = nextProfile;
+    }
+  }
+
+  return bestProfile;
+}
+
+function getEffectiveFairnessSpread(
+  insight: CandidateInsight,
+  participants: Participant[] = [],
+) {
+  return getMinorityBenefitProfile(insight, participants)?.effectiveSpread ?? insight.spreadDuration;
+}
+
+function getLongTripPenalty(insight: CandidateInsight) {
+  return (
+    Math.max(0, insight.averageDuration - 48) * 0.85 +
+    Math.max(0, insight.farthestDuration - 58) * 0.55
+  );
+}
+
+function getCorridorDriftPenalty(insight: CandidateInsight) {
+  const axisDrift = Math.max(0, insight.axisDistance - 4.2);
+  const centerDrift = Math.max(0, insight.centerDistance - 8);
+  const equalLongTripPenalty =
+    insight.spreadDuration <= 10 && insight.averageDuration >= 34
+      ? (insight.averageDuration - 33) * 2.2
+      : 0;
+
+  return axisDrift * 8.5 + centerDrift * 5.4 + equalLongTripPenalty;
+}
+
+function isDetachedFairnessTrap(insight: CandidateInsight) {
+  return (
+    insight.axisDistance >= 6 &&
+    insight.centerDistance >= 7.5 &&
+    insight.averageDuration >= 34 &&
+    insight.spreadDuration <= 15
+  );
+}
+
+export function getPracticalRouteGuardedInsights(
+  insights: CandidateInsight[],
+  minCount = 4,
+) {
+  if (insights.length <= 3) {
+    return insights;
+  }
+
+  const reachableInsights = insights.filter((insight) => insight.allReachable);
+  const baselineSource =
+    reachableInsights.length >= Math.min(3, insights.length) ? reachableInsights : insights;
+  const bestAverageDuration = Math.min(
+    ...baselineSource.map((insight) => insight.averageDuration),
+  );
+  const bestFarthestDuration = Math.min(
+    ...baselineSource.map((insight) => insight.farthestDuration),
+  );
+  const bestCenterDistance = Math.min(
+    ...baselineSource.map((insight) => insight.centerDistance),
+  );
+  const bestAxisDistance = Math.min(...baselineSource.map((insight) => insight.axisDistance));
+
+  const guardedInsights = insights.filter((insight) => {
+    const detachedLowSpreadOutlier = isDetachedFairnessTrap(insight);
+    const lowSpreadButLonger =
+      insight.spreadDuration <= 12 &&
+      insight.averageDuration >= bestAverageDuration + 6 &&
+      insight.axisDistance >= Math.max(5.5, bestAxisDistance + 2.8);
+    const inefficientAgainstBest =
+      insight.averageDuration >= bestAverageDuration + 7 ||
+      insight.farthestDuration >= bestFarthestDuration + 5;
+
+    return !(lowSpreadButLonger || (detachedLowSpreadOutlier && inefficientAgainstBest));
+  });
+
+  if (guardedInsights.length >= Math.min(minCount, insights.length)) {
+    return guardedInsights;
+  }
+
+  const softlyGuardedInsights = insights.filter((insight) => {
+    const clearlyDetached =
+      insight.spreadDuration <= 8 &&
+      insight.averageDuration >= bestAverageDuration + 8 &&
+      insight.axisDistance >= Math.max(7, bestAxisDistance + 4);
+
+    return !clearlyDetached;
+  });
+
+  return softlyGuardedInsights.length >= Math.min(minCount, insights.length)
+    ? softlyGuardedInsights
+    : insights;
+}
+
+function getFairnessBand(
+  insight: CandidateInsight,
+  level: ThrillLevel = 1,
+  participants: Participant[] = [],
+) {
+  const limit = getFairnessSpreadLimit(level, participants);
+  const softLimit = Math.min(getFairnessSpreadLimit(5, participants), limit + 5);
+  const isDetached = isDetachedFairnessTrap(insight);
+  const effectiveSpread = getEffectiveFairnessSpread(insight, participants);
+
+  if (effectiveSpread <= limit && !isDetached) {
+    return 0;
+  }
+
+  if (effectiveSpread <= softLimit && !isDetached) {
+    return 1;
+  }
+
+  if (effectiveSpread <= limit) {
+    return 2;
+  }
+
+  if (effectiveSpread <= softLimit) {
+    return 3;
+  }
+
+  return 4;
+}
+
+function getFairnessRankingScore(
+  insight: CandidateInsight,
+  level: ThrillLevel = 1,
+  participants: Participant[] = [],
+) {
+  const overage = getFairnessOverage(insight, level, participants);
+  const overagePenalty = overage > 0 ? 80 + overage * 9 + overage * overage * 0.9 : 0;
+  const effectiveSpread = getEffectiveFairnessSpread(insight, participants);
+
+  return (
+    getBalanceRankingScore(insight, participants) +
+    effectiveSpread * 0.6 +
+    getLongTripPenalty(insight) +
+    overagePenalty +
+    (insight.allReachable ? 0 : 20)
+  );
+}
+
+function compareByFairnessLevel(
+  left: CandidateInsight,
+  right: CandidateInsight,
+  level: ThrillLevel = 1,
+  participants: Participant[] = [],
+) {
+  const leftBand = getFairnessBand(left, level, participants);
+  const rightBand = getFairnessBand(right, level, participants);
+
+  if (leftBand !== rightBand) {
+    return leftBand - rightBand;
+  }
+
+  const scoreDiff =
+    getFairnessRankingScore(left, level, participants) -
+    getFairnessRankingScore(right, level, participants);
+
+  if (Math.abs(scoreDiff) > 1) {
+    return scoreDiff;
+  }
+
+  const leftEffectiveSpread = getEffectiveFairnessSpread(left, participants);
+  const rightEffectiveSpread = getEffectiveFairnessSpread(right, participants);
+
+  if (leftEffectiveSpread !== rightEffectiveSpread) {
+    return leftEffectiveSpread - rightEffectiveSpread;
+  }
+
+  if (left.farthestDuration !== right.farthestDuration) {
+    return left.farthestDuration - right.farthestDuration;
+  }
+
+  return left.averageDuration - right.averageDuration;
+}
+
+function isFullyRouteVerifiedInsight(insight: CandidateInsight) {
+  return insight.routeVerification?.status === 'verified';
 }
 
 function mergeUniqueInsights(
@@ -134,6 +453,167 @@ function mergeUniqueInsights(
 
     merged.push(insight);
     seen.add(insight.candidate.id);
+
+    if (merged.length >= limit) {
+      break;
+    }
+  }
+
+  return merged.slice(0, limit);
+}
+
+function getBalanceRelaxLimits(level: ThrillLevel) {
+  return {
+    axisLimit: level <= 2 ? 3.25 : level <= 4 ? 4.15 : 4.8,
+    centerLimit: level <= 2 ? 7.4 : level <= 4 ? 8.8 : 10,
+    averageSlack: level <= 2 ? 10 : level <= 4 ? 14 : 18,
+    farthestSlack: level <= 2 ? 10 : level <= 4 ? 15 : 19,
+  };
+}
+
+function getAutoRelaxedBalancePool(
+  insights: CandidateInsight[],
+  startLevel: ThrillLevel,
+  targetSize: number,
+  participants: Participant[] = [],
+) {
+  const reachableInsights = insights.filter((insight) => insight.allReachable);
+  const baselineSource = reachableInsights.length ? reachableInsights : insights;
+  const bestAverageDuration = Math.min(
+    ...baselineSource.map((insight) => insight.averageDuration),
+  );
+  const bestFarthestDuration = Math.min(
+    ...baselineSource.map((insight) => insight.farthestDuration),
+  );
+  const bestCenterDistance = Math.min(
+    ...baselineSource.map((insight) => insight.centerDistance),
+  );
+  const bestAxisDistance = Math.min(...baselineSource.map((insight) => insight.axisDistance));
+  const minPoolSize = Math.min(targetSize, insights.length, MIN_BALANCE_DRAW_POOL_SIZE);
+  const preferredPoolSize = Math.min(
+    targetSize,
+    insights.length,
+    PREFERRED_BALANCE_DRAW_POOL_SIZE,
+  );
+  let relaxedToLevel: ThrillLevel = startLevel;
+  let pool: CandidateInsight[] = [];
+
+  for (let level = startLevel; level <= 5; level += 1) {
+    const relaxedLevel = toThrillLevel(level);
+    const spreadLimit = getFairnessSpreadLimit(relaxedLevel, participants);
+    const { axisLimit, centerLimit, averageSlack, farthestSlack } =
+      getBalanceRelaxLimits(relaxedLevel);
+    const rankedSource = [...insights].sort((left, right) =>
+      compareByFairnessLevel(left, right, relaxedLevel, participants),
+    );
+    const levelPool = rankedSource.filter((insight) => {
+      const routeVerifiedBonus = isFullyRouteVerifiedInsight(insight) ? 1.3 : 0;
+      const effectiveSpread = getEffectiveFairnessSpread(insight, participants);
+
+      return (
+        insight.allReachable &&
+        !isDetachedFairnessTrap(insight) &&
+        effectiveSpread <= spreadLimit &&
+        insight.axisDistance <= axisLimit + routeVerifiedBonus &&
+        insight.centerDistance <= centerLimit + routeVerifiedBonus &&
+        insight.averageDuration <= bestAverageDuration + averageSlack &&
+        insight.farthestDuration <= bestFarthestDuration + farthestSlack
+      );
+    });
+
+    pool = mergeUniqueInsights(pool, levelPool, targetSize);
+    relaxedToLevel = relaxedLevel;
+
+    if (pool.length >= preferredPoolSize) {
+      return {
+        pool,
+        relaxedToLevel,
+      };
+    }
+  }
+
+  const safeFallback = getPracticalRouteGuardedInsights(
+    [...insights].sort((left, right) => compareByFairnessLevel(left, right, 5, participants)),
+    minPoolSize,
+  ).filter((insight) => {
+    const { axisLimit, centerLimit, averageSlack, farthestSlack } = getBalanceRelaxLimits(5);
+    const effectiveSpread = getEffectiveFairnessSpread(insight, participants);
+
+    return (
+      insight.allReachable &&
+      !isDetachedFairnessTrap(insight) &&
+      effectiveSpread <= getFairnessSpreadLimit(5, participants) &&
+      insight.axisDistance <= axisLimit + 0.8 &&
+      insight.centerDistance <= centerLimit + 1.2 &&
+      insight.averageDuration <= bestAverageDuration + averageSlack + 4 &&
+      insight.farthestDuration <= bestFarthestDuration + farthestSlack + 5
+    );
+  });
+
+  const safeMergedPool = mergeUniqueInsights(pool, safeFallback, targetSize);
+
+  if (safeMergedPool.length >= minPoolSize) {
+    return {
+      pool: safeMergedPool,
+      relaxedToLevel,
+    };
+  }
+
+  const nearReachableFallback = getPracticalRouteGuardedInsights(
+    [...insights].sort((left, right) => compareByFairnessLevel(left, right, 5, participants)),
+    minPoolSize,
+  );
+  const centralFallbackCandidates = nearReachableFallback.filter((insight) => {
+    const fallbackAxisLimit = Math.max(8.5, bestAxisDistance + 5.2);
+    const fallbackCenterLimit = Math.max(11.5, bestCenterDistance + 5.8);
+
+    return (
+      !isDetachedFairnessTrap(insight) &&
+      insight.axisDistance <= fallbackAxisLimit &&
+      insight.centerDistance <= fallbackCenterLimit &&
+      insight.averageDuration <= bestAverageDuration + 10 &&
+      insight.farthestDuration <= bestFarthestDuration + 12
+    );
+  });
+  const bestCentralSpread = centralFallbackCandidates.length
+    ? Math.min(
+        ...centralFallbackCandidates.map((insight) =>
+          getEffectiveFairnessSpread(insight, participants),
+        ),
+      )
+    : getFairnessSpreadLimit(5, participants);
+  const impossibleFairnessSpreadLimit = Math.max(
+    getFairnessSpreadLimit(5, participants),
+    Math.min(72, bestCentralSpread + 14),
+  );
+  const impossibleFairnessFallback = centralFallbackCandidates.filter((insight) => {
+    return (
+      !isDetachedFairnessTrap(insight) &&
+      getEffectiveFairnessSpread(insight, participants) <= impossibleFairnessSpreadLimit
+    );
+  });
+
+  return {
+    pool: mergeUniqueInsights(safeMergedPool, impossibleFairnessFallback, targetSize),
+    relaxedToLevel,
+  };
+}
+
+function mergeUniqueRankedInsights<T extends { insight: CandidateInsight }>(
+  primary: T[],
+  secondary: T[],
+  limit: number,
+) {
+  const merged = [...primary];
+  const seen = new Set(primary.map((item) => item.insight.candidate.id));
+
+  for (const item of secondary) {
+    if (seen.has(item.insight.candidate.id)) {
+      continue;
+    }
+
+    merged.push(item);
+    seen.add(item.insight.candidate.id);
 
     if (merged.length >= limit) {
       break;
@@ -169,6 +649,79 @@ function isLocalWildcardCandidate(candidate: Candidate) {
     isHouseFrontCandidate(candidate) ||
     candidate.id.startsWith('thrill-local-') ||
     candidate.id.startsWith('participant-near-')
+  );
+}
+
+const HOTPLACE_KEYWORDS = [
+  '핫',
+  '힙',
+  '트렌디',
+  '번화가',
+  '메인 상권',
+  '맛집',
+  '카페',
+  '브런치',
+  '데이트',
+  '펍',
+  '와인',
+  '칵테일',
+  '복합몰',
+  '전시',
+  '문화',
+  '산책',
+  '한강',
+  '호수',
+  '레트로',
+  '도심',
+];
+
+function getHotplaceAppealBonus(insight: CandidateInsight) {
+  const candidate = insight.candidate;
+  const haystack = [
+    candidate.name,
+    candidate.district,
+    candidate.description,
+    candidate.vibe,
+    candidate.bestFor,
+    candidate.tags.join(' '),
+  ].join(' ');
+  const keywordHitCount = HOTPLACE_KEYWORDS.reduce(
+    (count, keyword) => count + (haystack.includes(keyword) ? 1 : 0),
+    0,
+  );
+  const moodBonus =
+    candidate.drawMood === '무드 픽'
+      ? -8
+      : candidate.drawMood === '반전 픽'
+        ? -5
+        : 0;
+  const categoryBonus = insight.categoryMatched ? -12 : 4;
+  const generatedPenalty =
+    candidate.id.startsWith('participant-near-') || candidate.id.startsWith('thrill-')
+      ? 22
+      : candidate.id.startsWith('close-range-')
+        ? 8
+        : candidate.id.startsWith('midpoint-')
+          ? 5
+          : 0;
+
+  return categoryBonus + moodBonus - Math.min(18, keywordHitCount * 3) + generatedPenalty;
+}
+
+export function getHotplaceRankingScore(insight: CandidateInsight, level: ThrillLevel = 1) {
+  void level;
+  const reachPenalty = insight.allReachable ? 0 : 28;
+  const routeVerifiedBonus = isFullyRouteVerifiedInsight(insight) ? -4 : 0;
+
+  return (
+    getHotplaceAppealBonus(insight) +
+    insight.averageDuration * 0.3 +
+    insight.farthestDuration * 0.18 +
+    insight.centerDistance * 0.18 +
+    insight.axisDistance * 0.12 +
+    getLongTripPenalty(insight) * 0.26 +
+    reachPenalty +
+    routeVerifiedBonus
   );
 }
 
@@ -352,6 +905,10 @@ export function ensureParticipantLocalCoverage(
   const isHouseFrontMode =
     options?.selectionMode === 'neighborhood' && (options.thrillLevel ?? 1) >= 5;
 
+  if (!isLocalHeavyMode) {
+    return nextInsights.slice(0, targetLimit);
+  }
+
   if (isHouseFrontMode) {
     const requiredLocalAnchors = getRequiredParticipantLocalAnchors(
       rankedInsights,
@@ -489,6 +1046,8 @@ function ensureMetroAreaCoverage(
   baseInsights: CandidateInsight[],
   requiredAreas: MetroAreaLabel[],
   limit: number,
+  fairnessLevel: ThrillLevel = 1,
+  participants: Participant[] = [],
 ) {
   if (!requiredAreas.length) {
     return baseInsights.slice(0, limit);
@@ -496,9 +1055,16 @@ function ensureMetroAreaCoverage(
 
   const nextInsights: CandidateInsight[] = [];
   const usedCandidateIds = new Set<string>();
+  const fairnessRankedInsights = [...rankedInsights].sort((left, right) =>
+    compareByFairnessLevel(left, right, fairnessLevel, participants),
+  );
+  const fairAreaSource = fairnessRankedInsights.filter(
+    (insight) => insight.spreadDuration <= getFairnessSpreadLimit(fairnessLevel, participants),
+  );
+  const areaSource = fairAreaSource.length ? fairAreaSource : fairnessRankedInsights;
 
   for (const area of requiredAreas) {
-    const areaInsight = rankedInsights.find(
+    const areaInsight = areaSource.find(
       (insight) =>
         inferMetroAreaLabel(insight.candidate) === area &&
         !usedCandidateIds.has(insight.candidate.id),
@@ -512,7 +1078,7 @@ function ensureMetroAreaCoverage(
     usedCandidateIds.add(areaInsight.candidate.id);
   }
 
-  for (const insight of [...baseInsights, ...rankedInsights]) {
+  for (const insight of [...baseInsights, ...fairnessRankedInsights]) {
     if (usedCandidateIds.has(insight.candidate.id)) {
       continue;
     }
@@ -526,7 +1092,7 @@ function ensureMetroAreaCoverage(
   }
 
   const rankedIndex = new Map(
-    rankedInsights.map((insight, index) => [insight.candidate.id, index]),
+    fairnessRankedInsights.map((insight, index) => [insight.candidate.id, index]),
   );
 
   return nextInsights
@@ -585,6 +1151,25 @@ function getDistanceToSegmentKm(point: Coordinates, start: Coordinates, end: Coo
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
+function getSegmentProjectionRatio(point: Coordinates, start: Coordinates, end: Coordinates) {
+  const origin = {
+    lat: (point.lat + start.lat + end.lat) / 3,
+    lng: (point.lng + start.lng + end.lng) / 3,
+  };
+  const p = toLocalKm(point, origin);
+  const a = toLocalKm(start, origin);
+  const b = toLocalKm(end, origin);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = dx * dx + dy * dy;
+
+  if (lengthSquared <= 0) {
+    return 0.5;
+  }
+
+  return clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared, 0, 1);
+}
+
 export function getTravelDistanceFromMinutes(minutes: number) {
   return minutes * TRANSIT_SPEED_KM_PER_MIN;
 }
@@ -600,6 +1185,183 @@ function getParticipantCenter(participants: Participant[]) {
   };
 }
 
+function getCoordinatesCenter(coordinates: Coordinates[]) {
+  if (!coordinates.length) {
+    return null;
+  }
+
+  return {
+    lat: coordinates.reduce((sum, coordinate) => sum + coordinate.lat, 0) / coordinates.length,
+    lng: coordinates.reduce((sum, coordinate) => sum + coordinate.lng, 0) / coordinates.length,
+  };
+}
+
+interface ClusteredBalanceContext {
+  center: Coordinates;
+  axisStart: Coordinates;
+  axisEnd: Coordinates;
+  clusters: Array<{
+    center: Coordinates;
+    participantIds: string[];
+    radiusKm: number;
+    size: number;
+  }>;
+  separationKm: number;
+}
+
+function getClusteredBalanceContext(participants: Participant[]): ClusteredBalanceContext | null {
+  if (participants.length < 3) {
+    return null;
+  }
+
+  const pairDistances = participants.flatMap((participant, firstIndex) =>
+    participants.slice(firstIndex + 1).map((otherParticipant, offsetIndex) => ({
+      firstIndex,
+      secondIndex: firstIndex + offsetIndex + 1,
+      distance: getDistanceKm(participant.coordinates, otherParticipant.coordinates),
+    })),
+  );
+  const closestPairDistance = Math.min(...pairDistances.map((pair) => pair.distance));
+
+  if (!Number.isFinite(closestPairDistance) || closestPairDistance > 6.5) {
+    return null;
+  }
+
+  const closeLinkLimit = Math.min(6.5, Math.max(4.2, closestPairDistance + 1.8));
+  const parent = participants.map((_, index) => index);
+  const find = (index: number): number => {
+    if (parent[index] !== index) {
+      parent[index] = find(parent[index]);
+    }
+
+    return parent[index];
+  };
+  const union = (left: number, right: number) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+
+    if (leftRoot !== rightRoot) {
+      parent[rightRoot] = leftRoot;
+    }
+  };
+
+  pairDistances.forEach((pair) => {
+    if (pair.distance <= closeLinkLimit) {
+      union(pair.firstIndex, pair.secondIndex);
+    }
+  });
+
+  const clusterMap = new Map<number, Participant[]>();
+
+  participants.forEach((participant, index) => {
+    const root = find(index);
+    clusterMap.set(root, [...(clusterMap.get(root) ?? []), participant]);
+  });
+
+  const clusters = [...clusterMap.values()].sort((left, right) => right.length - left.length);
+  const hasDenseCluster = clusters.some((cluster) => cluster.length >= 2);
+
+  if (!hasDenseCluster || clusters.length < 2) {
+    return null;
+  }
+
+  const clusterDetails = clusters
+    .map((cluster) => {
+      const center = getParticipantCenter(cluster);
+
+      if (!center) {
+        return null;
+      }
+
+      return {
+        center,
+        participantIds: cluster.map((participant) => participant.id),
+        radiusKm: getParticipantSpreadKm(cluster, center),
+        size: cluster.length,
+      };
+    })
+    .filter((cluster): cluster is NonNullable<typeof cluster> => Boolean(cluster));
+
+  if (clusterDetails.length < 2) {
+    return null;
+  }
+
+  const farthestClusterPair = clusterDetails
+    .flatMap((cluster, firstIndex) =>
+      clusterDetails.slice(firstIndex + 1).map((otherCluster, offsetIndex) => ({
+        firstIndex,
+        secondIndex: firstIndex + offsetIndex + 1,
+        distance: getDistanceKm(cluster.center, otherCluster.center),
+      })),
+    )
+    .sort((left, right) => right.distance - left.distance)[0];
+
+  if (!farthestClusterPair) {
+    return null;
+  }
+
+  const separationKm = farthestClusterPair.distance;
+  const largestClusterRadius = Math.max(...clusterDetails.map((cluster) => cluster.radiusKm));
+  const enoughSeparation = separationKm >= Math.max(7, largestClusterRadius + 4);
+
+  if (!enoughSeparation) {
+    return null;
+  }
+
+  const center = getCoordinatesCenter(clusterDetails.map((cluster) => cluster.center));
+  const axisStart = clusterDetails[farthestClusterPair.firstIndex].center;
+  const axisEnd = clusterDetails[farthestClusterPair.secondIndex].center;
+
+  if (!center) {
+    return null;
+  }
+
+  return {
+    center,
+    axisStart,
+    axisEnd,
+    clusters: clusterDetails,
+    separationKm,
+  };
+}
+
+function getBalancedParticipantCenter(
+  participants: Participant[],
+  selectionMode: SelectionModeKey = 'balance',
+) {
+  if (selectionMode !== 'balance') {
+    return getParticipantCenter(participants);
+  }
+
+  return getClusteredBalanceContext(participants)?.center ?? getParticipantCenter(participants);
+}
+
+function getBalancedParticipantAxisDistanceKm(
+  participants: Participant[],
+  coordinates: Coordinates,
+  center: Coordinates | null,
+  selectionMode: SelectionModeKey = 'balance',
+  clusteredContext = selectionMode === 'balance' ? getClusteredBalanceContext(participants) : null,
+) {
+  if (clusteredContext) {
+    if (clusteredContext.clusters.length > 2 && center) {
+      return Math.min(
+        ...clusteredContext.clusters.map((cluster) =>
+          getDistanceToSegmentKm(coordinates, center, cluster.center),
+        ),
+      );
+    }
+
+    return getDistanceToSegmentKm(
+      coordinates,
+      clusteredContext.axisStart,
+      clusteredContext.axisEnd,
+    );
+  }
+
+  return getParticipantAxisDistanceKm(participants, coordinates, center);
+}
+
 function getParticipantSpreadKm(participants: Participant[], center: Coordinates | null) {
   if (!participants.length || !center) {
     return 0;
@@ -608,6 +1370,59 @@ function getParticipantSpreadKm(participants: Participant[], center: Coordinates
   return Math.max(
     ...participants.map((participant) => getDistanceKm(participant.coordinates, center)),
   );
+}
+
+function getMaxParticipantPairDistanceKm(participants: Participant[]) {
+  if (participants.length < 2) {
+    return 0;
+  }
+
+  return Math.max(
+    ...participants.flatMap((participant, firstIndex) =>
+      participants.slice(firstIndex + 1).map((otherParticipant) =>
+        getDistanceKm(participant.coordinates, otherParticipant.coordinates),
+      ),
+    ),
+  );
+}
+
+function getAdaptiveMaxTravelTime(
+  participants: Participant[],
+  participant: Participant | undefined,
+  selectionMode: SelectionModeKey = 'balance',
+) {
+  const baseLimit = participant?.maxTravelTime ?? 45;
+
+  if (!participant || participants.length < 2) {
+    return baseLimit;
+  }
+
+  const pairDistanceKm = getMaxParticipantPairDistanceKm(participants);
+
+  if (pairDistanceKm < 14) {
+    return baseLimit;
+  }
+
+  const center = getBalancedParticipantCenter(participants, selectionMode);
+  const speed =
+    participant.travelMode === 'car' ? CAR_SPEED_KM_PER_MIN : TRANSIT_SPEED_KM_PER_MIN;
+  const directPairMinutes =
+    pairDistanceKm / speed + (participant.travelMode === 'car' ? 8 : 14);
+  const centerMinutes = center
+    ? getDistanceKm(participant.coordinates, center) /
+        speed *
+        (participant.travelMode === 'car' ? CAR_ROUTE_DISTANCE_FACTOR : 1.35) +
+      10
+    : baseLimit;
+  const modeFactor =
+    selectionMode === 'hotplace' ? 0.82 : selectionMode === 'neighborhood' ? 0.86 : 0.72;
+  const distanceBuffer = pairDistanceKm >= 30 ? 8 : pairDistanceKm >= 22 ? 5 : 3;
+  const adaptiveLimit = Math.round(
+    Math.max(directPairMinutes * modeFactor, centerMinutes) + distanceBuffer,
+  );
+  const cap = participant.travelMode === 'car' ? 85 : 95;
+
+  return Math.max(baseLimit, Math.min(cap, adaptiveLimit));
 }
 
 function getParticipantAxisDistanceKm(
@@ -683,6 +1498,82 @@ function getBalancedCenterLimitKm(participants: Participant[], center: Coordinat
   }
 
   return Math.max(2.8, spreadKm + (participants.length <= 2 ? 2.4 : 4.2));
+}
+
+function getTwoPersonBalanceLimits(participants: Participant[], center: Coordinates | null) {
+  const spreadKm = getParticipantSpreadKm(participants, center);
+
+  if (participants.length !== 2 || !center) {
+    return null;
+  }
+
+  return {
+    centerLimit: Math.max(3.4, Math.min(9.5, spreadKm * 0.42 + 2.2)),
+    relaxedCenterLimit: Math.max(4.2, Math.min(11.5, spreadKm * 0.55 + 2.8)),
+    axisLimit: Math.max(1.35, Math.min(3.4, spreadKm * 0.22 + 0.55)),
+    strictAxisLimit: Math.max(1.15, Math.min(2.5, spreadKm * 0.16 + 0.4)),
+  };
+}
+
+function getGroupBalanceLimits(
+  participants: Participant[],
+  center: Coordinates | null,
+  clusteredContext: ClusteredBalanceContext | null,
+) {
+  if (participants.length < 3 || !center) {
+    return null;
+  }
+
+  const spreadKm = getParticipantSpreadKm(participants, center);
+  const centerLimit = clusteredContext
+    ? Math.max(4.6, Math.min(12.5, clusteredContext.separationKm * 0.28 + 3))
+    : participants.length >= 5
+      ? Math.max(4.8, Math.min(10.5, spreadKm * 0.3 + 3.2))
+      : Math.max(5.2, Math.min(12, spreadKm * 0.36 + 3.4));
+  const relaxedCenterLimit =
+    centerLimit + (participants.length >= 5 ? 2 : clusteredContext ? 2.4 : 2.8);
+  const axisLimit = clusteredContext
+    ? Math.max(1.8, Math.min(5.2, clusteredContext.separationKm * 0.1 + 1))
+    : Math.max(2.1, Math.min(5.4, centerLimit * 0.46));
+  const strictAxisLimit = Math.max(1.35, axisLimit * (participants.length >= 5 ? 0.68 : 0.74));
+
+  return {
+    centerLimit,
+    relaxedCenterLimit,
+    axisLimit,
+    strictAxisLimit,
+  };
+}
+
+function getTwoPersonCorridorPenalty(
+  participants: Participant[],
+  coordinates: Coordinates,
+  center: Coordinates | null,
+) {
+  if (participants.length !== 2 || !center) {
+    return 0;
+  }
+
+  const [first, second] = participants;
+  const participantDistance = getDistanceKm(first.coordinates, second.coordinates);
+
+  if (participantDistance <= 0.4) {
+    return 0;
+  }
+
+  const projectionRatio = getSegmentProjectionRatio(
+    coordinates,
+    first.coordinates,
+    second.coordinates,
+  );
+  const middleOffset = Math.abs(projectionRatio - 0.5);
+  const endpointPenalty = Math.max(0, middleOffset - 0.22) * participantDistance * 1.15;
+  const centerFlexKm = Math.max(1.2, Math.min(5.5, participantDistance * 0.16));
+  const centerPenalty = Math.max(0, getDistanceKm(center, coordinates) - centerFlexKm) * 0.55;
+  const axisPenalty =
+    getDistanceToSegmentKm(coordinates, first.coordinates, second.coordinates) * 1.35;
+
+  return endpointPenalty + centerPenalty + axisPenalty;
 }
 
 function getCloseCandidateLimitKm(spreadKm: number) {
@@ -880,22 +1771,54 @@ function buildMidpointCandidates(
   participants: Participant[],
   selectedCategory?: MeetCategoryKey,
 ): Candidate[] {
-  const center = getParticipantCenter(participants);
+  const clusteredContext = getClusteredBalanceContext(participants);
+  const center = clusteredContext?.center ?? getParticipantCenter(participants);
 
   if (!center || participants.length < 2) {
     return [];
   }
 
-  const spreadKm = getParticipantSpreadKm(participants, center);
+  const spreadKm = clusteredContext
+    ? Math.max(clusteredContext.separationKm / 2, getParticipantSpreadKm(participants, center))
+    : getParticipantSpreadKm(participants, center);
   const closeContext = getCloseParticipantContext(participants);
+  const isTwoPersonGroup = participants.length === 2;
+  const useBridgeCorridor = isTwoPersonGroup || clusteredContext?.clusters.length === 2;
+  const axisStart = clusteredContext?.axisStart ?? participants[0].coordinates;
+  const axisEnd =
+    clusteredContext?.axisEnd ?? participants[participants.length - 1].coordinates;
   const searchRadiusKm = closeContext.isCloseGroup
     ? closeContext.candidateLimitKm
-    : Math.max(3, Math.min(11, spreadKm * 0.95 + 2.6));
+    : clusteredContext
+      ? Math.max(5.5, Math.min(14, clusteredContext.separationKm * 0.34 + 3))
+      : Math.max(3, Math.min(11, spreadKm * 0.95 + 2.6));
 
   return stationOptions
     .map((station) => {
       const centerDistance = getDistanceKm(center, station.coordinates);
-      const axisDistance = getParticipantAxisDistanceKm(participants, station.coordinates, center);
+      const axisDistance = getBalancedParticipantAxisDistanceKm(
+        participants,
+        station.coordinates,
+        center,
+        'balance',
+        clusteredContext,
+      );
+      const projectionRatio = useBridgeCorridor
+        ? getSegmentProjectionRatio(
+            station.coordinates,
+            axisStart,
+            axisEnd,
+          )
+        : 0.5;
+      const twoPersonCorridorPenalty = getTwoPersonCorridorPenalty(
+        participants,
+        station.coordinates,
+        center,
+      );
+      const bridgeCorridorPenalty = clusteredContext
+        ? Math.abs(projectionRatio - 0.5) * clusteredContext.separationKm * 1.4 +
+          axisDistance * 1.9
+        : 0;
       const travelInfo = participants.map((participant) =>
         getParticipantEstimatedTravelInfo(participant, {
           id: station.name,
@@ -913,19 +1836,51 @@ function buildMidpointCandidates(
         }),
       );
       const spreadDuration = getTravelSpread(travelInfo);
+      const averageDuration =
+        travelInfo.reduce((sum, info) => sum + info.duration, 0) / travelInfo.length;
       const farthestDuration = Math.max(...travelInfo.map((info) => info.duration));
 
       return {
         station,
         centerDistance,
         axisDistance,
-        score: centerDistance * 1.7 + axisDistance * 2.4 + spreadDuration * 0.18 + farthestDuration * 0.06,
+        score:
+          centerDistance * 1.45 +
+          axisDistance * 2.05 +
+          averageDuration * 0.5 +
+          farthestDuration * 0.34 +
+          spreadDuration * 0.65 +
+          twoPersonCorridorPenalty * 1.15 +
+          bridgeCorridorPenalty,
+        projectionRatio,
       };
     })
     .filter(
-      ({ centerDistance, axisDistance }) =>
-        centerDistance <= searchRadiusKm ||
-        (!closeContext.isCloseGroup && axisDistance <= Math.max(1.2, searchRadiusKm * 0.28)),
+      ({ centerDistance, axisDistance, projectionRatio }) => {
+        if (!useBridgeCorridor) {
+          return (
+            centerDistance <= searchRadiusKm ||
+            (!closeContext.isCloseGroup && axisDistance <= Math.max(1.2, searchRadiusKm * 0.28))
+          );
+        }
+
+        const middleBandLimit = closeContext.isCloseGroup
+          ? 0.42
+          : clusteredContext
+            ? 0.36
+            : 0.28;
+        const nearMiddleOfSegment = Math.abs(projectionRatio - 0.5) <= middleBandLimit;
+        const axisLimit = closeContext.isCloseGroup
+          ? closeContext.axisLimitKm + 0.4
+          : clusteredContext
+            ? Math.max(1.8, Math.min(4.6, clusteredContext.separationKm * 0.12 + 0.8))
+            : Math.max(1.4, Math.min(3.6, spreadKm * 0.22 + 0.8));
+
+        return (
+          (centerDistance <= searchRadiusKm && axisDistance <= axisLimit + 1.2) ||
+          (nearMiddleOfSegment && axisDistance <= axisLimit)
+        );
+      },
     )
     .sort((left, right) => left.score - right.score)
     .slice(0, participants.length <= 2 ? 10 : 12)
@@ -937,7 +1892,7 @@ function buildMidpointCandidates(
       vibe: '한쪽으로 크게 치우치지 않는 중간 만남 무드',
       coordinates: station.coordinates,
       tags: ['중간지점', '공정', '역세권'],
-      bestFor: '모두가 비슷하게 움직이는 밥약, 카페수다, 가벼운 약속',
+      bestFor: '모두가 비슷하게 움직이는 식사, 카페, 가벼운 약속',
       whyItWorks: '참여자들의 중심점과 이동 격차를 같이 보고 고른 중간 후보예요.',
       routeHint: `${station.name} 주변에서 만나면 한쪽만 과하게 이동하는 느낌을 줄일 수 있어요.`,
       drawMood: '안정 픽' as Candidate['drawMood'],
@@ -1009,7 +1964,7 @@ function buildCloseRangeCandidates(
       vibe: '멀리 이동하지 않고 바로 만나는 생활권 무드',
       coordinates: station.coordinates,
       tags: ['근거리', '역세권', '생활권'],
-      bestFor: '가까운 사람끼리 빠르게 모이는 밥약이나 카페수다',
+      bestFor: '가까운 사람끼리 빠르게 모이는 식사나 카페',
       whyItWorks:
         '위치가 가까운 모임에서는 유명 상권을 억지로 끼우는 것보다 현재 생활권 안에서 고르는 게 더 자연스러워요.',
       routeHint: `${station.name} 주변에서 식사, 카페, 2차 동선을 짧게 잡기 좋아요.`,
@@ -1068,11 +2023,13 @@ export function buildCandidateUniverse(
     ...extraCandidates,
   ].forEach((candidate) => {
     const shouldKeepLocalWildcard = thrillLevel >= 4 && isLocalWildcardCandidate(candidate);
+    const isAiGeneratedCandidate = candidate.id.startsWith('ai-generated-');
     const isGeneratedCandidate =
       candidate.id.startsWith('midpoint-') ||
       candidate.id.startsWith('close-range-') ||
       candidate.id.startsWith('participant-near-') ||
-      candidate.id.startsWith('thrill-');
+      candidate.id.startsWith('thrill-') ||
+      candidate.id.startsWith('ai-generated-');
     const duplicateCandidate = [...candidateMap.values()].find(
       (existingCandidate) =>
         existingCandidate.name === candidate.name ||
@@ -1084,12 +2041,34 @@ export function buildCandidateUniverse(
       return;
     }
 
+    if (duplicateCandidate && isAiGeneratedCandidate) {
+      candidateMap.delete(duplicateCandidate.id);
+      candidateMap.set(candidate.id, candidate);
+      return;
+    }
+
+    if (duplicateCandidate && !isGeneratedCandidate) {
+      const duplicateIsGenerated =
+        duplicateCandidate.id.startsWith('midpoint-') ||
+        duplicateCandidate.id.startsWith('close-range-') ||
+        duplicateCandidate.id.startsWith('participant-near-') ||
+        duplicateCandidate.id.startsWith('thrill-') ||
+        duplicateCandidate.id.startsWith('ai-generated-');
+
+      if (duplicateIsGenerated) {
+        candidateMap.delete(duplicateCandidate.id);
+        candidateMap.set(candidate.id, candidate);
+        return;
+      }
+    }
+
     if (
       duplicateCandidate &&
       (isGeneratedCandidate ||
         duplicateCandidate.id.startsWith('midpoint-') ||
         duplicateCandidate.id.startsWith('close-range-') ||
-        duplicateCandidate.id.startsWith('participant-near-'))
+        duplicateCandidate.id.startsWith('participant-near-') ||
+        duplicateCandidate.id.startsWith('ai-generated-'))
     ) {
       return;
     }
@@ -1148,20 +2127,49 @@ export function getParticipantEstimatedTravelInfo(
     : getTravelInfo(participant, candidate);
 }
 
-function formatAccessSummary(participants: Participant[], travelInfo: TravelInfo[]) {
+function formatAccessSummary(
+  participants: Participant[],
+  travelInfo: TravelInfo[],
+  selectionMode: SelectionModeKey = 'balance',
+) {
   if (!participants.length || !travelInfo.length) {
     return '출발지를 먼저 입력해 주세요.';
   }
 
-  const limitById = participants.reduce<Record<string, number>>((acc, participant) => {
+  const limitById = participants.reduce<Record<string, number>>(
+    (acc, participant) => {
+      acc[participant.id] = getAdaptiveMaxTravelTime(participants, participant, selectionMode);
+      return acc;
+    },
+    {},
+  );
+  const baseLimitById = participants.reduce<Record<string, number>>((acc, participant) => {
     acc[participant.id] = participant.maxTravelTime;
     return acc;
   }, {});
 
   const delayed = travelInfo.filter((info) => info.duration > limitById[info.participantId]);
+  const baseDelayed = travelInfo.filter(
+    (info) => info.duration > baseLimitById[info.participantId],
+  );
   const maxDuration = Math.max(...travelInfo.map((info) => info.duration));
+  const minorityBenefitProfile =
+    selectionMode === 'balance'
+      ? getMinorityBenefitProfile({
+          travelInfo,
+          spreadDuration: getTravelSpread(travelInfo),
+        })
+      : null;
+
+  if (minorityBenefitProfile) {
+    return `소수는 가까운 편이고, 나머지 ${minorityBenefitProfile.majorityCount}명은 ${minorityBenefitProfile.majoritySpread}분 차이로 비슷하게 도착해요.`;
+  }
 
   if (!delayed.length) {
+    if (baseDelayed.length) {
+      return `거리가 멀어 이동시간 기준을 유동적으로 넓히면 모두 ${maxDuration}분 안에 합류할 수 있어요.`;
+    }
+
     return `모든 참여자가 ${maxDuration}분 안에 도착 가능한 교집합 안입니다.`;
   }
 
@@ -1173,20 +2181,81 @@ function formatAccessSummary(participants: Participant[], travelInfo: TravelInfo
   return '완벽한 교집합은 아니지만, 가장 부담이 덜한 후보로 압축한 결과예요.';
 }
 
-function getBalanceRankingScore(insight: CandidateInsight) {
+export function applyTravelInfoToCandidateInsight(
+  insight: CandidateInsight,
+  participants: Participant[],
+  travelInfoOverride: TravelInfo[],
+  selectionMode: SelectionModeKey = 'balance',
+): CandidateInsight {
+  const travelInfo = participants.map((participant) => {
+    return (
+      travelInfoOverride.find((info) => info.participantId === participant.id) ??
+      insight.travelInfo.find((info) => info.participantId === participant.id) ??
+      getParticipantEstimatedTravelInfo(participant, insight.candidate)
+    );
+  });
+  const averageDistance =
+    travelInfo.reduce((sum, info) => sum + info.distance, 0) / Math.max(travelInfo.length, 1);
+  const averageDuration =
+    travelInfo.reduce((sum, info) => sum + info.duration, 0) / Math.max(travelInfo.length, 1);
+  const maxDuration = travelInfo.length
+    ? Math.max(...travelInfo.map((info) => info.duration))
+    : 0;
+  const spreadDuration = travelInfo.length ? getTravelSpread(travelInfo) : 0;
+  const allReachable = travelInfo.every((info) => {
+    const participant = participants.find((item) => item.id === info.participantId);
+    return info.duration <= getAdaptiveMaxTravelTime(participants, participant, selectionMode);
+  });
+  const sortedTravelInfo = [...travelInfo].sort((left, right) => left.duration - right.duration);
+  const nearest = sortedTravelInfo[0];
+  const farthest = sortedTravelInfo[sortedTravelInfo.length - 1];
+
+  return {
+    ...insight,
+    travelInfo,
+    averageDistance: Math.round(averageDistance * 10) / 10,
+    averageDuration: Math.round(averageDuration),
+    maxDuration,
+    spreadDuration,
+    allReachable,
+    accessSummary: formatAccessSummary(participants, travelInfo, selectionMode),
+    nearestParticipantName: nearest?.participantName ?? insight.nearestParticipantName,
+    nearestDuration: nearest?.duration ?? insight.nearestDuration,
+    farthestParticipantName: farthest?.participantName ?? insight.farthestParticipantName,
+    farthestDuration: farthest?.duration ?? insight.farthestDuration,
+  };
+}
+
+function getBalanceRankingScore(
+  insight: CandidateInsight,
+  participants: Participant[] = [],
+) {
+  const minorityBenefitProfile = getMinorityBenefitProfile(insight, participants);
+  const effectiveSpread = minorityBenefitProfile?.effectiveSpread ?? insight.spreadDuration;
   const oneSidedPenalty =
-    insight.spreadDuration > 10 && insight.nearestDuration <= 16
+    !minorityBenefitProfile && insight.spreadDuration > 10 && insight.nearestDuration <= 16
       ? (insight.spreadDuration - 10) * 1.6 + (16 - insight.nearestDuration) * 0.7
       : 0;
+  const minorityEfficiencyBonus = minorityBenefitProfile
+    ? Math.min(
+        16,
+        minorityBenefitProfile.majorityCount * 1.6 +
+          Math.max(0, insight.spreadDuration - minorityBenefitProfile.effectiveSpread) * 0.16,
+      )
+    : 0;
 
   return (
-    insight.spreadDuration * 2.05 +
-    insight.centerDistance * 2.25 +
-    insight.axisDistance * 3.1 +
-    insight.farthestDuration * 0.72 +
+    effectiveSpread * 1.2 +
+    insight.centerDistance * 2 +
+    insight.axisDistance * 2.7 +
+    insight.averageDuration * 0.85 +
+    insight.farthestDuration * 0.65 +
+    getLongTripPenalty(insight) +
+    getCorridorDriftPenalty(insight) +
     oneSidedPenalty +
     (insight.allReachable ? 0 : 36) +
-    (insight.categoryMatched ? 0 : 8)
+    (insight.categoryMatched ? 0 : 8) -
+    minorityEfficiencyBonus
   );
 }
 
@@ -1194,12 +2263,17 @@ export function getCandidateInsights(
   participants: Participant[],
   candidates: Candidate[],
   selectedCategory?: MeetCategoryKey,
+  selectionMode: SelectionModeKey = 'balance',
 ): CandidateInsight[] {
   if (!participants.length) {
     return [];
   }
 
-  const center = getParticipantCenter(participants);
+  const clusteredContext = selectionMode === 'balance' ? getClusteredBalanceContext(participants) : null;
+  const center =
+    selectionMode === 'balance'
+      ? clusteredContext?.center ?? getParticipantCenter(participants)
+      : getParticipantCenter(participants);
 
   return candidates
     .map((candidate) => {
@@ -1214,7 +2288,7 @@ export function getCandidateInsights(
       const spreadDuration = getTravelSpread(travelInfo);
       const allReachable = travelInfo.every((info) => {
         const participant = participants.find((item) => item.id === info.participantId);
-        return info.duration <= (participant?.maxTravelTime ?? 45);
+        return info.duration <= getAdaptiveMaxTravelTime(participants, participant, selectionMode);
       });
       const categoryMatched = selectedCategory
         ? candidate.categories.includes(selectedCategory)
@@ -1223,7 +2297,13 @@ export function getCandidateInsights(
       const nearest = sortedTravelInfo[0];
       const farthest = sortedTravelInfo[sortedTravelInfo.length - 1];
       const centerDistance = center ? getDistanceKm(center, candidate.coordinates) : 0;
-      const axisDistance = getParticipantAxisDistanceKm(participants, candidate.coordinates, center);
+      const axisDistance = getBalancedParticipantAxisDistanceKm(
+        participants,
+        candidate.coordinates,
+        center,
+        selectionMode,
+        clusteredContext,
+      );
 
       return {
         candidate,
@@ -1233,7 +2313,7 @@ export function getCandidateInsights(
         maxDuration,
         spreadDuration,
         allReachable,
-        accessSummary: formatAccessSummary(participants, travelInfo),
+        accessSummary: formatAccessSummary(participants, travelInfo, selectionMode),
         categoryMatched,
         centerDistance: Math.round(centerDistance * 10) / 10,
         axisDistance: Math.round(axisDistance * 10) / 10,
@@ -1248,7 +2328,20 @@ export function getCandidateInsights(
         return left.allReachable ? -1 : 1;
       }
 
-      const balanceDiff = getBalanceRankingScore(left) - getBalanceRankingScore(right);
+      const leftTwoPersonPenalty = getTwoPersonCorridorPenalty(
+        participants,
+        left.candidate.coordinates,
+        center,
+      );
+      const rightTwoPersonPenalty = getTwoPersonCorridorPenalty(
+        participants,
+        right.candidate.coordinates,
+        center,
+      );
+      const balanceDiff =
+        getBalanceRankingScore(left, participants) +
+        leftTwoPersonPenalty * 1.15 -
+        (getBalanceRankingScore(right, participants) + rightTwoPersonPenalty * 1.15);
 
       if (Math.abs(balanceDiff) > 3) {
         return balanceDiff;
@@ -1275,11 +2368,29 @@ export function getDynamicCandidateInsights(
   candidateScope: CandidateScopeKey = 'standard',
   requestedTargetCount?: number,
 ) {
-  const insights = getCandidateInsights(participants, candidates, selectedCategory);
-  const center = getParticipantCenter(participants);
+  const insights = getCandidateInsights(participants, candidates, selectedCategory, selectionMode);
+  const clusteredBalanceContext =
+    selectionMode === 'balance' ? getClusteredBalanceContext(participants) : null;
+  const center =
+    selectionMode === 'balance'
+      ? clusteredBalanceContext?.center ?? getParticipantCenter(participants)
+      : getParticipantCenter(participants);
   const dynamicAxisRadius = getDynamicAxisRadiusKm(participants, center);
   const balancedCenterLimit = getBalancedCenterLimitKm(participants, center);
   const participantSpreadKm = getParticipantSpreadKm(participants, center);
+  const twoPersonBalanceLimits = getTwoPersonBalanceLimits(participants, center);
+  const groupBalanceLimits =
+    selectionMode === 'balance'
+      ? getGroupBalanceLimits(participants, center, clusteredBalanceContext)
+      : null;
+  const balanceShapeLimits = twoPersonBalanceLimits ?? groupBalanceLimits;
+  const balancedCoreCenterLimit = balanceShapeLimits?.centerLimit ?? balancedCenterLimit;
+  const balancedRelaxedCenterLimit =
+    balanceShapeLimits?.relaxedCenterLimit ?? balancedCenterLimit;
+  const balancedAxisLimit =
+    balanceShapeLimits?.axisLimit ?? Math.max(1.8, balancedCenterLimit * 0.45);
+  const strictBalancedAxisLimit =
+    balanceShapeLimits?.strictAxisLimit ?? Math.max(1.5, balancedCenterLimit * 0.4);
   const isCloseBalancedGroup =
     selectionMode === 'balance' && participants.length >= 2 && participantSpreadKm <= 5.5;
 
@@ -1316,6 +2427,12 @@ export function getDynamicCandidateInsights(
         : participants.length >= 3
           ? 12
           : 10
+      : selectionMode === 'hotplace'
+        ? participants.length >= 5
+          ? 14
+          : participants.length >= 3
+            ? 12
+            : 10
       : participants.length >= 5
         ? 12
         : participants.length >= 3
@@ -1326,36 +2443,60 @@ export function getDynamicCandidateInsights(
 
   const ranked = insights
     .map((insight, index) => {
+      const fairnessOverage = getFairnessOverage(insight, thrillLevel, participants);
+      const minorityBenefitProfile = getMinorityBenefitProfile(insight, participants);
+      const effectiveFairnessSpread =
+        minorityBenefitProfile?.effectiveSpread ?? insight.spreadDuration;
       const overflowMinutes = insight.travelInfo.reduce((sum, info) => {
         const participant = participants.find((item) => item.id === info.participantId);
+        const travelLimit = getAdaptiveMaxTravelTime(participants, participant, selectionMode);
 
-        return sum + Math.max(0, info.duration - (participant?.maxTravelTime ?? 45));
+        return sum + Math.max(0, info.duration - travelLimit);
       }, 0);
       const radiusOverflow = Math.max(0, insight.centerDistance - dynamicAxisRadius);
       const localityStrength = getLocalityStrength(insight.nearestDuration);
       const extremeBias = Math.max(0, insight.centerDistance - dynamicAxisRadius * 0.58);
       const oneSidedPenalty =
-        insight.spreadDuration > 10 && insight.nearestDuration <= 16
+        !minorityBenefitProfile && insight.spreadDuration > 10 && insight.nearestDuration <= 16
           ? (insight.spreadDuration - 10) * 1.8 + (16 - insight.nearestDuration) * 0.8
           : 0;
+      const minorityEfficiencyBonus = minorityBenefitProfile
+        ? Math.min(
+            18,
+            minorityBenefitProfile.majorityCount * 1.8 +
+              Math.max(0, insight.spreadDuration - effectiveFairnessSpread) * 0.18,
+          )
+        : 0;
+      const longTripPenalty = getLongTripPenalty(insight);
+      const twoPersonCorridorPenalty = getTwoPersonCorridorPenalty(
+        participants,
+        insight.candidate.coordinates,
+        center,
+      );
       const balanceScore =
         (insight.categoryMatched ? -8 : 0) +
         (insight.allReachable ? -14 : 20) +
-        insight.centerDistance * 2.35 +
-        insight.axisDistance * 3.15 +
-        insight.averageDuration * 0.56 +
-        insight.farthestDuration * 0.38 +
-        insight.spreadDuration * 1.95 +
+        insight.centerDistance * (twoPersonBalanceLimits ? 1.55 : 2.1) +
+        insight.axisDistance * (twoPersonBalanceLimits ? 3.35 : 2.8) +
+        insight.averageDuration * 0.88 +
+        insight.farthestDuration * 0.62 +
+        effectiveFairnessSpread * 2.05 +
+        fairnessOverage * 8 +
+        fairnessOverage * fairnessOverage * 0.75 +
+        longTripPenalty +
+        twoPersonCorridorPenalty * 1.25 +
         oneSidedPenalty +
         overflowMinutes * 1.2 +
         radiusOverflow * 4.4 +
+        - minorityEfficiencyBonus +
         index * 0.1;
       const neighborhoodScore =
         (insight.categoryMatched ? -16 : 0) +
         (insight.allReachable ? -6 : 0) +
         insight.nearestDuration * 0.62 +
         insight.farthestDuration * 0.46 +
-        insight.spreadDuration * 0.42 +
+        insight.spreadDuration * 0.86 +
+        fairnessOverage * 2.4 +
         overflowMinutes * 0.92 +
         radiusOverflow * 1.15 -
         localityStrength * 1.45 -
@@ -1444,6 +2585,8 @@ export function getDynamicCandidateInsights(
         participantCoveredNeighborhoodInsights,
         participantMetroAreas,
         targetLimit,
+        thrillLevel,
+        participants,
       );
 
       return ensureParticipantLocalCoverage(
@@ -1461,37 +2604,83 @@ export function getDynamicCandidateInsights(
     return participantCoveredNeighborhoodInsights;
   }
 
-  const categoryFirst = ranked.filter(({ insight }) => insight.categoryMatched);
-  const rankedSource = categoryFirst.length >= Math.min(5, targetCount) ? categoryFirst : ranked;
-  const dynamicMiddleBand = rankedSource.filter(
-    ({ insight, centerDistance }) =>
-      (selectionMode === 'balance' &&
-        centerDistance <= balancedCenterLimit &&
-        insight.axisDistance <= Math.max(1.8, balancedCenterLimit * 0.45)) ||
-      (selectionMode !== 'balance' && insight.allReachable) ||
-      (centerDistance <= dynamicAxisRadius + (thrillLevel >= 3 ? 7.5 : 4.5) &&
-        insight.spreadDuration <= (participants.length <= 2 ? 18 : 22)) ||
-      (thrillLevel >= 4 && insight.nearestDuration <= 18),
+  if (selectionMode === 'hotplace') {
+    const hotplaceRankedInsights = [...insights].sort(
+      (left, right) =>
+        getHotplaceRankingScore(left, thrillLevel) - getHotplaceRankingScore(right, thrillLevel),
+    );
+    const categoryHotplaces = hotplaceRankedInsights.filter(
+      (insight) => insight.allReachable && insight.categoryMatched,
+    );
+    const reachableHotplaces = hotplaceRankedInsights.filter((insight) => insight.allReachable);
+    const source =
+      categoryHotplaces.length >= Math.min(4, targetCount)
+        ? categoryHotplaces
+        : reachableHotplaces.length
+          ? reachableHotplaces
+          : hotplaceRankedInsights;
+
+    return source.slice(0, Math.min(targetCount, source.length));
+  }
+
+  const rankedSource = ranked;
+  const fairnessRankedSource = [...rankedSource].sort((left, right) =>
+    compareByFairnessLevel(left.insight, right.insight, thrillLevel, participants),
+  );
+  const fairnessSpreadLimit = getFairnessSpreadLimit(thrillLevel, participants);
+  const softFairnessSpreadLimit = Math.min(
+    getFairnessSpreadLimit(5, participants),
+    fairnessSpreadLimit + 5,
+  );
+  const fairBalancedBand =
+    selectionMode === 'balance'
+      ? fairnessRankedSource.filter(
+          ({ insight }) =>
+            insight.allReachable &&
+            insight.spreadDuration <= fairnessSpreadLimit &&
+            (!twoPersonBalanceLimits ||
+              (insight.centerDistance <= balancedRelaxedCenterLimit &&
+                insight.axisDistance <= balancedAxisLimit)),
+        )
+      : [];
+  const dynamicMiddleBand = fairnessRankedSource.filter(
+    ({ insight, centerDistance }) => {
+      const effectiveSpread = getEffectiveFairnessSpread(insight, participants);
+
+      return (
+        (selectionMode === 'balance' &&
+          centerDistance <= balancedCoreCenterLimit &&
+          insight.axisDistance <= balancedAxisLimit &&
+          effectiveSpread <= softFairnessSpreadLimit) ||
+        (selectionMode !== 'balance' && insight.allReachable) ||
+        (centerDistance <=
+          (twoPersonBalanceLimits
+            ? balancedRelaxedCenterLimit
+            : dynamicAxisRadius + (thrillLevel >= 3 ? 7.5 : 4.5)) &&
+          effectiveSpread <= softFairnessSpreadLimit) ||
+        (thrillLevel >= 4 && insight.nearestDuration <= 18)
+      );
+    },
   );
   const strictBalancedBand =
     selectionMode === 'balance'
-      ? rankedSource.filter(
+      ? fairnessRankedSource.filter(
           ({ insight, centerDistance }) =>
-            centerDistance <= balancedCenterLimit &&
-            insight.axisDistance <= Math.max(1.5, balancedCenterLimit * 0.4) &&
-            insight.spreadDuration <= (participants.length <= 2 ? 10 : 16),
+            centerDistance <= balancedCoreCenterLimit &&
+            insight.axisDistance <= strictBalancedAxisLimit &&
+            insight.spreadDuration <= fairnessSpreadLimit,
         )
       : [];
   const closeBalancedInsightIds = new Set(
     isCloseBalancedGroup
       ? getCloseBalancedCandidateInsights(
-          rankedSource.map((rankedInsight) => rankedInsight.insight),
+          fairnessRankedSource.map((rankedInsight) => rankedInsight.insight),
           participants,
         ).map((insight) => insight.candidate.id)
       : [],
   );
   const closeBalancedBand = isCloseBalancedGroup
-    ? rankedSource.filter(({ insight }) => closeBalancedInsightIds.has(insight.candidate.id))
+    ? fairnessRankedSource.filter(({ insight }) => closeBalancedInsightIds.has(insight.candidate.id))
     : [];
   const closeFinalBand =
     strictBalancedBand.length >= Math.min(targetCount, 3)
@@ -1501,10 +2690,32 @@ export function getDynamicCandidateInsights(
         : dynamicMiddleBand.length
           ? dynamicMiddleBand
           : rankedSource;
-  let finalSource = rankedSource;
+  const twoPersonCorridorBand =
+    selectionMode === 'balance' && twoPersonBalanceLimits
+      ? fairnessRankedSource.filter(
+          ({ insight, centerDistance }) =>
+            !isDetachedFairnessTrap(insight) &&
+            centerDistance <= balancedRelaxedCenterLimit + 2.2 &&
+            insight.axisDistance <= balancedAxisLimit + 1.8 &&
+            insight.spreadDuration <= softFairnessSpreadLimit + 8,
+        )
+      : [];
+  let finalSource = fairnessRankedSource;
 
   if (isCloseBalancedGroup) {
     finalSource = closeFinalBand;
+  } else if (twoPersonCorridorBand.length >= Math.min(targetCount, 2)) {
+    const nonDetachedSource = fairnessRankedSource.filter(
+      ({ insight }) => !isDetachedFairnessTrap(insight),
+    );
+
+    finalSource = mergeUniqueRankedInsights(
+      twoPersonCorridorBand,
+      nonDetachedSource.length ? nonDetachedSource : fairnessRankedSource,
+      targetCount,
+    );
+  } else if (fairBalancedBand.length >= Math.min(targetCount, 3)) {
+    finalSource = fairBalancedBand;
   } else if (strictBalancedBand.length >= Math.min(targetCount, 4)) {
     finalSource = strictBalancedBand;
   } else if (dynamicMiddleBand.length >= Math.min(targetCount, 6)) {
@@ -1526,12 +2737,18 @@ export function getDynamicCandidateInsights(
     },
   );
 
-  if (!isCloseBalancedGroup && participantMetroAreas.some((area) => area !== '서울')) {
+  if (
+    selectionMode !== 'balance' &&
+    !isCloseBalancedGroup &&
+    participantMetroAreas.some((area) => area !== '서울')
+  ) {
     const metroCoveredInsights = ensureMetroAreaCoverage(
       insights,
       participantCoveredInsights,
       participantMetroAreas,
       Math.min(targetCount, insights.length),
+      thrillLevel,
+      participants,
     );
 
     return ensureParticipantLocalCoverage(
@@ -1555,14 +2772,21 @@ export function getDrawPool(
   thrillLevel: ThrillLevel = 1,
   candidateScope: CandidateScopeKey = 'standard',
   requestedTargetCount?: number,
+  participants: Participant[] = [],
 ) {
   if (insights.length <= 4) {
     return {
       pool:
         selectionMode === 'balance'
           ? [...insights].sort(
-              (left, right) => getBalanceRankingScore(left) - getBalanceRankingScore(right),
+              (left, right) => compareByFairnessLevel(left, right, thrillLevel, participants),
             )
+          : selectionMode === 'hotplace'
+            ? [...insights].sort(
+                (left, right) =>
+                  getHotplaceRankingScore(left, thrillLevel) -
+                  getHotplaceRankingScore(right, thrillLevel),
+              )
           : insights,
       fallbackNotice: null,
     };
@@ -1631,10 +2855,50 @@ export function getDrawPool(
     };
   }
 
-  const fairnessSorted = [...insights].sort(
-    (left, right) => getBalanceRankingScore(left) - getBalanceRankingScore(right),
+  if (selectionMode === 'hotplace') {
+    const targetSize = explicitTargetCount ?? Math.min(8 + drawPoolExtra, insights.length);
+    const hotplaceSorted = [...insights].sort(
+      (left, right) =>
+        getHotplaceRankingScore(left, thrillLevel) - getHotplaceRankingScore(right, thrillLevel),
+    );
+    const categoryHotplaces = hotplaceSorted.filter(
+      (insight) => insight.allReachable && insight.categoryMatched,
+    );
+    const reachableHotplaces = hotplaceSorted.filter((insight) => insight.allReachable);
+    const source =
+      categoryHotplaces.length >= Math.min(4, targetSize)
+        ? categoryHotplaces
+        : reachableHotplaces.length
+          ? reachableHotplaces
+          : hotplaceSorted;
+
+    return {
+      pool: source.slice(0, Math.min(targetSize, source.length)),
+      fallbackNotice:
+        categoryHotplaces.length >= Math.min(4, targetSize)
+          ? null
+          : '카테고리에 맞는 핫플 후보를 우선해서 추첨 풀을 만들었어요.',
+    };
+  }
+
+  const fairnessSorted = [...insights].sort((left, right) =>
+    compareByFairnessLevel(left, right, thrillLevel, participants),
   );
   const reachable = fairnessSorted.filter((insight) => insight.allReachable);
+  const fairnessSpreadLimit = getFairnessSpreadLimit(thrillLevel, participants);
+  const softFairnessSpreadLimit = Math.min(
+    getFairnessSpreadLimit(5, participants),
+    fairnessSpreadLimit + 5,
+  );
+  const verifiedFairPool =
+    selectionMode === 'balance'
+      ? fairnessSorted.filter(
+          (insight) =>
+            isFullyRouteVerifiedInsight(insight) &&
+            insight.allReachable &&
+            insight.spreadDuration <= fairnessSpreadLimit,
+        )
+      : [];
   const balancedPool =
     selectionMode === 'balance'
       ? fairnessSorted.filter(
@@ -1642,7 +2906,7 @@ export function getDrawPool(
             insight.allReachable &&
             insight.centerDistance <= 6.5 &&
             insight.axisDistance <= 2.8 &&
-            insight.spreadDuration <= 12,
+            insight.spreadDuration <= fairnessSpreadLimit,
         )
       : [];
   const softBalancedPool =
@@ -1652,9 +2916,80 @@ export function getDrawPool(
             insight.allReachable &&
             insight.centerDistance <= 8.5 &&
             insight.axisDistance <= 4 &&
-            insight.spreadDuration <= 18,
+            getEffectiveFairnessSpread(insight, participants) <= softFairnessSpreadLimit,
         )
       : [];
+
+  if (selectionMode === 'balance') {
+    const targetSize = explicitTargetCount ?? Math.min(6 + drawPoolExtra, insights.length);
+    const minPoolSize = Math.min(targetSize, insights.length, MIN_BALANCE_DRAW_POOL_SIZE);
+    const preferredPoolSize = Math.min(
+      targetSize,
+      insights.length,
+      PREFERRED_BALANCE_DRAW_POOL_SIZE,
+    );
+    const strictSource = verifiedFairPool.length ? verifiedFairPool : balancedPool;
+
+    if (strictSource.length >= preferredPoolSize) {
+      return {
+        pool: strictSource.slice(0, Math.min(targetSize, strictSource.length)),
+        fallbackNotice:
+          strictSource.length < Math.min(3, targetSize)
+            ? '이동시간 차이 기준을 통과한 중간 후보만 남겼어요.'
+            : null,
+      };
+    }
+
+    const autoRelaxedPool = getAutoRelaxedBalancePool(
+      mergeUniqueInsights(strictSource, fairnessSorted, insights.length),
+      thrillLevel,
+      targetSize,
+      participants,
+    );
+
+    if (autoRelaxedPool.pool.length >= minPoolSize) {
+      const includesOverLimitCandidate = autoRelaxedPool.pool.some(
+        (insight) => !insight.allReachable,
+      );
+      const includesImpossibleFairnessCandidate = autoRelaxedPool.pool.some(
+        (insight) =>
+          getEffectiveFairnessSpread(insight, participants) >
+          getFairnessSpreadLimit(5, participants),
+      );
+      const relaxedNotice =
+        includesImpossibleFairnessCandidate
+          ? '서로 멀리 떨어져 완전 공평한 중간 후보가 좁아요. 대신 중심축과 평균 이동시간이 가장 덜 무리한 후보를 보여줘요.'
+          : includesOverLimitCandidate
+          ? '서로 거리가 멀어서 기본 이동시간을 조금 넘는 후보까지 포함했어요. 그래도 편차와 중심축이 덜 무리한 곳만 남겼어요.'
+          : autoRelaxedPool.relaxedToLevel > thrillLevel
+          ? `중간 후보가 부족해서 Lv${autoRelaxedPool.relaxedToLevel} 기준까지 자동으로 넓혔어요. 그래도 중심축에서 크게 벗어나는 후보는 제외했어요.`
+          : autoRelaxedPool.pool.length < preferredPoolSize
+            ? '중간 후보를 최소 3개 기준으로 압축했어요.'
+            : null;
+
+      return {
+        pool: autoRelaxedPool.pool.slice(0, Math.min(targetSize, autoRelaxedPool.pool.length)),
+        fallbackNotice: relaxedNotice,
+      };
+    }
+
+    return {
+      pool: [],
+      fallbackNotice: `중간 후보가 최소 ${minPoolSize}개가 되지 않아요. Lv5까지 넓혀도 튀는 후보뿐이라 핫플에서 만나로 바꿔보세요.`,
+    };
+  }
+
+  if (verifiedFairPool.length > 0) {
+    const targetSize = explicitTargetCount ?? Math.min(6 + drawPoolExtra, insights.length);
+
+    return {
+      pool: verifiedFairPool.slice(0, Math.min(targetSize, verifiedFairPool.length)),
+      fallbackNotice:
+        verifiedFairPool.length < Math.min(3, targetSize)
+          ? '실제 이동시간으로 공정도 기준을 통과한 후보만 추첨 풀에 넣었어요.'
+          : null,
+    };
+  }
 
   if (balancedPool.length >= 3) {
     const targetSize = explicitTargetCount ?? Math.min(6 + drawPoolExtra, insights.length);
@@ -1684,7 +3019,7 @@ export function getDrawPool(
     };
   }
 
-  if (thrillLevel >= 4) {
+  if (selectionMode === 'neighborhood' && thrillLevel >= 4) {
     const thrillPool = insights.filter(
       (insight) => insight.nearestDuration <= 18 || insight.centerDistance <= 2.5,
     );
@@ -1734,6 +3069,7 @@ function weightedPick(
   pool: CandidateInsight[],
   selectionMode: SelectionModeKey = 'balance',
   thrillLevel: ThrillLevel = 1,
+  participants: Participant[] = [],
 ) {
   const getWeight = (insight: CandidateInsight, index: number) => {
     const categoryWeight = insight.categoryMatched ? 1.24 : 0.78;
@@ -1741,12 +3077,16 @@ function weightedPick(
     const speedWeight = Math.max(0.7, 1.45 - insight.averageDuration / 50);
     const fairRankWeight =
       selectionMode === 'balance'
-        ? Math.max(0.24, 1.8 - getBalanceRankingScore(insight) / 42)
+        ? Math.max(0.18, 2.1 - getFairnessRankingScore(insight, thrillLevel, participants) / 42)
         : 1;
     const neighborhoodWeight =
       selectionMode === 'neighborhood'
         ? Math.max(0.85, 1.38 - insight.nearestDuration / 55) +
           Math.min(0.18, insight.centerDistance / 18)
+        : 1;
+    const hotplaceWeight =
+      selectionMode === 'hotplace'
+        ? Math.max(0.55, 1.85 - getHotplaceRankingScore(insight, thrillLevel) / 70)
         : 1;
     const thrillWeight =
       thrillLevel >= 5
@@ -1780,6 +3120,10 @@ function weightedPick(
         : insight.candidate.drawMood === '무드 픽'
           ? 1.06
           : 0.98;
+    const corridorWeight =
+      selectionMode === 'balance'
+        ? Math.max(0.16, 1 - getCorridorDriftPenalty(insight) / 95)
+        : 1;
     const rankWeight = Math.max(0.85, 1.2 - index * 0.04);
 
     return (
@@ -1788,9 +3132,11 @@ function weightedPick(
         fairRankWeight *
         speedWeight *
         neighborhoodWeight *
+        hotplaceWeight *
         thrillWeight *
         houseFrontWeight *
         moodWeight *
+        corridorWeight *
         rankWeight
     );
   };
@@ -1830,17 +3176,20 @@ export function buildDrawPlan(
   thrillLevel: ThrillLevel = 1,
   candidateScope: CandidateScopeKey = 'standard',
   lockedWinner?: CandidateInsight | null,
+  participants: Participant[] = [],
 ): DrawPlan {
   const { pool, fallbackNotice } = getDrawPool(
     insights,
     selectionMode,
     thrillLevel,
     candidateScope,
+    undefined,
+    participants,
   );
   const winner =
     lockedWinner && pool.some((insight) => insight.candidate.id === lockedWinner.candidate.id)
       ? lockedWinner
-      : weightedPick(pool, selectionMode, thrillLevel);
+      : weightedPick(pool, selectionMode, thrillLevel, participants);
   const runnerUps = sampleWithoutRepeat(pool, 2, [winner.candidate.id]);
   const finalists = [winner, ...runnerUps].slice(0, Math.min(3, pool.length));
   const rapidShuffle = Array.from({ length: Math.max(12, pool.length * 3) }, () => {

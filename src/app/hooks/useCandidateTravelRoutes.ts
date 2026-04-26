@@ -39,6 +39,61 @@ function getRouteSignature(participants: Participant[], candidate: Candidate | n
   });
 }
 
+function getReasonMessage(reason: unknown) {
+  if (reason instanceof Error && reason.message) {
+    return reason.message.replace(/ODsay\s*/g, '');
+  }
+
+  if (
+    reason &&
+    typeof reason === 'object' &&
+    'message' in reason &&
+    typeof (reason as { message?: unknown }).message === 'string'
+  ) {
+    return (reason as { message: string }).message.replace(/ODsay\s*/g, '');
+  }
+
+  return null;
+}
+
+function getFirstRouteError(results: PromiseSettledResult<TravelInfo>[]) {
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      const message = getReasonMessage(result.reason);
+
+      if (message) {
+        return message;
+      }
+    }
+  }
+
+  return null;
+}
+
+function getRouteFallbackMessage(message: string | null, partial: boolean) {
+  const hasOdsayNoRoute =
+    message?.includes('ODsay 대중교통 경로를 찾지 못했습니다') ||
+    message?.includes('대중교통 경로를 찾지 못했습니다') ||
+    message?.includes('ODsay 대중교통 경로 응답에 추천 경로가 없습니다') ||
+    message?.includes('대중교통 경로 응답에 추천 경로가 없습니다');
+
+  if (hasOdsayNoRoute) {
+    return partial
+      ? '일부 대중교통 경로는 실시간 응답이 없어 예상값으로 보정했어요.'
+      : '대중교통 실시간 경로를 못 받아서 예상 이동시간으로 보정했어요.';
+  }
+
+  if (message) {
+    return partial
+      ? `일부 경로는 예상값으로 보정했어요. ${message}`
+      : message;
+  }
+
+  return partial
+    ? '일부 경로는 응답이 없어 예상값으로 보정했어요.'
+    : '실제 경로 응답이 없어 예상 이동 정보로 보여드려요.';
+}
+
 export function useCandidateTravelRoutes(
   participants: Participant[],
   candidate: Candidate | null,
@@ -90,9 +145,11 @@ export function useCandidateTravelRoutes(
 
         setRoutes(merged);
 
+        const firstRouteError = getFirstRouteError(results);
+
         if (!liveCount) {
           setStatus('error');
-          setError('실제 경로 응답이 없어 예상 이동 정보로 보여드려요.');
+          setError(getRouteFallbackMessage(firstRouteError, false));
           return;
         }
 
@@ -100,17 +157,17 @@ export function useCandidateTravelRoutes(
         setError(
           liveCount === merged.length
             ? null
-            : '일부 경로는 응답이 없어 예상값으로 보정했어요.',
+            : getRouteFallbackMessage(firstRouteError, true),
         );
       })
-      .catch(() => {
+      .catch((error) => {
         if (!active) {
           return;
         }
 
         setRoutes(fallbackRoutes);
         setStatus('error');
-        setError('실제 경로 응답이 없어 예상 이동 정보로 보여드려요.');
+        setError(getReasonMessage(error) ?? '실제 경로 응답이 없어 예상 이동 정보로 보여드려요.');
       });
 
     return () => {

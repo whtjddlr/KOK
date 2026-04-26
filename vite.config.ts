@@ -43,6 +43,120 @@ function getCandidateScopeBonus(candidateScope: string) {
   return 0;
 }
 
+const FAIRNESS_SPREAD_LIMIT_BY_LEVEL: Record<number, number> = {
+  1: 10,
+  2: 15,
+  3: 20,
+  4: 25,
+  5: 35,
+};
+
+function getFairnessSpreadLimit(thrillLevel: number) {
+  return FAIRNESS_SPREAD_LIMIT_BY_LEVEL[thrillLevel] ?? FAIRNESS_SPREAD_LIMIT_BY_LEVEL[1];
+}
+
+function getInsightSpreadDuration(insight: any) {
+  return typeof insight?.spreadDuration === 'number'
+    ? insight.spreadDuration
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function getInsightFarthestDuration(insight: any) {
+  return typeof insight?.farthestDuration === 'number'
+    ? insight.farthestDuration
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function getInsightAverageDuration(insight: any) {
+  return typeof insight?.averageDuration === 'number'
+    ? insight.averageDuration
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function getInsightNumber(insight: any, key: string, fallback = 0) {
+  return typeof insight?.[key] === 'number' ? insight[key] : fallback;
+}
+
+function getInsightFairEfficiencyScore(insight: any, thrillLevel: number) {
+  const spread = getInsightSpreadDuration(insight);
+  const average = getInsightAverageDuration(insight);
+  const farthest = getInsightFarthestDuration(insight);
+  const overage = Math.max(0, spread - getFairnessSpreadLimit(thrillLevel));
+  const longTripPenalty =
+    Math.max(0, average - 48) * 0.85 + Math.max(0, farthest - 58) * 0.55;
+
+  return (
+    spread * 1.6 +
+    average * 0.85 +
+    farthest * 0.62 +
+    getInsightNumber(insight, 'centerDistance') * 0.8 +
+    getInsightNumber(insight, 'axisDistance') * 1.05 +
+    longTripPenalty +
+    overage * 10 +
+    overage * overage * 0.75 +
+    (insight?.allReachable === false ? 24 : 0) +
+    (insight?.categoryMatched === false ? 6 : 0)
+  );
+}
+
+function compareInsightsByFairness(left: any, right: any, thrillLevel: number) {
+  const limit = getFairnessSpreadLimit(thrillLevel);
+  const leftSpread = getInsightSpreadDuration(left);
+  const rightSpread = getInsightSpreadDuration(right);
+  const leftWithinLimit = leftSpread <= limit;
+  const rightWithinLimit = rightSpread <= limit;
+
+  if (leftWithinLimit !== rightWithinLimit) {
+    return leftWithinLimit ? -1 : 1;
+  }
+
+  const scoreDiff =
+    getInsightFairEfficiencyScore(left, thrillLevel) -
+    getInsightFairEfficiencyScore(right, thrillLevel);
+
+  if (Math.abs(scoreDiff) > 1) {
+    return scoreDiff;
+  }
+
+  if (leftSpread !== rightSpread) {
+    return leftSpread - rightSpread;
+  }
+
+  const leftFarthest = getInsightFarthestDuration(left);
+  const rightFarthest = getInsightFarthestDuration(right);
+
+  if (leftFarthest !== rightFarthest) {
+    return leftFarthest - rightFarthest;
+  }
+
+  return getInsightAverageDuration(left) - getInsightAverageDuration(right);
+}
+
+function reorderCandidateIdsByFairness(
+  candidateIds: string[],
+  insights: any[],
+  thrillLevel: number,
+) {
+  const orderIndex = new Map(candidateIds.map((candidateId, index) => [candidateId, index]));
+
+  return candidateIds
+    .map((candidateId) => insights.find((insight) => getInsightCandidateId(insight) === candidateId))
+    .filter(Boolean)
+    .sort((left, right) => {
+      const fairnessDiff = compareInsightsByFairness(left, right, thrillLevel);
+
+      if (fairnessDiff !== 0) {
+        return fairnessDiff;
+      }
+
+      return (
+        (orderIndex.get(getInsightCandidateId(left)) ?? Number.MAX_SAFE_INTEGER) -
+        (orderIndex.get(getInsightCandidateId(right)) ?? Number.MAX_SAFE_INTEGER)
+      );
+    })
+    .map((insight) => getInsightCandidateId(insight));
+}
+
 function pickTargetCount(
   total: number,
   selectionMode: string,
@@ -88,10 +202,15 @@ function buildFallbackCandidateIds(
       return true;
     });
 
-  return orderedIds.slice(
-    0,
-    pickTargetCount(orderedIds.length, selectionMode, thrillLevel, candidateScope, requestedTargetCount),
+  const targetCount = pickTargetCount(
+    orderedIds.length,
+    selectionMode,
+    thrillLevel,
+    candidateScope,
+    requestedTargetCount,
   );
+
+  return reorderCandidateIdsByFairness(orderedIds, insights, thrillLevel).slice(0, targetCount);
 }
 
 function getInsightCandidateId(insight: any) {
@@ -264,6 +383,10 @@ function ensureParticipantLocalCoverageIds(
   const isLocalHeavyMode = selectionMode === 'neighborhood' && thrillLevel >= 4;
   const isHouseFrontMode = selectionMode === 'neighborhood' && thrillLevel >= 5;
 
+  if (!isLocalHeavyMode) {
+    return nextIds.slice(0, targetLimit);
+  }
+
   if (isHouseFrontMode) {
     const requiredIds: string[] = [];
     const usedRequiredIds = new Set<string>();
@@ -432,10 +555,28 @@ function buildSelectionPayload(
 ) {
   const isNearOnePersonMode = selectionMode === 'neighborhood' && thrillLevel >= 4;
   const isHouseFrontMode = selectionMode === 'neighborhood' && thrillLevel >= 5;
+  const fairnessSpreadLimit = getFairnessSpreadLimit(thrillLevel);
+  const categoryLabels: Record<string, string> = {
+    dining: '식사',
+    cafe: '카페',
+    drink: '술자리',
+    date: '데이트',
+    culture: '문화/산책',
+    activity: '액티비티',
+  };
+  const categoryLabel = categoryLabels[selectedCategory] ?? selectedCategory;
 
   return {
     selectionGoal:
       'Select meetup area candidates near the middle of the group so everyone can reach them as fairly as possible.',
+    fairnessRule:
+      `Lv${thrillLevel} 공정도는 참여자별 이동시간 편차(spreadDuration) ${fairnessSpreadLimit}분 이하가 기준이다. 이 기준 안의 후보를 최우선으로 고르고, 충분하지 않을 때만 편차가 가장 작은 후보를 보충해라. 중간에서 만나 모드에서는 기준 안에 들어온 후보끼리 averageDuration과 farthestDuration이 낮은 효율적인 후보를 우선하고, 모두가 똑같이 오래 이동하는 후보는 낮게 평가해라. 공정 모드에서는 서울/경기/인천 지역 안배보다 spreadDuration 최소화와 이동 효율이 먼저이며, 지역 대표 후보를 억지로 넣어 편차를 키우지 마라.`,
+    twoPersonRule:
+      participants.length === 2 && selectionMode === 'balance'
+        ? '2명 모임에서는 후보가 애매하게 퍼지기 쉬우니 두 출발지를 잇는 이동축 근처, 그중에서도 한쪽 끝이 아니라 가운데 35~65% 구간에 가까운 후보를 우선해라. 편차가 낮아도 둘 다 오래 이동하거나 이동축에서 크게 벗어난 후보는 낮게 평가해라.'
+        : '3명 이상 모임에서는 전체 중심과 참여자별 편차를 함께 본다.',
+    categoryRule:
+      `${categoryLabel} 카테고리에 잘 맞는 상권을 고르되, 카테고리 적합성은 공정성 다음 기준이다. 먼저 fairnessSpreadLimit 안에 있거나 spreadDuration이 작은 후보를 고르고, 그 안에서 selectedCategory와 tags/categories/bestFor가 잘 맞는 후보를 우선해라. 유명한 상권 하나로 몰지 말고, 덜 유명한 동네라도 ${categoryLabel}에 맞는 식당/카페/바/전시/액티비티 포인트가 있으면 공정한 후보로 살려라. 카테고리 때문에 한 참여자 근처로 과하게 쏠리는 선택은 피하라.`,
     localModeRule:
       isHouseFrontMode
         ? 'House-front mode is intentionally extreme: keep some fair midpoint candidates, but every participant must have at least one explicit local wildcard candidate in the final ids. Prefer exactly one thrill-hyper id per participant first, then use thrill-local or participant-near only as fallback. Do not give two house-front picks to one participant while another participant has none.'
@@ -451,13 +592,16 @@ function buildSelectionPayload(
           ? 'Include a few one-person-near picks, but keep exact house-front picks out.'
         : 'Keep candidate selection centered on fair and realistic meetup areas.',
     selectedCategory,
+    categoryLabel,
     selectionMode,
     thrillLevel,
+    fairnessSpreadLimit,
     candidateScope,
     thrillHint: getThrillHint(thrillLevel),
     targetCount,
     participants: participants.map((participant) => ({
       name: participant?.name,
+      gender: participant?.gender,
       location: participant?.location,
       maxTravelTime: participant?.maxTravelTime,
     })),
@@ -470,6 +614,7 @@ function buildSelectionPayload(
       routeHint: insight?.candidate?.routeHint,
       tags: insight?.candidate?.tags,
       categories: insight?.candidate?.categories,
+      categoryMatched: Boolean(insight?.categoryMatched),
       averageDuration: insight?.averageDuration,
       maxDuration: insight?.maxDuration,
       spreadDuration: insight?.spreadDuration,
@@ -525,6 +670,315 @@ function getRuntimeAiConfig(body: any) {
   };
 }
 
+interface PlaceCandidate {
+  id: string;
+  name: string;
+  description?: string;
+  categoryPath?: string;
+  address?: string;
+  roadAddress?: string;
+}
+
+const genericPlaceChainKeywords = [
+  '롯데리아',
+  '맥도날드',
+  '버거킹',
+  'KFC',
+  '맘스터치',
+  '써브웨이',
+  '이디야',
+  '메가커피',
+  '빽다방',
+  '컴포즈커피',
+  '스타벅스',
+  '투썸',
+  '파리바게뜨',
+  '뚜레쥬르',
+  'CU',
+  'GS25',
+  '세븐일레븐',
+  '다이소',
+  '올리브영',
+  '마트',
+  '편의점',
+  '약국',
+  '주차장',
+];
+
+const placeCategoryHints: Record<string, string[]> = {
+  restaurant: ['음식점', '한식', '일식', '양식', '중식', '고기', '파스타', '브런치', '다이닝'],
+  cafe: ['카페', '디저트', '베이커리', '커피', '브런치'],
+  drink: ['술집', '바', '이자카야', '와인', '맥주', '포차', '칵테일'],
+  culture: ['전시', '공연', '문화', '갤러리', '소품샵', '서점', '공방'],
+  activity: ['방탈출', '보드게임', '볼링', '오락', '영화', '놀거리', '공원'],
+};
+
+function normalizePlaceText(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getPlaceCandidateText(item: PlaceCandidate) {
+  return [
+    item.name,
+    item.description,
+    item.categoryPath,
+    item.address,
+    item.roadAddress,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function getPlaceHeuristicScore(
+  item: PlaceCandidate,
+  category: string,
+  detailQuery: string,
+  meetCategory: string,
+) {
+  const text = getPlaceCandidateText(item);
+  const lowerText = text.toLowerCase();
+  const normalizedDetail = detailQuery.trim().toLowerCase();
+  const hints = placeCategoryHints[category] ?? [];
+  let score = 0;
+
+  hints.forEach((hint) => {
+    if (text.includes(hint)) {
+      score += 9;
+    }
+  });
+
+  if (normalizedDetail && lowerText.includes(normalizedDetail)) {
+    score += 8;
+  }
+
+  if (text.includes('맛집') || text.includes('핫플') || text.includes('분위기')) {
+    score += 5;
+  }
+
+  if (text.includes('예약') || text.includes('레스토랑') || text.includes('다이닝')) {
+    score += 3;
+  }
+
+  const chainPenalty = genericPlaceChainKeywords.some((keyword) => text.includes(keyword))
+    ? 18
+    : 0;
+  score -= meetCategory === 'date' || detailQuery.includes('데이트') || detailQuery.includes('분위기')
+    ? chainPenalty * 1.4
+    : chainPenalty;
+
+  if (text.includes('호텔') || text.includes('모텔') || text.includes('부동산')) {
+    score -= 30;
+  }
+
+  return score;
+}
+
+function buildPlaceFallbackIds(
+  items: PlaceCandidate[],
+  category: string,
+  detailQuery: string,
+  meetCategory: string,
+  limit: number,
+) {
+  return [...items]
+    .sort(
+      (left, right) =>
+        getPlaceHeuristicScore(right, category, detailQuery, meetCategory) -
+        getPlaceHeuristicScore(left, category, detailQuery, meetCategory),
+    )
+    .map((item) => item.id)
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function buildPlaceSelectionPayload(input: {
+  candidateName: string;
+  candidateDistrict: string;
+  category: string;
+  detailQuery: string;
+  meetCategory: string;
+  userVibe: string;
+  favoriteKeywords: string[];
+  groupGenderContext: string;
+  limit: number;
+  items: PlaceCandidate[];
+}) {
+  return {
+    placeArea: input.candidateName,
+    district: input.candidateDistrict,
+    meetCategory: input.meetCategory,
+    recommendationCategory: input.category,
+    detailQuery: input.detailQuery,
+    userVibe: input.userVibe,
+    favoriteKeywords: input.favoriteKeywords,
+    groupGenderContext: input.groupGenderContext,
+    targetCount: input.limit,
+    allowedIds: input.items.map((item) => item.id),
+    places: input.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      categoryPath: item.categoryPath,
+      address: item.roadAddress || item.address,
+      heuristicScore:
+        Math.round(
+          getPlaceHeuristicScore(item, input.category, input.detailQuery, input.meetCategory) *
+            10,
+        ) / 10,
+      genericChain: genericPlaceChainKeywords.some((keyword) =>
+        getPlaceCandidateText(item).includes(keyword),
+      ),
+    })),
+  };
+}
+
+async function fetchOpenAiPlaceRanking({
+  apiKey,
+  model,
+  payload,
+  allowedIds,
+}: {
+  apiKey: string;
+  model: string;
+  payload: ReturnType<typeof buildPlaceSelectionPayload>;
+  allowedIds: string[];
+}) {
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.45,
+      input: [
+        {
+          role: 'system',
+          content:
+            'You rank real nearby places for a Korean meetup/date planning app. Return JSON only. Choose only allowed ids. Prioritize places that fit the requested category, detail query, and social context. Prefer distinctive local venues, appropriate ambience, reservation-worthy restaurants/cafes/bars, and places people would actually choose for a meetup. Use groupGenderContext only as a soft ambience and comfort signal: prefer clean, safe, conversation-friendly, inclusive places for mixed or gender-skewed groups, but do not stereotype or exclude valid options only by gender. Penalize generic fast-food chains, convenience stores, marts, pharmacies, unrelated retail, hotels/motels, and broad landmarks when the user asks for restaurants, dates, cafes, bars, or activities. For date or ambience-driven requests, do not rank generic fast-food chains such as Lotteria highly unless no other relevant option exists. Do not invent places.',
+        },
+        {
+          role: 'user',
+          content: JSON.stringify(payload),
+        },
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'place_recommendation_ranking',
+          strict: true,
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              item_ids: {
+                type: 'array',
+                minItems: payload.targetCount,
+                maxItems: payload.targetCount,
+                uniqueItems: true,
+                items: {
+                  type: 'string',
+                  enum: allowedIds,
+                },
+              },
+              summary: {
+                type: 'string',
+              },
+            },
+            required: ['item_ids', 'summary'],
+          },
+        },
+      },
+    }),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message ?? `OpenAI place ranking failed with status ${response.status}.`);
+  }
+
+  const outputText = extractResponseText(data);
+
+  if (!outputText) {
+    throw new Error('OpenAI place ranking returned no structured output.');
+  }
+
+  const parsed = JSON.parse(outputText);
+
+  return {
+    itemIds: Array.isArray(parsed?.item_ids)
+      ? parsed.item_ids.filter((id: unknown): id is string => typeof id === 'string')
+      : [],
+    summary: typeof parsed?.summary === 'string' ? parsed.summary : '',
+  };
+}
+
+async function fetchUpstagePlaceRanking({
+  apiKey,
+  model,
+  baseUrl,
+  payload,
+}: {
+  apiKey: string;
+  model: string;
+  baseUrl: string;
+  payload: ReturnType<typeof buildPlaceSelectionPayload>;
+}) {
+  const apiBase = baseUrl.replace(/\/$/, '');
+  const response = await fetch(`${apiBase}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.45,
+      response_format: {
+        type: 'json_object',
+      },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Return a JSON object with keys item_ids and summary. item_ids must contain only allowed ids and match targetCount. You rank real nearby places for a Korean meetup/date planning app. Prioritize category fit, detail query fit, ambience, local distinctiveness, and places people would actually choose for a meetup. Use groupGenderContext only as a soft ambience and comfort signal: prefer clean, safe, conversation-friendly, inclusive places for mixed or gender-skewed groups, but do not stereotype or exclude valid options only by gender. Penalize generic fast-food chains, convenience stores, marts, pharmacies, unrelated retail, hotels/motels, and broad landmarks when the user asks for restaurants, dates, cafes, bars, or activities. For date or ambience-driven requests, do not rank generic fast-food chains such as Lotteria highly unless no other relevant option exists. Do not invent places.',
+        },
+        {
+          role: 'user',
+          content: JSON.stringify(payload),
+        },
+      ],
+    }),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message ?? `Upstage place ranking failed with status ${response.status}.`);
+  }
+
+  const rawContent = data?.choices?.[0]?.message?.content;
+  const content =
+    typeof rawContent === 'string'
+      ? rawContent
+      : Array.isArray(rawContent)
+        ? rawContent.map((item) => item?.text ?? '').join('\n')
+        : '';
+
+  if (!content.trim()) {
+    throw new Error('Upstage place ranking returned no content.');
+  }
+
+  const parsed = JSON.parse(content);
+
+  return {
+    itemIds: Array.isArray(parsed?.item_ids)
+      ? parsed.item_ids.filter((id: unknown): id is string => typeof id === 'string')
+      : [],
+    summary: typeof parsed?.summary === 'string' ? parsed.summary : '',
+  };
+}
+
 async function fetchOpenAiCandidateSelection({
   apiKey,
   model,
@@ -570,7 +1024,7 @@ async function fetchOpenAiCandidateSelection({
         {
           role: 'system',
           content:
-            'You are selecting meeting area candidates for a Seoul Capital Area meetup app. Return JSON only. Choose only from the allowed candidate ids. Keep a fair midpoint core for the whole group. In neighborhood thrill level 4, include participant-near or thrill-local candidates around one person. In neighborhood thrill level 5 house-front mode, every participant must get one explicit local extreme anchor: prefer one thrill-hyper id per participant, then use thrill-local or participant-near only as fallback. Do not give multiple house-front picks to one participant while another participant has none. Favor fairness across participants, travel plausibility, and category fit.',
+            'You are selecting meeting area candidates for a Seoul Capital Area meetup app. Return JSON only. Choose only from the allowed candidate ids. The primary fairness metric is spreadDuration, the difference between the slowest and fastest participant travel times. Respect the provided fairnessSpreadLimit first: prefer candidates at or below that limit, and if there are not enough, choose the smallest spreadDuration candidates. Category fit is important but secondary to fairness: among fair candidates, prefer areas whose tags/categories/bestFor match selectedCategory. Do not let category fit collapse the list into one famous or one-person-near area. Every neighborhood can have category-specific venues, so keep less famous but fair areas when their tags, bestFor, or commercial context support the category. Do not force Seoul/Gyeonggi/Incheon regional representation if it increases spreadDuration. In balance mode, respect fairnessSpreadLimit first, but among candidates within the limit prioritize low averageDuration and low farthestDuration so the group does not travel equally far; use spreadDuration, centerDistance, and axisDistance as tie-breakers. For exactly two participants, prefer candidates near the corridor between both starts and close to the middle band, not candidates drifting toward either endpoint. In neighborhood level 4, include participant-near or thrill-local candidates only after preserving a fair midpoint core. In neighborhood level 5 house-front mode, every participant must get one explicit local extreme anchor when possible, but still keep the rest of the set as fair as possible.',
         },
         {
           role: 'user',
@@ -690,7 +1144,7 @@ async function fetchUpstageCandidateSelection({
         {
           role: 'system',
           content:
-            'Return a JSON object with keys candidate_ids and summary. candidate_ids must contain only allowed ids and match the requested targetCount. Always preserve balanced midpoint recommendations. In neighborhood thrill level 4, include participant-near or thrill-local candidates around one person. In neighborhood thrill level 5 house-front mode, every participant must get one explicit local extreme anchor: prefer one thrill-hyper id per participant, then use thrill-local or participant-near only as fallback. Do not give multiple house-front picks to one participant while another participant has none.',
+            'Return a JSON object with keys candidate_ids and summary. candidate_ids must contain only allowed ids and match the requested targetCount. The primary fairness metric is spreadDuration, the difference between the slowest and fastest participant travel times. Respect the provided fairnessSpreadLimit first: prefer candidates at or below that limit, and if there are not enough, choose the smallest spreadDuration candidates. Category fit is important but secondary to fairness: among fair candidates, prefer areas whose tags/categories/bestFor match selectedCategory. Do not let category fit collapse the list into one famous or one-person-near area. Every neighborhood can have category-specific venues, so keep less famous but fair areas when their tags, bestFor, or commercial context support the category. Do not force Seoul/Gyeonggi/Incheon regional representation if it increases spreadDuration. In balance mode, respect fairnessSpreadLimit first, but among candidates within the limit prioritize low averageDuration and low farthestDuration so the group does not travel equally far; use spreadDuration, centerDistance, and axisDistance as tie-breakers. For exactly two participants, prefer candidates near the corridor between both starts and close to the middle band, not candidates drifting toward either endpoint. In neighborhood level 4, include participant-near or thrill-local candidates only after preserving a fair midpoint core. In neighborhood level 5 house-front mode, every participant must get one explicit local extreme anchor when possible, but still keep the rest of the set as fair as possible.',
         },
         {
           role: 'user',
@@ -1187,12 +1641,16 @@ function liveCandidateProxy({
         candidateScope,
         effectiveCandidateTargetCount,
       );
-      const coveredSafeFallbackIds = ensureParticipantLocalCoverageIds(
-        safeFallbackIds,
+      const coveredSafeFallbackIds = reorderCandidateIdsByFairness(
+        ensureParticipantLocalCoverageIds(
+          safeFallbackIds,
+          insights,
+          participants,
+          safeTargetCount,
+          selectionMode,
+          thrillLevel,
+        ),
         insights,
-        participants,
-        safeTargetCount,
-        selectionMode,
         thrillLevel,
       );
 
@@ -1243,12 +1701,16 @@ function liveCandidateProxy({
         const candidateIds = aiSelection.candidateIds
           .filter((candidateId) => allowedIds.has(candidateId))
           .slice(0, pickTargetCount(allowedIds.size, selectionMode, thrillLevel, candidateScope, effectiveCandidateTargetCount));
-        const coveredCandidateIds = ensureParticipantLocalCoverageIds(
-          candidateIds.length ? candidateIds : coveredSafeFallbackIds,
+        const coveredCandidateIds = reorderCandidateIdsByFairness(
+          ensureParticipantLocalCoverageIds(
+            candidateIds.length ? candidateIds : coveredSafeFallbackIds,
+            insights,
+            participants,
+            pickTargetCount(allowedIds.size, selectionMode, thrillLevel, candidateScope, effectiveCandidateTargetCount),
+            selectionMode,
+            thrillLevel,
+          ),
           insights,
-          participants,
-          pickTargetCount(allowedIds.size, selectionMode, thrillLevel, candidateScope, effectiveCandidateTargetCount),
-          selectionMode,
           thrillLevel,
         );
 
@@ -1301,6 +1763,189 @@ function liveCandidateProxy({
   };
 }
 
+function contentRecommendationsProxy({
+  openAiApiKey,
+  openAiModel,
+  upstageApiKey,
+  upstageModel,
+  upstageBaseUrl,
+}: {
+  openAiApiKey: string;
+  openAiModel: string;
+  upstageApiKey: string;
+  upstageModel: string;
+  upstageBaseUrl: string;
+}) {
+  const middleware = async (req: any, res: any, next: () => void) => {
+    if (!req.url?.startsWith('/api/content-recommendations')) {
+      next();
+      return;
+    }
+
+    if (req.method !== 'POST') {
+      res.statusCode = 405;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ message: 'Method not allowed' }));
+      return;
+    }
+
+    try {
+      const body = await readJsonBody(req);
+      const items = Array.isArray(body?.items)
+        ? body.items
+            .map((item: any) => ({
+              id: normalizePlaceText(item?.id),
+              name: normalizePlaceText(item?.name),
+              description: normalizePlaceText(item?.description),
+              categoryPath: normalizePlaceText(item?.categoryPath),
+              address: normalizePlaceText(item?.address),
+              roadAddress: normalizePlaceText(item?.roadAddress),
+            }))
+            .filter((item: PlaceCandidate) => item.id && item.name)
+        : [];
+      const category = normalizePlaceText(body?.category) || 'restaurant';
+      const detailQuery = normalizePlaceText(body?.detailQuery) || category;
+      const meetCategory = normalizePlaceText(body?.meetCategory) || category;
+      const limit = Math.max(
+        1,
+        Math.min(
+          typeof body?.limit === 'number' && Number.isFinite(body.limit)
+            ? Math.round(body.limit)
+            : 6,
+          items.length,
+        ),
+      );
+      const allowedIds = items.map((item) => item.id).filter(Boolean);
+      const fallbackIds = buildPlaceFallbackIds(
+        items,
+        category,
+        detailQuery,
+        meetCategory,
+        limit,
+      );
+
+      if (!items.length || !allowedIds.length) {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(
+          JSON.stringify({
+            itemIds: [],
+            source: 'empty',
+            message: '추천 후보가 아직 없어요.',
+          }),
+        );
+        return;
+      }
+
+      const runtimeAiConfig = getRuntimeAiConfig(body);
+      const effectiveUpstageApiKey =
+        runtimeAiConfig?.provider === 'upstage' ? runtimeAiConfig.apiKey : upstageApiKey;
+      const effectiveUpstageModel =
+        runtimeAiConfig?.provider === 'upstage' ? runtimeAiConfig.model : upstageModel;
+      const effectiveUpstageBaseUrl =
+        runtimeAiConfig?.provider === 'upstage' && runtimeAiConfig.baseUrl
+          ? runtimeAiConfig.baseUrl
+          : upstageBaseUrl;
+      const effectiveOpenAiApiKey =
+        runtimeAiConfig?.provider === 'openai' ? runtimeAiConfig.apiKey : openAiApiKey;
+      const effectiveOpenAiModel =
+        runtimeAiConfig?.provider === 'openai' ? runtimeAiConfig.model : openAiModel;
+      const payload = buildPlaceSelectionPayload({
+        candidateName: normalizePlaceText(body?.candidate?.name),
+        candidateDistrict: normalizePlaceText(body?.candidate?.district),
+        category,
+        detailQuery,
+        meetCategory,
+        userVibe: normalizePlaceText(body?.userVibe),
+        groupGenderContext: normalizePlaceText(body?.groupGenderContext),
+        favoriteKeywords: Array.isArray(body?.favoriteKeywords)
+          ? body.favoriteKeywords.filter((keyword: unknown): keyword is string => typeof keyword === 'string')
+          : [],
+        limit,
+        items,
+      });
+
+      if (!effectiveOpenAiApiKey && !effectiveUpstageApiKey) {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(
+          JSON.stringify({
+            itemIds: fallbackIds,
+            source: 'heuristic',
+            message: 'AI 키가 없어 기본 필터로 장소를 정리했어요.',
+          }),
+        );
+        return;
+      }
+
+      try {
+        const aiRanking = effectiveUpstageApiKey
+          ? await fetchUpstagePlaceRanking({
+              apiKey: effectiveUpstageApiKey,
+              model: effectiveUpstageModel,
+              baseUrl: effectiveUpstageBaseUrl,
+              payload,
+            })
+          : await fetchOpenAiPlaceRanking({
+              apiKey: effectiveOpenAiApiKey,
+              model: effectiveOpenAiModel,
+              payload,
+              allowedIds,
+            });
+        const itemIds = aiRanking.itemIds
+          .filter((id) => allowedIds.includes(id))
+          .slice(0, limit);
+
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(
+          JSON.stringify({
+            itemIds: itemIds.length ? itemIds : fallbackIds,
+            source: effectiveUpstageApiKey ? 'upstage' : 'openai',
+            message: aiRanking.summary || 'AI가 모임에 어울리는 순서로 장소를 정리했어요.',
+          }),
+        );
+      } catch (error) {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(
+          JSON.stringify({
+            itemIds: fallbackIds,
+            source: 'heuristic',
+            message:
+              error instanceof Error
+                ? `AI 추천 정렬 실패: ${error.message}`
+                : 'AI 추천 정렬에 실패해 기본 필터로 장소를 정리했어요.',
+          }),
+        );
+      }
+    } catch (error) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(
+        JSON.stringify({
+          itemIds: [],
+          source: 'error',
+          message:
+            error instanceof Error
+              ? error.message
+              : '장소 추천을 정리하지 못했어요.',
+        }),
+      );
+    }
+  };
+
+  return {
+    name: 'content-recommendations-proxy',
+    configureServer(server: any) {
+      server.middlewares.use(middleware);
+    },
+    configurePreviewServer(server: any) {
+      server.middlewares.use(middleware);
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const rawOpenAiKey = pickFirstEnv(env, ['OPENAI_API_KEY', 'AI_API_KEY', 'VITE_OPENAI_API_KEY']);
@@ -1333,6 +1978,20 @@ export default defineConfig(({ mode }) => {
         odsayApiKey,
       }),
       liveCandidateProxy({
+        openAiApiKey: detectedOpenAiKey,
+        openAiModel: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini',
+        upstageApiKey: detectedUpstageKey,
+        upstageModel:
+          pickFirstEnv(env, ['UPSTAGE_MODEL', 'SOLAR_MODEL', 'VITE_UPSTAGE_MODEL']) ||
+          'solar-pro3',
+        upstageBaseUrl:
+          pickFirstEnv(env, [
+            'UPSTAGE_API_BASE_URL',
+            'SOLAR_API_BASE_URL',
+            'VITE_UPSTAGE_API_BASE_URL',
+          ]) || 'https://api.upstage.ai/v1',
+      }),
+      contentRecommendationsProxy({
         openAiApiKey: detectedOpenAiKey,
         openAiModel: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini',
         upstageApiKey: detectedUpstageKey,
