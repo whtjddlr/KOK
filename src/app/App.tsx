@@ -221,6 +221,8 @@ function getMeetingRoomSignature(room: MeetingRoom | null) {
     redrawVotes: [...room.redrawVotes].sort(),
     redrawRequestedAt: room.redrawRequestedAt,
     selectedCategory: room.selectedCategory,
+    selectionMode: room.selectionMode,
+    thrillLevel: room.thrillLevel,
     selectedCandidate: room.selectedCandidate,
     status: room.status,
     updatedAt: room.updatedAt,
@@ -347,6 +349,8 @@ export default function App() {
 
         setActiveRoom(room);
         setSelectedCategory(room.selectedCategory);
+        setSelectionMode(room.selectionMode);
+        setThrillLevel(room.thrillLevel);
         setCurrentParticipants([]);
         setCurrentScreen('planner');
       })
@@ -458,6 +462,8 @@ export default function App() {
         createMeetingRoom({
           ownerId,
           selectedCategory,
+          selectionMode,
+          thrillLevel,
         }),
         7000,
         timeoutMessage,
@@ -607,6 +613,8 @@ export default function App() {
       setActiveRoom(room);
       syncRoomUrl(room);
       setSelectedCategory(room.selectedCategory);
+      setSelectionMode(room.selectionMode);
+      setThrillLevel(room.thrillLevel);
       setCurrentParticipants([]);
       setCurrentScreen('planner');
     } catch (error) {
@@ -712,6 +720,9 @@ export default function App() {
       const optimisticRoom = {
         ...roomToReset,
         selectedCandidate: null,
+        selectedCategory,
+        selectionMode,
+        thrillLevel,
         status: 'planning' as const,
         drawControllerId: null,
         drawReadyIds: roomToReset.status === 'decided' ? roomToReset.drawReadyIds : [],
@@ -728,6 +739,8 @@ export default function App() {
         resetRoomSelection({
           roomId: roomToReset.id,
           selectedCategory,
+          selectionMode,
+          thrillLevel,
           preserveReadiness: roomToReset.status === 'decided',
         }),
         5000,

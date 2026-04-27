@@ -5,7 +5,7 @@ import {
   getParticipantEstimatedTravelInfo,
 } from '../lib/meeting';
 import { fetchDirectionsTravelInfo } from '../lib/naver-directions';
-import { fetchOdsayTransitTravelInfo } from '../lib/odsay-transit';
+import { fetchOdsayTransitTravelInfo, getTransitServicePeriodKey } from '../lib/odsay-transit';
 
 type VerificationStatus = 'idle' | 'loading' | 'ready' | 'partial' | 'error';
 
@@ -30,7 +30,11 @@ function getFallbackRoute(participant: Participant, candidate: Candidate) {
   return getParticipantEstimatedTravelInfo(participant, candidate);
 }
 
-function getRouteCacheKey(participant: Participant, candidate: Candidate) {
+function getRouteCacheKey(
+  participant: Participant,
+  candidate: Candidate,
+  transitServicePeriod: string,
+) {
   return [
     participant.id,
     participant.coordinates.lat.toFixed(5),
@@ -39,6 +43,7 @@ function getRouteCacheKey(participant: Participant, candidate: Candidate) {
     candidate.id,
     candidate.coordinates.lat.toFixed(5),
     candidate.coordinates.lng.toFixed(5),
+    transitServicePeriod,
   ].join(':');
 }
 
@@ -65,8 +70,12 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
   });
 }
 
-async function fetchVerifiedRoute(participant: Participant, candidate: Candidate) {
-  const cacheKey = getRouteCacheKey(participant, candidate);
+async function fetchVerifiedRoute(
+  participant: Participant,
+  candidate: Candidate,
+  transitServicePeriod: string,
+) {
+  const cacheKey = getRouteCacheKey(participant, candidate, transitServicePeriod);
   const cached = routeCache.get(cacheKey);
 
   if (cached) {
@@ -82,9 +91,12 @@ async function fetchVerifiedRoute(participant: Participant, candidate: Candidate
 async function verifyCandidateInsight(
   insight: CandidateInsight,
   participants: Participant[],
+  transitServicePeriod: string,
 ): Promise<VerifiedCandidateResult> {
   const results = await Promise.allSettled(
-    participants.map((participant) => fetchVerifiedRoute(participant, insight.candidate)),
+    participants.map((participant) =>
+      fetchVerifiedRoute(participant, insight.candidate, transitServicePeriod),
+    ),
   );
   const routes = results.map((result, index) => {
     const participant = participants[index];
@@ -124,7 +136,11 @@ async function verifyCandidateInsight(
   };
 }
 
-function getVerificationSignature(participants: Participant[], insights: CandidateInsight[]) {
+function getVerificationSignature(
+  participants: Participant[],
+  insights: CandidateInsight[],
+  transitServicePeriod: string,
+) {
   return JSON.stringify({
     participants: participants.map((participant) => [
       participant.id,
@@ -133,6 +149,7 @@ function getVerificationSignature(participants: Participant[], insights: Candida
       participant.travelMode ?? 'transit',
       participant.maxTravelTime,
     ]),
+    transitPeriod: transitServicePeriod,
     candidates: insights.slice(0, MAX_VERIFIED_CANDIDATES).map((insight) => [
       insight.candidate.id,
       insight.candidate.coordinates.lat.toFixed(5),
@@ -148,13 +165,14 @@ export function useFairnessVerifiedCandidateInsights(
   participants: Participant[],
   insights: CandidateInsight[],
 ): VerifiedCandidateInsightsResult {
+  const transitServicePeriod = getTransitServicePeriodKey();
   const limitedInsights = useMemo(
     () => insights.slice(0, MAX_VERIFIED_CANDIDATES),
     [insights],
   );
   const verificationSignature = useMemo(
-    () => getVerificationSignature(participants, limitedInsights),
-    [limitedInsights, participants],
+    () => getVerificationSignature(participants, limitedInsights, transitServicePeriod),
+    [limitedInsights, participants, transitServicePeriod],
   );
   const [verifiedInsights, setVerifiedInsights] = useState<CandidateInsight[]>(limitedInsights);
   const [status, setStatus] = useState<VerificationStatus>(
@@ -181,7 +199,11 @@ export function useFairnessVerifiedCandidateInsights(
     setMessage('실제 이동시간으로 공정도를 다시 확인 중이에요.');
     setError(null);
 
-    Promise.all(limitedInsights.map((insight) => verifyCandidateInsight(insight, participants)))
+    Promise.all(
+      limitedInsights.map((insight) =>
+        verifyCandidateInsight(insight, participants, transitServicePeriod),
+      ),
+    )
       .then((results) => {
         if (!active) {
           return;

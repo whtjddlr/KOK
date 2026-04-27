@@ -91,7 +91,6 @@ import {
   loadRoomParticipants,
   rememberLocalRoomParticipant,
   removeRoomParticipant,
-  resetRoomReadiness,
   setRoomDrawReady,
   subscribeToRoomParticipants,
   subscribeToRoomState,
@@ -237,6 +236,8 @@ function getMeetingRoomSignature(room: MeetingRoom | null) {
     redrawVotes: [...room.redrawVotes].sort(),
     redrawRequestedAt: room.redrawRequestedAt,
     selectedCategory: room.selectedCategory,
+    selectionMode: room.selectionMode,
+    thrillLevel: room.thrillLevel,
     selectedCandidate: room.selectedCandidate,
     status: room.status,
     updatedAt: room.updatedAt,
@@ -571,11 +572,21 @@ export function PlannerScreen({
   const syncedRoomSignatureRef = useRef(getMeetingRoomSignature(onlineRoom));
   const participantsSignatureRef = useRef(getParticipantsSignature(participants));
   const onCategoryChangeRef = useRef(onCategoryChange);
+  const onSelectionModeChangeRef = useRef(onSelectionModeChange);
+  const onThrillLevelChangeRef = useRef(onThrillLevelChange);
   const onCompleteRef = useRef(onComplete);
 
   useEffect(() => {
     onCategoryChangeRef.current = onCategoryChange;
   }, [onCategoryChange]);
+
+  useEffect(() => {
+    onSelectionModeChangeRef.current = onSelectionModeChange;
+  }, [onSelectionModeChange]);
+
+  useEffect(() => {
+    onThrillLevelChangeRef.current = onThrillLevelChange;
+  }, [onThrillLevelChange]);
 
   useEffect(() => {
     onCompleteRef.current = onComplete;
@@ -650,6 +661,8 @@ export function PlannerScreen({
       seenRoomWinnerRef.current = winnerKey;
       pendingDecidedRoom = null;
       onCategoryChangeRef.current(room.selectedCategory);
+      onSelectionModeChangeRef.current(room.selectionMode);
+      onThrillLevelChangeRef.current(room.thrillLevel);
       onCompleteRef.current(room.selectedCandidate, roomParticipants, room.selectedCategory);
     };
 
@@ -785,6 +798,32 @@ export function PlannerScreen({
   const aiConfigSignature = getRuntimeAiConfigSignature(effectiveRuntimeAiConfig);
 
   useEffect(() => {
+    if (!onlineRoom || !roomState) {
+      return;
+    }
+
+    if (roomState.selectedCategory !== selectedCategory) {
+      onCategoryChangeRef.current(roomState.selectedCategory);
+    }
+
+    if (roomState.selectionMode !== selectionMode) {
+      onSelectionModeChangeRef.current(roomState.selectionMode);
+    }
+
+    if (roomState.thrillLevel !== thrillLevel) {
+      onThrillLevelChangeRef.current(roomState.thrillLevel);
+    }
+  }, [
+    onlineRoom,
+    roomState?.selectedCategory,
+    roomState?.selectionMode,
+    roomState?.thrillLevel,
+    selectedCategory,
+    selectionMode,
+    thrillLevel,
+  ]);
+
+  useEffect(() => {
     setSaveNewFriend(!isGuestMode);
   }, [isGuestMode]);
 
@@ -841,18 +880,19 @@ export function PlannerScreen({
   const isOnlineReadyComplete = Boolean(
     onlineRoom && readyRequiredCount > 0 && readyCount >= readyRequiredCount,
   );
+  const useSharedOnlineCandidatePool = Boolean(onlineRoom);
   const { candidates: aiGeneratedCandidates } = useAiGeneratedCandidates(
     participants,
     selectedCategory,
     selectionMode,
     effectiveThrillLevel,
-    activeCandidateTargetCount,
+    useSharedOnlineCandidatePool ? 0 : activeCandidateTargetCount,
     effectiveRuntimeAiConfig,
     aiConfigSignature,
   );
   const candidateSeeds = useMemo(
-    () => [...mockCandidates, ...aiGeneratedCandidates],
-    [aiGeneratedCandidates],
+    () => (useSharedOnlineCandidatePool ? mockCandidates : [...mockCandidates, ...aiGeneratedCandidates]),
+    [aiGeneratedCandidates, useSharedOnlineCandidatePool],
   );
 
   const candidateUniverse = useMemo(
@@ -923,25 +963,30 @@ export function PlannerScreen({
   const {
     candidateIds: aiCandidateIds,
     status: aiCandidateStatus,
-    source: aiCandidateSource,
     message: aiCandidateMessage,
     error: aiCandidateError,
   } = useLiveCandidateSearch(
     participants,
-    scopedCandidateInsights,
-    fallbackCandidateIds,
+    useSharedOnlineCandidatePool ? [] : scopedCandidateInsights,
+    useSharedOnlineCandidatePool ? [] : fallbackCandidateIds,
     selectedCategory,
     selectionMode,
     effectiveThrillLevel,
     candidateScope,
-    effectiveRuntimeAiConfig,
+    useSharedOnlineCandidatePool ? null : effectiveRuntimeAiConfig,
     aiConfigSignature,
     effectiveCandidateTargetCount,
   );
+  const sharedCandidateIds = useSharedOnlineCandidatePool ? fallbackCandidateIds : aiCandidateIds;
+  const sharedCandidateStatus = useSharedOnlineCandidatePool ? 'ready' : aiCandidateStatus;
+  const sharedCandidateMessage = useSharedOnlineCandidatePool
+    ? '온라인 방에서는 모두 같은 후보판으로 동기화해요.'
+    : aiCandidateMessage;
+  const sharedCandidateError = useSharedOnlineCandidatePool ? null : aiCandidateError;
 
   const aiCandidateInsights = useMemo(
-    () => sortInsightsByCandidateIds(scopedCandidateInsights, aiCandidateIds),
-    [aiCandidateIds, scopedCandidateInsights],
+    () => sortInsightsByCandidateIds(scopedCandidateInsights, sharedCandidateIds),
+    [scopedCandidateInsights, sharedCandidateIds],
   );
   const guardedAiCandidateInsights = useMemo(
     () =>
@@ -996,7 +1041,9 @@ export function PlannerScreen({
     ],
   );
   const fairnessVerificationInputInsights =
-    isFairnessMode && aiCandidateStatus !== 'loading' ? rawCandidateInsights : [];
+    isFairnessMode && !useSharedOnlineCandidatePool && sharedCandidateStatus !== 'loading'
+      ? rawCandidateInsights
+      : [];
   const {
     insights: fairnessVerifiedRawCandidateInsights,
     status: fairnessVerificationStatus,
@@ -1055,7 +1102,7 @@ export function PlannerScreen({
   );
   const drawBlockedReason = participants.length < 2
     ? '먼저 참여자를 2명 이상 입력해 주세요.'
-    : aiCandidateStatus === 'loading'
+    : sharedCandidateStatus === 'loading'
       ? 'AI가 후보를 정리하는 중이에요.'
       : fairnessVerificationPending
         ? '실제 이동시간으로 공정도를 다시 확인 중이에요.'
@@ -1089,7 +1136,7 @@ export function PlannerScreen({
         ? '내 위치 추가 필요'
         : participants.length < 2
           ? '참여자 2명 필요'
-          : aiCandidateStatus === 'loading'
+          : sharedCandidateStatus === 'loading'
             ? 'AI 후보 정리 중'
             : fairnessVerificationPending
               ? '실제 이동시간 확인 중'
@@ -1106,7 +1153,7 @@ export function PlannerScreen({
       onlineRoom && !isSettingReady && isOnlineReadyComplete && drawPool.length
         ? [
             onlineRoom.id,
-            roomState?.updatedAt ?? onlineRoom.updatedAt,
+            roomState?.redrawRequestedAt ?? 'initial',
             selectedCategory,
             selectionMode,
             effectiveThrillLevel,
@@ -1122,7 +1169,7 @@ export function PlannerScreen({
       isSettingReady,
       onlineRoom,
       readyParticipantIds,
-      roomState?.updatedAt,
+      roomState?.redrawRequestedAt,
       roomParticipantActorIds,
       selectedCategory,
       selectionMode,
@@ -1925,14 +1972,24 @@ export function PlannerScreen({
     }
   };
 
-  const resetOnlineReadyStateAfterOptionChange = () => {
-    if (!onlineRoom || !roomState || !roomState.drawReadyIds.length) {
+  const resetOnlineReadyStateAfterOptionChange = (nextSettings?: {
+    selectedCategory?: MeetCategoryKey;
+    selectionMode?: SelectionModeKey;
+    thrillLevel?: ThrillLevel;
+  }) => {
+    if (!onlineRoom || !roomState) {
       return;
     }
 
+    const nextSelectedCategory = nextSettings?.selectedCategory ?? selectedCategory;
+    const nextSelectionMode = nextSettings?.selectionMode ?? selectionMode;
+    const nextThrillLevel = nextSettings?.thrillLevel ?? thrillLevel;
     const previousRoom = roomState;
     const optimisticRoom = {
       ...roomState,
+      selectedCategory: nextSelectedCategory,
+      selectionMode: nextSelectionMode,
+      thrillLevel: nextThrillLevel,
       drawReadyIds: [],
       updatedAt: new Date().toISOString(),
     };
@@ -1940,8 +1997,11 @@ export function PlannerScreen({
     openedReadyDrawSessionRef.current = null;
     setSyncedRoom(optimisticRoom);
 
-    void resetRoomReadiness({
+    void updateRoomPlanningCategory({
       roomId: onlineRoom.id,
+      selectedCategory: nextSelectedCategory,
+      selectionMode: nextSelectionMode,
+      thrillLevel: nextThrillLevel,
     })
       .then((room) => {
         if (room) {
@@ -1971,6 +2031,8 @@ export function PlannerScreen({
     const optimisticRoom = {
       ...roomState,
       selectedCategory: category,
+      selectionMode,
+      thrillLevel,
       drawReadyIds: [],
       updatedAt: new Date().toISOString(),
     };
@@ -1980,6 +2042,8 @@ export function PlannerScreen({
     void updateRoomPlanningCategory({
       roomId: onlineRoom.id,
       selectedCategory: category,
+      selectionMode,
+      thrillLevel,
     })
       .then((room) => {
         setSyncedRoom(room);
@@ -1996,7 +2060,7 @@ export function PlannerScreen({
     }
 
     onSelectionModeChange(mode);
-    resetOnlineReadyStateAfterOptionChange();
+    resetOnlineReadyStateAfterOptionChange({ selectionMode: mode });
   };
 
   const handleThrillLevelSelect = (level: ThrillLevel) => {
@@ -2005,7 +2069,7 @@ export function PlannerScreen({
     }
 
     onThrillLevelChange(level);
-    resetOnlineReadyStateAfterOptionChange();
+    resetOnlineReadyStateAfterOptionChange({ thrillLevel: level });
   };
 
   const handleExcludeCandidate = (candidateId: string) => {
@@ -2062,22 +2126,44 @@ export function PlannerScreen({
 
   const handleDrawComplete = (winner: Candidate, proof: DrawProof) => {
     const completionParticipants = drawSessionSnapshot?.participants ?? participants;
-    closeDrawDrawer();
 
     if (onlineRoom) {
+      if (!isCurrentDrawController) {
+        return;
+      }
+
       void updateRoomSelection({
         roomId: onlineRoom.id,
         selectedCategory,
+        selectionMode,
+        thrillLevel,
         selectedCandidate: winner,
       })
         .then((room) => {
           setSyncedRoom(room);
+          const winnerKey = `${room.selectedCandidate?.id ?? winner.id}-${room.updatedAt}`;
+          seenRoomWinnerRef.current = winnerKey;
+
+          return loadRoomParticipants(onlineRoom.id)
+            .catch(() => completionParticipants)
+            .then((roomParticipants) => {
+              closeDrawDrawer();
+              onComplete(
+                room.selectedCandidate ?? winner,
+                roomParticipants.length ? roomParticipants : completionParticipants,
+                room.selectedCategory,
+                proof,
+              );
+            });
         })
         .catch((error: Error) => {
           setRoomMessage(error.message);
         });
+
+      return;
     }
 
+    closeDrawDrawer();
     onComplete(winner, completionParticipants, selectedCategory, proof);
   };
 
@@ -2094,14 +2180,14 @@ export function PlannerScreen({
   };
 
   const resolvedCandidateGuideText =
-    aiCandidateStatus === 'loading'
+    sharedCandidateStatus === 'loading'
       ? 'AI가 후보 지역을 정리 중이에요.'
-      : aiCandidateError
-        ? aiCandidateError
+      : sharedCandidateError
+        ? sharedCandidateError
         : fairnessVerificationMessage
           ? fairnessVerificationMessage
-        : aiCandidateMessage
-          ? aiCandidateMessage
+        : sharedCandidateMessage
+          ? sharedCandidateMessage
           : fallbackNotice ?? `공통 범위 안에서 바로 추첨 가능한 후보 ${drawPool.length}곳을 골라뒀어요.`;
   const displayRoomMessage = getFriendlyRoomMessage(roomMessage);
   const activeDrawSession = drawSessionSnapshot ?? {
@@ -3110,7 +3196,7 @@ export function PlannerScreen({
               onlineRoom && isCurrentActorReady ? 'bg-[#22c55e]' : 'bg-[#1f2a44]'
             }`}
           >
-            {aiCandidateStatus === 'loading' || fairnessVerificationPending || isSettingReady ? (
+            {sharedCandidateStatus === 'loading' || fairnessVerificationPending || isSettingReady ? (
               <LoaderCircle className="h-5 w-5 animate-spin" />
             ) : onlineRoom ? (
               <CheckCircle2 className="h-5 w-5" />
@@ -3119,7 +3205,7 @@ export function PlannerScreen({
             )}
             {onlineRoom
               ? onlineReadyButtonLabel
-              : aiCandidateStatus === 'loading'
+              : sharedCandidateStatus === 'loading'
                 ? 'AI 후보 정리 중'
                 : fairnessVerificationPending
                   ? '실제 이동시간 확인 중'
@@ -3131,19 +3217,20 @@ export function PlannerScreen({
       {showDrawer && (
         <RandomDrawer
           key={activeDrawSession.seed ?? 'manual-draw'}
-	          candidateInsights={activeDrawSession.candidateInsights}
-	          categoryLabel={activeCategory.label}
-	          modeLabel={
-	            isFairnessMode
-	              ? `${activeMode.shortLabel} · ${activeThrill.shortLabel}`
-	              : activeMode.shortLabel
-	          }
+          candidateInsights={activeDrawSession.candidateInsights}
+          categoryLabel={activeCategory.label}
+          modeLabel={
+            isFairnessMode
+              ? `${activeMode.shortLabel} · ${activeThrill.shortLabel}`
+              : activeMode.shortLabel
+          }
           selectionMode={selectionMode}
           thrillLevel={effectiveThrillLevel}
           candidateScope={candidateScope}
           participants={activeDrawSession.participants}
           drawSeed={activeDrawSession.seed}
           canChoose={isCurrentDrawController}
+          autoChoose={Boolean(onlineRoom)}
           waitingMessage={
             onlineRoom && !isCurrentDrawController
               ? `${activeDrawControllerName}님이 게임을 진행 중이에요. 결과가 정해지면 자동으로 넘어갑니다.`

@@ -36,7 +36,14 @@ function toLngLat(lat: number, lng: number) {
 }
 
 function getCacheKey(participant: Participant, candidate: Candidate) {
-  return `${participant.id}:${candidate.id}`;
+  return [
+    participant.id,
+    participant.coordinates.lat.toFixed(6),
+    participant.coordinates.lng.toFixed(6),
+    candidate.id,
+    candidate.coordinates.lat.toFixed(6),
+    candidate.coordinates.lng.toFixed(6),
+  ].join(':');
 }
 
 function getFirstRoute(payload: DirectionsResponse) {

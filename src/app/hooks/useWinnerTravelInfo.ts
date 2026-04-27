@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Candidate, Participant, TravelInfo } from '../types';
 import { getCarTravelInfo, getTravelInfo } from '../lib/meeting';
 import { fetchDirectionsTravelInfo } from '../lib/naver-directions';
-import { fetchOdsayTransitTravelInfo } from '../lib/odsay-transit';
+import { fetchOdsayTransitTravelInfo, getTransitServicePeriodKey } from '../lib/odsay-transit';
 
 type TravelInfoStatus = 'loading' | 'ready' | 'partial' | 'error';
 
@@ -22,9 +22,30 @@ interface WinnerTravelInfoResult {
 const winnerCache = new Map<string, TravelInfo[]>();
 const winnerTransitCache = new Map<string, TravelInfo[]>();
 
-function getWinnerCacheKey(participants: Participant[], winner: Candidate) {
-  const participantIds = participants.map((participant) => participant.id).sort().join(',');
-  return `${winner.id}:${participantIds}`;
+function getWinnerCacheKey(
+  participants: Participant[],
+  winner: Candidate,
+  transitServicePeriod: string,
+) {
+  const participantKey = participants
+    .map((participant) =>
+      [
+        participant.id,
+        participant.coordinates.lat.toFixed(6),
+        participant.coordinates.lng.toFixed(6),
+        participant.travelMode ?? 'transit',
+      ].join(':'),
+    )
+    .sort()
+    .join('|');
+
+  return [
+    winner.id,
+    winner.coordinates.lat.toFixed(6),
+    winner.coordinates.lng.toFixed(6),
+    transitServicePeriod,
+    participantKey,
+  ].join(':');
 }
 
 function getReasonMessage(reason: unknown) {
@@ -86,6 +107,7 @@ export function useWinnerTravelInfo(
   participants: Participant[],
   winner: Candidate,
 ): WinnerTravelInfoResult {
+  const transitServicePeriod = getTransitServicePeriodKey();
   const transitTravelInfo = useMemo(
     () => participants.map((participant) => getTravelInfo(participant, winner)),
     [participants, winner],
@@ -95,8 +117,8 @@ export function useWinnerTravelInfo(
     [participants, winner],
   );
   const cacheKey = useMemo(
-    () => getWinnerCacheKey(participants, winner),
-    [participants, winner],
+    () => getWinnerCacheKey(participants, winner, transitServicePeriod),
+    [participants, transitServicePeriod, winner],
   );
 
   const [travelInfo, setTravelInfo] = useState<TravelInfo[]>(

@@ -103,6 +103,8 @@ create table if not exists public.meeting_rooms (
   redraw_votes jsonb not null default '[]'::jsonb,
   redraw_requested_at timestamptz,
   selected_category text not null default 'dining',
+  selected_mode text not null default 'balance',
+  thrill_level integer not null default 1,
   selected_candidate jsonb,
   status text not null default 'planning',
   created_at timestamptz not null default now(),
@@ -115,7 +117,9 @@ alter table public.meeting_rooms
 add column if not exists draw_controller_id text,
 add column if not exists draw_ready_ids jsonb not null default '[]'::jsonb,
 add column if not exists redraw_votes jsonb not null default '[]'::jsonb,
-add column if not exists redraw_requested_at timestamptz;
+add column if not exists redraw_requested_at timestamptz,
+add column if not exists selected_mode text not null default 'balance',
+add column if not exists thrill_level integer not null default 1;
 
 alter table public.meeting_rooms replica identity full;
 

@@ -22,12 +22,40 @@ export interface ReverseGeocodeResult {
   title: string;
 }
 
+const curatedStationFallbacks: AddressSearchResult[] = [
+  {
+    title: '서초역',
+    roadAddress: '서울특별시 서초구 서초대로 지하 233',
+    jibunAddress: '서울특별시 서초구 서초동',
+    coordinates: { lat: 37.491897, lng: 127.007917 },
+  },
+];
+
 function normalizeSearchText(value: string) {
   return value
     .replace(/<[^>]*>/g, '')
     .replace(/\s+/g, '')
     .replace(/[^\dA-Za-z가-힣]/g, '')
     .toLowerCase();
+}
+
+function getCuratedStationResults(query: string) {
+  const normalizedQuery = normalizeSearchText(query);
+
+  if (!normalizedQuery) {
+    return [] as AddressSearchResult[];
+  }
+
+  return curatedStationFallbacks.filter((station) => {
+    const normalizedTitle = normalizeSearchText(station.title);
+    const titleWithoutStationSuffix = normalizedTitle.replace(/역$/, '');
+    const queryWithoutStationSuffix = normalizedQuery.replace(/역$/, '');
+
+    return (
+      normalizedTitle === normalizedQuery ||
+      titleWithoutStationSuffix === queryWithoutStationSuffix
+    );
+  });
 }
 
 function looksLikeAddress(query: string) {
@@ -296,6 +324,12 @@ export async function searchAddress(query: string) {
 
   if (geocodeResults.length) {
     return geocodeResults;
+  }
+
+  const curatedStationResults = getCuratedStationResults(trimmedQuery);
+
+  if (curatedStationResults.length) {
+    return curatedStationResults;
   }
 
   return [];

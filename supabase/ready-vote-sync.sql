@@ -4,7 +4,9 @@ alter table public.meeting_rooms
 add column if not exists draw_controller_id text,
 add column if not exists draw_ready_ids jsonb not null default '[]'::jsonb,
 add column if not exists redraw_votes jsonb not null default '[]'::jsonb,
-add column if not exists redraw_requested_at timestamptz;
+add column if not exists redraw_requested_at timestamptz,
+add column if not exists selected_mode text not null default 'balance',
+add column if not exists thrill_level integer not null default 1;
 
 alter table public.profiles
 add column if not exists gender text not null default 'unspecified',

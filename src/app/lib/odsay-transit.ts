@@ -60,7 +60,48 @@ interface OdsayResponse {
 const transitCache = new Map<string, TravelInfo>();
 
 function getCacheKey(participant: Participant, candidate: Candidate) {
-  return `${participant.id}:${candidate.id}`;
+  return [
+    participant.id,
+    participant.coordinates.lat.toFixed(6),
+    participant.coordinates.lng.toFixed(6),
+    candidate.id,
+    candidate.coordinates.lat.toFixed(6),
+    candidate.coordinates.lng.toFixed(6),
+    getTransitServicePeriodKey(),
+  ].join(':');
+}
+
+function getSeoulHour(date = new Date()) {
+  const hour = new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Seoul',
+  }).format(date);
+  const numericHour = Number(hour);
+
+  return numericHour === 24 ? 0 : numericHour;
+}
+
+function isNightTransitWindow(date = new Date()) {
+  const hour = getSeoulHour(date);
+
+  return Number.isFinite(hour) && (hour >= 23 || hour < 5);
+}
+
+export function getTransitServicePeriodKey() {
+  return isNightTransitWindow() ? 'night' : 'day';
+}
+
+function isNightBusLane(lane: OdsayLane) {
+  const text = `${lane.name ?? ''} ${lane.busNo ?? ''}`.trim();
+
+  return /(^|\s)N\d{2,4}\b/i.test(text) || text.includes('심야') || text.includes('올빼미');
+}
+
+function pathUsesNightBus(path: OdsayPath) {
+  return (path.subPath ?? []).some(
+    (step) => step.trafficType === 2 && (step.lane ?? []).some(isNightBusLane),
+  );
 }
 
 function getRouteTypeLabel(trafficType?: number) {
@@ -141,7 +182,15 @@ function buildRoutePath(path: OdsayPath, participant: Participant, candidate: Ca
 }
 
 function getBestPath(paths: OdsayPath[]) {
-  return [...paths].sort((left, right) => {
+  const candidatePaths = isNightTransitWindow()
+    ? paths
+    : paths.filter((path) => !pathUsesNightBus(path));
+
+  if (!candidatePaths.length) {
+    return undefined;
+  }
+
+  return [...candidatePaths].sort((left, right) => {
     const leftInfo = left.info ?? {};
     const rightInfo = right.info ?? {};
     const leftTransferCount =

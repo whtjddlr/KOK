@@ -26,6 +26,7 @@ interface RandomDrawerProps {
   drawSeed?: string;
   lockedWinner?: CandidateInsight | null;
   canChoose?: boolean;
+  autoChoose?: boolean;
   waitingMessage?: string;
   onComplete: (winner: Candidate, proof: DrawProof) => void;
   onClose: () => void;
@@ -489,7 +490,7 @@ function PinMarker({
           animate={{ scale: [0.55, 1.8, 1.15], opacity: [0.6, 0.04, 0.2] }}
           transition={{
             duration: winner ? 1.1 : 0.7,
-            repeat: winner ? Infinity : 0,
+            repeat: winner ? 2 : 0,
             ease: 'easeOut',
           }}
         />
@@ -736,7 +737,7 @@ function CardShuffleStage({
           <motion.div
             className="absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-white/12 px-5 py-2 text-sm text-white backdrop-blur-sm"
             animate={{ scale: [1, 1.05, 1], opacity: [0.72, 1, 0.72] }}
-            transition={{ duration: 0.72, repeat: Infinity }}
+            transition={{ duration: 0.72, repeat: 2 }}
           >
             {activeCandidate.candidate.name}
           </motion.div>
@@ -800,7 +801,7 @@ function DartMapStage({
                       : 'border-white bg-[#1f2a44]/52'
                 }`}
                 animate={{ scale: isWinner ? [1, 1.55, 1.08] : isActive ? 1.2 : 1 }}
-                transition={{ duration: 0.45, repeat: isWinner ? Infinity : 0 }}
+                transition={{ duration: 0.45, repeat: isWinner ? 2 : 0 }}
               />
             </div>
           );
@@ -895,7 +896,7 @@ function RadarStage({
                   scale: isWinner ? [1, 1.9, 1.2] : isActive ? [1, 1.35, 1] : 1,
                   opacity: isWinner ? 1 : isActive ? 0.95 : 0.48,
                 }}
-                transition={{ duration: 0.5, repeat: isWinner ? Infinity : isActive ? Infinity : 0 }}
+                transition={{ duration: 0.5, repeat: isWinner ? 2 : isActive ? 2 : 0 }}
               />
               {(isActive || isWinner) && (
                 <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded-full bg-white px-3 py-1 text-xs text-[#1f2a44] shadow-sm">
@@ -956,7 +957,7 @@ function ShellGameStage({
                   x: phase === 'revealed' ? 0 : index % 2 === 0 ? [0, 18, -10, 0] : [0, -18, 10, 0],
                   y: phase === 'revealed' && isPicked ? -22 : 0,
                 }}
-                transition={{ duration: 0.7, repeat: phase === 'revealed' ? 0 : Infinity, repeatDelay: 0.12 }}
+                transition={{ duration: 0.7, repeat: phase === 'revealed' ? 0 : 2, repeatDelay: 0.12 }}
               >
                 <div
                   className={`h-36 w-full rounded-b-[4rem] rounded-t-[1.4rem] shadow-[0_24px_48px_rgba(31,42,68,0.18)] ${
@@ -1047,7 +1048,7 @@ function CardBackGraphic({
           <motion.div
             className="absolute inset-y-0 -left-1/2 w-1/2 -skew-x-12 bg-white/45"
             animate={{ x: ['0%', '330%'], opacity: [0, 0.8, 0] }}
-            transition={{ duration: 1.2, repeat: Infinity, repeatDelay: 1.4 }}
+            transition={{ duration: 1.2, repeat: 1, repeatDelay: 1.4 }}
           />
           <div className="absolute left-3 top-3 text-xs font-semibold text-white/80">{label}</div>
           <div className="absolute bottom-3 right-3 rotate-180 text-xs font-semibold text-white/80">{label}</div>
@@ -1334,7 +1335,7 @@ function WheelFace({
               <motion.div
                 className="mt-2 h-2 w-14 overflow-hidden rounded-full bg-[#f0edf0]"
                 animate={{ opacity: [0.65, 1, 0.65] }}
-                transition={{ duration: 0.75, repeat: Infinity }}
+                transition={{ duration: 0.75, repeat: 2 }}
               >
                 <div className="h-full rounded-full" style={{ width: '70%', backgroundColor: accent }} />
               </motion.div>
@@ -1544,7 +1545,7 @@ function CupGraphic({
           opacity: active ? 1 : 0.48,
         }}
         animate={active ? { x: [0, 12, -10, 0], rotate: [0, 4, -4, 0] } : { opacity: 0.48 }}
-        transition={{ duration: 1.05, repeat: active ? Infinity : 0, repeatDelay: 0.16 }}
+        transition={{ duration: 1.05, repeat: active ? 2 : 0, repeatDelay: 0.16 }}
       >
         <div className="absolute inset-x-2 top-2 h-9 rounded-[50%] bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.96),rgba(181,166,145,0.88))] shadow-inner" />
         <div className="absolute left-5 top-8 h-20 w-5 rounded-full bg-white/55 blur-[1px]" />
@@ -1930,7 +1931,7 @@ function MapSnapshotLayer({
               animate={{
                 scale: isWinner ? [1, 1.34, 1.08] : isActive ? [1, 1.18, 1] : 1,
               }}
-              transition={{ duration: 0.6, repeat: isWinner ? Infinity : 0 }}
+              transition={{ duration: 0.6, repeat: isWinner ? 2 : 0 }}
             >
               <span className="text-[10px] font-bold text-white">{index + 1}</span>
               {isWinner && (
@@ -1938,7 +1939,7 @@ function MapSnapshotLayer({
                   className="absolute inset-[-12px] rounded-full border-2 border-[#ff7b6b]"
                   initial={{ scale: 0.3, opacity: 0.65 }}
                   animate={{ scale: 1.9, opacity: 0 }}
-                  transition={{ duration: 0.8, repeat: Infinity, ease: 'easeOut' }}
+                  transition={{ duration: 0.8, repeat: 2, ease: 'easeOut' }}
                 />
               )}
             </motion.div>
@@ -2229,7 +2230,7 @@ function DrawChoiceStage({
             <motion.div
               className="pointer-events-none absolute right-6 top-5 origin-left"
               animate={{ x: [0, -12, 0], y: [0, 7, 0], rotate: [-26, -18, -26] }}
-              transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+              transition={{ duration: 1.6, repeat: 2, ease: 'easeInOut' }}
             >
               <MarkerPenGraphic compact />
             </motion.div>
@@ -2289,7 +2290,7 @@ function DrawChoiceStage({
                   transition={{
                     delay: index * 0.06,
                     duration: variant === 'shell-game' ? 1.05 : 0.34,
-                    repeat: variant === 'shell-game' ? Infinity : 0,
+                    repeat: variant === 'shell-game' ? 2 : 0,
                     repeatDelay: 0.15,
                   }}
                   aria-label={`${action} ${choiceLabel}`}
@@ -2567,7 +2568,7 @@ function PickedChoiceStage({
               <motion.div
                 className="absolute inset-y-0 -left-1/2 w-1/2 -skew-x-12 bg-white/70"
                 animate={{ x: ['0%', '330%'], opacity: [0, 0.8, 0] }}
-                transition={{ duration: 0.78, repeat: isRevealed ? 0 : Infinity, repeatDelay: 0.4 }}
+                transition={{ duration: 0.78, repeat: isRevealed ? 0 : 1, repeatDelay: 0.4 }}
               />
               <div
                 className="absolute inset-0"
@@ -2635,6 +2636,7 @@ export function RandomDrawer({
   drawSeed,
   lockedWinner = null,
   canChoose = true,
+  autoChoose = false,
   waitingMessage,
   onComplete,
   onClose,
@@ -2647,6 +2649,13 @@ export function RandomDrawer({
   );
   const [ladderBars, setLadderBars] = useState<LadderBar[]>(() => getLadderBars(choiceLock));
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
+  const autoChoiceIndex = useMemo(
+    () =>
+      choiceLock.slots.length
+        ? Math.floor(seededNumber(choiceLock.seed, 'auto-choice') * choiceLock.slots.length)
+        : 0,
+    [choiceLock],
+  );
   const selectedStartSlot =
     selectedSlotIndex === null ? null : choiceLock.slots[selectedSlotIndex] ?? null;
   const selectedChoice =
@@ -2672,10 +2681,12 @@ export function RandomDrawer({
         candidateScope,
         lockedChoiceInsight,
         participants,
+        drawSeed,
       ),
     [
       candidateInsights,
       candidateScope,
+      drawSeed,
       lockedChoiceInsight,
       participants,
       selectionMode,
@@ -2719,6 +2730,20 @@ export function RandomDrawer({
       winner: plan.winner.candidate,
     };
   });
+
+  useEffect(() => {
+    if (!autoChoose || selectedSlotIndex !== null || !choiceLock.slots.length) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSelectedSlotIndex(autoChoiceIndex);
+    }, 850);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [autoChoiceIndex, autoChoose, choiceLock.slots.length, selectedSlotIndex]);
 
   useEffect(() => {
     if (selectedSlotIndex === null) {
@@ -2837,9 +2862,9 @@ export function RandomDrawer({
                 lock={choiceLock}
                 ladderBars={ladderBars}
                 candidatePoints={visiblePoints}
-                onLadderBarsChange={canChoose ? setLadderBars : undefined}
+                onLadderBarsChange={canChoose && !autoChoose ? setLadderBars : undefined}
                 onChoose={
-                  canChoose
+                  canChoose && !autoChoose
                     ? (index) => {
                         setSelectedSlotIndex(index);
                       }
@@ -2849,10 +2874,10 @@ export function RandomDrawer({
               />
             ) : selectedChoice ? (
               <PickedChoiceStage
-	                variant={variant}
-	                slot={selectedChoice}
-	                selectedIndex={selectedSlotIndex ?? 0}
-	                choiceLabel={selectedChoiceLabel}
+                variant={variant}
+                slot={selectedChoice}
+                selectedIndex={selectedSlotIndex ?? 0}
+                choiceLabel={selectedChoiceLabel}
                 lock={choiceLock}
                 ladderBars={ladderBars}
                 plan={plan}
@@ -2866,9 +2891,9 @@ export function RandomDrawer({
                 lock={choiceLock}
                 ladderBars={ladderBars}
                 candidatePoints={visiblePoints}
-                onLadderBarsChange={canChoose ? setLadderBars : undefined}
+                onLadderBarsChange={canChoose && !autoChoose ? setLadderBars : undefined}
                 onChoose={
-                  canChoose
+                  canChoose && !autoChoose
                     ? (index) => {
                         setSelectedSlotIndex(index);
                       }

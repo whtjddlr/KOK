@@ -56,6 +56,8 @@ export interface MeetingRoom {
   redrawVotes: string[];
   redrawRequestedAt: string | null;
   selectedCategory: MeetCategoryKey;
+  selectionMode: SelectionModeKey;
+  thrillLevel: ThrillLevel;
   selectedCandidate: Candidate | null;
   status: 'planning' | 'decided';
   createdAt: string;

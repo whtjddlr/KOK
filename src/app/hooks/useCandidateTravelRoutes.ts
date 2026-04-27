@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Candidate, Participant, TravelInfo } from '../types';
 import { getCarTravelInfo, getTravelInfo } from '../lib/meeting';
 import { fetchDirectionsTravelInfo } from '../lib/naver-directions';
-import { fetchOdsayTransitTravelInfo } from '../lib/odsay-transit';
+import { fetchOdsayTransitTravelInfo, getTransitServicePeriodKey } from '../lib/odsay-transit';
 
 type RouteStatus = 'idle' | 'loading' | 'ready' | 'partial' | 'error';
 
@@ -27,9 +27,14 @@ async function fetchRoute(participant: Participant, candidate: Candidate) {
   return fetchOdsayTransitTravelInfo(participant, candidate);
 }
 
-function getRouteSignature(participants: Participant[], candidate: Candidate | null) {
+function getRouteSignature(
+  participants: Participant[],
+  candidate: Candidate | null,
+  transitServicePeriod: string,
+) {
   return JSON.stringify({
     candidate: candidate ? [candidate.id, candidate.coordinates.lat, candidate.coordinates.lng] : null,
+    transitPeriod: transitServicePeriod,
     participants: participants.map((participant) => [
       participant.id,
       participant.coordinates.lat,
@@ -98,13 +103,14 @@ export function useCandidateTravelRoutes(
   participants: Participant[],
   candidate: Candidate | null,
 ): CandidateTravelRoutesResult {
+  const transitServicePeriod = getTransitServicePeriodKey();
   const fallbackRoutes = useMemo(
     () => (candidate ? participants.map((participant) => getFallbackRoute(participant, candidate)) : []),
     [candidate, participants],
   );
   const routeSignature = useMemo(
-    () => getRouteSignature(participants, candidate),
-    [candidate, participants],
+    () => getRouteSignature(participants, candidate, transitServicePeriod),
+    [candidate, participants, transitServicePeriod],
   );
   const [routes, setRoutes] = useState<TravelInfo[]>(fallbackRoutes);
   const [status, setStatus] = useState<RouteStatus>(candidate ? 'loading' : 'idle');

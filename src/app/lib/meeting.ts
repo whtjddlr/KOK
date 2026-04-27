@@ -3065,11 +3065,31 @@ export function getDrawPool(
   };
 }
 
+function hashText(value: string) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function seededRandom(seed: string | undefined, key: string | number) {
+  if (!seed) {
+    return Math.random();
+  }
+
+  return hashText(`${seed}:${key}`) / 0xffffffff;
+}
+
 function weightedPick(
   pool: CandidateInsight[],
   selectionMode: SelectionModeKey = 'balance',
   thrillLevel: ThrillLevel = 1,
   participants: Participant[] = [],
+  seed?: string,
 ) {
   const getWeight = (insight: CandidateInsight, index: number) => {
     const categoryWeight = insight.categoryMatched ? 1.24 : 0.78;
@@ -3143,7 +3163,7 @@ function weightedPick(
 
   const total = pool.reduce((sum, insight, index) => sum + getWeight(insight, index), 0);
 
-  let cursor = Math.random() * total;
+  let cursor = seededRandom(seed, 'winner') * total;
 
   for (const [index, insight] of pool.entries()) {
     const weight = getWeight(insight, index);
@@ -3157,12 +3177,17 @@ function weightedPick(
   return pool[0];
 }
 
-function sampleWithoutRepeat(pool: CandidateInsight[], count: number, excludedIds: string[] = []) {
+function sampleWithoutRepeat(
+  pool: CandidateInsight[],
+  count: number,
+  excludedIds: string[] = [],
+  seed?: string,
+) {
   const available = pool.filter((insight) => !excludedIds.includes(insight.candidate.id));
   const picked: CandidateInsight[] = [];
 
   while (available.length && picked.length < count) {
-    const index = Math.floor(Math.random() * available.length);
+    const index = Math.floor(seededRandom(seed, `sample-${picked.length}`) * available.length);
     picked.push(available[index]);
     available.splice(index, 1);
   }
@@ -3177,6 +3202,7 @@ export function buildDrawPlan(
   candidateScope: CandidateScopeKey = 'standard',
   lockedWinner?: CandidateInsight | null,
   participants: Participant[] = [],
+  drawSeed?: string,
 ): DrawPlan {
   const { pool, fallbackNotice } = getDrawPool(
     insights,
@@ -3189,11 +3215,11 @@ export function buildDrawPlan(
   const winner =
     lockedWinner && pool.some((insight) => insight.candidate.id === lockedWinner.candidate.id)
       ? lockedWinner
-      : weightedPick(pool, selectionMode, thrillLevel, participants);
-  const runnerUps = sampleWithoutRepeat(pool, 2, [winner.candidate.id]);
+      : weightedPick(pool, selectionMode, thrillLevel, participants, drawSeed);
+  const runnerUps = sampleWithoutRepeat(pool, 2, [winner.candidate.id], drawSeed);
   const finalists = [winner, ...runnerUps].slice(0, Math.min(3, pool.length));
-  const rapidShuffle = Array.from({ length: Math.max(12, pool.length * 3) }, () => {
-    return pool[Math.floor(Math.random() * pool.length)];
+  const rapidShuffle = Array.from({ length: Math.max(12, pool.length * 3) }, (_, index) => {
+    return pool[Math.floor(seededRandom(drawSeed, `shuffle-${index}`) * pool.length)];
   });
   const finalStretch =
     finalists.length >= 3
