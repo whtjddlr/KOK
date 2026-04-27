@@ -34,6 +34,7 @@ import {
   Participant,
   SelectionModeKey,
   ThrillLevel,
+  WinnerRouteSnapshot,
 } from './types';
 
 type Screen = 'home' | 'planner' | 'result';
@@ -224,6 +225,7 @@ function getMeetingRoomSignature(room: MeetingRoom | null) {
     selectionMode: room.selectionMode,
     thrillLevel: room.thrillLevel,
     selectedCandidate: room.selectedCandidate,
+    selectedRouteSnapshot: room.selectedRouteSnapshot ?? null,
     status: room.status,
     updatedAt: room.updatedAt,
     memberCount: room.memberCount ?? null,
@@ -246,6 +248,8 @@ export default function App() {
   const [isRequestingRedraw, setIsRequestingRedraw] = useState(false);
   const [roomError, setRoomError] = useState<string | null>(null);
   const [selectedWinner, setSelectedWinner] = useState<Candidate | null>(null);
+  const [selectedRouteSnapshot, setSelectedRouteSnapshot] =
+    useState<WinnerRouteSnapshot | null>(null);
   const [drawProof, setDrawProof] = useState<DrawProof | null>(null);
   const [currentParticipants, setCurrentParticipants] = useState<Participant[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<MeetCategoryKey>('dining');
@@ -380,8 +384,17 @@ export default function App() {
 
       if (room.status === 'planning' && !room.selectedCandidate) {
         setSelectedWinner(null);
+        setSelectedRouteSnapshot(null);
         setDrawProof(null);
         setCurrentScreen('planner');
+      }
+
+      if (room.status === 'decided' && room.selectedCandidate) {
+        setSelectedWinner(room.selectedCandidate);
+        setSelectedCategory(room.selectedCategory);
+        setSelectionMode(room.selectionMode);
+        setThrillLevel(room.thrillLevel);
+        setSelectedRouteSnapshot(room.selectedRouteSnapshot ?? null);
       }
     };
 
@@ -453,6 +466,7 @@ export default function App() {
     setRoomError(null);
     setCurrentParticipants([]);
     setSelectedWinner(null);
+    setSelectedRouteSnapshot(null);
     setDrawProof(null);
     setActiveRoom(null);
     syncRoomUrl(null);
@@ -616,6 +630,9 @@ export default function App() {
       setSelectionMode(room.selectionMode);
       setThrillLevel(room.thrillLevel);
       setCurrentParticipants([]);
+      setSelectedWinner(null);
+      setSelectedRouteSnapshot(null);
+      setDrawProof(null);
       setCurrentScreen('planner');
     } catch (error) {
       setRoomError(getActionErrorMessage(error, '약속방에 들어가지 못했어요.'));
@@ -629,8 +646,10 @@ export default function App() {
     participants: Participant[],
     category: MeetCategoryKey,
     proof?: DrawProof | null,
+    routeSnapshot?: WinnerRouteSnapshot | null,
   ) => {
     setSelectedWinner(winner);
+    setSelectedRouteSnapshot(routeSnapshot ?? null);
     setDrawProof(proof ?? null);
     setCurrentParticipants(participants);
     setSelectedCategory(category);
@@ -749,6 +768,7 @@ export default function App() {
         .then((room) => {
           setActiveRoom(room);
           setSelectedWinner(null);
+          setSelectedRouteSnapshot(null);
           setDrawProof(null);
           setCurrentScreen('planner');
         })
@@ -763,6 +783,7 @@ export default function App() {
     }
 
     setSelectedWinner(null);
+    setSelectedRouteSnapshot(null);
     setDrawProof(null);
     setCurrentScreen('planner');
   };
@@ -783,6 +804,7 @@ export default function App() {
   const handleGoHome = () => {
     setActiveRoom(null);
     setSelectedWinner(null);
+    setSelectedRouteSnapshot(null);
     setDrawProof(null);
     setCurrentParticipants([]);
     setRoomError(null);
@@ -897,6 +919,7 @@ export default function App() {
           selectedCategory={selectedCategory}
           selectionMode={selectionMode}
           currentUser={currentUser}
+          routeSnapshot={selectedRouteSnapshot ?? activeRoom?.selectedRouteSnapshot ?? null}
           redrawControl={
             activeRoom
               ? {

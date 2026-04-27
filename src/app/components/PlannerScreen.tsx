@@ -38,6 +38,7 @@ import {
   TravelInfo,
   TravelMode,
   TravelRouteStep,
+  WinnerRouteSnapshot,
 } from '../types';
 import { ParticipantCard } from './ParticipantCard';
 import { MapView } from './MapView';
@@ -105,6 +106,7 @@ import {
   getParticipantGenderLabel,
   participantGenderOptions,
 } from '../lib/gender';
+import { buildWinnerRouteSnapshot } from '../lib/route-snapshot';
 import {
   filterSupportedServiceAreaResults,
   getAddressResultLocationLabel,
@@ -135,6 +137,7 @@ interface PlannerScreenProps {
     participants: Participant[],
     category: MeetCategoryKey,
     proof?: DrawProof | null,
+    routeSnapshot?: WinnerRouteSnapshot | null,
   ) => void;
 }
 
@@ -239,6 +242,7 @@ function getMeetingRoomSignature(room: MeetingRoom | null) {
     selectionMode: room.selectionMode,
     thrillLevel: room.thrillLevel,
     selectedCandidate: room.selectedCandidate,
+    selectedRouteSnapshot: room.selectedRouteSnapshot ?? null,
     status: room.status,
     updatedAt: room.updatedAt,
     memberCount: room.memberCount ?? null,
@@ -569,6 +573,7 @@ export function PlannerScreen({
   const [nearbySearchCandidateId, setNearbySearchCandidateId] = useState<string | null>(null);
   const [syncedRoom, setSyncedRoom] = useState<MeetingRoom | null>(onlineRoom);
   const openedReadyDrawSessionRef = useRef<string | null>(null);
+  const isOpeningDrawSessionRef = useRef(false);
   const syncedRoomSignatureRef = useRef(getMeetingRoomSignature(onlineRoom));
   const participantsSignatureRef = useRef(getParticipantsSignature(participants));
   const onCategoryChangeRef = useRef(onCategoryChange);
@@ -663,7 +668,13 @@ export function PlannerScreen({
       onCategoryChangeRef.current(room.selectedCategory);
       onSelectionModeChangeRef.current(room.selectionMode);
       onThrillLevelChangeRef.current(room.thrillLevel);
-      onCompleteRef.current(room.selectedCandidate, roomParticipants, room.selectedCategory);
+      onCompleteRef.current(
+        room.selectedCandidate,
+        roomParticipants,
+        room.selectedCategory,
+        null,
+        room.selectedRouteSnapshot ?? null,
+      );
     };
 
     const applyParticipants = (nextParticipants: Participant[]) => {
@@ -1188,13 +1199,52 @@ export function PlannerScreen({
   const isCurrentDrawController = Boolean(
     !onlineRoom || (currentReadyActorId && currentReadyActorId === activeDrawControllerId),
   );
-  const openDrawDrawer = () => {
-    setDrawSessionSnapshot({
-      candidateInsights: drawPool,
-      participants,
-      seed: readyDrawSessionSeed ?? undefined,
-    });
-    setShowDrawer(true);
+  const openDrawDrawer = async () => {
+    if (isOpeningDrawSessionRef.current) {
+      return;
+    }
+
+    const sessionSeed = readyDrawSessionSeed ?? undefined;
+
+    if (sessionSeed && openedReadyDrawSessionRef.current === sessionSeed) {
+      return;
+    }
+
+    isOpeningDrawSessionRef.current = true;
+
+    try {
+      let snapshotParticipants = participants;
+
+      if (onlineRoom) {
+        const syncedParticipants = await loadRoomParticipants(onlineRoom.id);
+
+        if (getParticipantsSignature(syncedParticipants) !== getParticipantsSignature(participants)) {
+          participantsRef.current = syncedParticipants;
+          participantsSignatureRef.current = getParticipantsSignature(syncedParticipants);
+          setParticipants(syncedParticipants);
+          openedReadyDrawSessionRef.current = null;
+          return;
+        }
+
+        snapshotParticipants = syncedParticipants;
+      }
+
+      if (sessionSeed) {
+        openedReadyDrawSessionRef.current = sessionSeed;
+      }
+
+      setDrawSessionSnapshot({
+        candidateInsights: drawPool,
+        participants: snapshotParticipants,
+        seed: sessionSeed,
+      });
+      setShowDrawer(true);
+    } catch (error) {
+      setRoomMessage(error instanceof Error ? error.message : '추첨 준비 중 방 상태를 다시 확인하지 못했어요.');
+      openedReadyDrawSessionRef.current = null;
+    } finally {
+      isOpeningDrawSessionRef.current = false;
+    }
   };
   const closeDrawDrawer = () => {
     setShowDrawer(false);
@@ -1245,8 +1295,7 @@ export function PlannerScreen({
       return;
     }
 
-    openedReadyDrawSessionRef.current = readyDrawSessionSeed;
-    openDrawDrawer();
+    void openDrawDrawer();
   }, [drawBlockedReason, isOnlineReadyComplete, readyDrawSessionSeed, showDrawer]);
 
   const selectedInsight = useMemo(
@@ -2132,33 +2181,42 @@ export function PlannerScreen({
         return;
       }
 
-      void updateRoomSelection({
-        roomId: onlineRoom.id,
-        selectedCategory,
-        selectionMode,
-        thrillLevel,
-        selectedCandidate: winner,
-      })
-        .then((room) => {
+      void (async () => {
+        try {
+          const roomParticipants = await loadRoomParticipants(onlineRoom.id).catch(
+            () => completionParticipants,
+          );
+          const completionRoomParticipants = roomParticipants.length
+            ? roomParticipants
+            : completionParticipants;
+          const selectedRouteSnapshot = await buildWinnerRouteSnapshot(
+            completionRoomParticipants,
+            winner,
+          ).catch(() => null);
+          const room = await updateRoomSelection({
+            roomId: onlineRoom.id,
+            selectedCategory,
+            selectionMode,
+            thrillLevel,
+            selectedCandidate: winner,
+            selectedRouteSnapshot,
+          });
+
           setSyncedRoom(room);
           const winnerKey = `${room.selectedCandidate?.id ?? winner.id}-${room.updatedAt}`;
           seenRoomWinnerRef.current = winnerKey;
-
-          return loadRoomParticipants(onlineRoom.id)
-            .catch(() => completionParticipants)
-            .then((roomParticipants) => {
-              closeDrawDrawer();
-              onComplete(
-                room.selectedCandidate ?? winner,
-                roomParticipants.length ? roomParticipants : completionParticipants,
-                room.selectedCategory,
-                proof,
-              );
-            });
-        })
-        .catch((error: Error) => {
-          setRoomMessage(error.message);
-        });
+          closeDrawDrawer();
+          onComplete(
+            room.selectedCandidate ?? winner,
+            completionRoomParticipants,
+            room.selectedCategory,
+            proof,
+            room.selectedRouteSnapshot ?? selectedRouteSnapshot,
+          );
+        } catch (error) {
+          setRoomMessage(error instanceof Error ? error.message : '결과를 방에 저장하지 못했어요.');
+        }
+      })();
 
       return;
     }

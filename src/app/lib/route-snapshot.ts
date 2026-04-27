@@ -1,0 +1,226 @@
+import {
+  Candidate,
+  Participant,
+  RouteSnapshotStatus,
+  TravelInfo,
+  WinnerRouteSnapshot,
+} from '../types';
+import { getCarTravelInfo, getTravelInfo } from './meeting';
+import { fetchDirectionsTravelInfo } from './naver-directions';
+import { fetchOdsayTransitTravelInfo, getTransitServicePeriodKey } from './odsay-transit';
+
+function getReasonMessage(reason: unknown) {
+  if (reason instanceof Error && reason.message) {
+    return reason.message.replace(/ODsay\s*/g, '');
+  }
+
+  if (
+    reason &&
+    typeof reason === 'object' &&
+    'message' in reason &&
+    typeof (reason as { message?: unknown }).message === 'string'
+  ) {
+    return (reason as { message: string }).message.replace(/ODsay\s*/g, '');
+  }
+
+  return null;
+}
+
+function getFirstRouteError(results: PromiseSettledResult<TravelInfo>[]) {
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      const message = getReasonMessage(result.reason);
+
+      if (message) {
+        return message;
+      }
+    }
+  }
+
+  return null;
+}
+
+function getTransitFallbackMessage(message: string | null, partial: boolean) {
+  const hasOdsayNoRoute =
+    message?.includes('ODsay 대중교통 경로를 찾지 못했습니다') ||
+    message?.includes('대중교통 경로를 찾지 못했습니다') ||
+    message?.includes('ODsay 대중교통 경로 응답에 추천 경로가 없습니다') ||
+    message?.includes('대중교통 경로 응답에 추천 경로가 없습니다');
+
+  if (hasOdsayNoRoute) {
+    return partial
+      ? '일부 대중교통 경로는 실시간 응답이 없어 예상값으로 보정했습니다.'
+      : '대중교통 실시간 경로를 못 받아서 예상 이동시간으로 보정했습니다.';
+  }
+
+  if (message) {
+    return partial
+      ? `일부 대중교통 경로는 예상값으로 보정했습니다. ${message}`
+      : message;
+  }
+
+  return partial
+    ? '일부 대중교통 경로는 응답이 없어 예상값으로 보정했습니다.'
+    : '대중교통 경로를 가져오지 못해 예상값으로 안내 중입니다.';
+}
+
+function getCarFallbackMessage(message: string | null, partial: boolean) {
+  if (message) {
+    return partial
+      ? `일부 자동차 경로는 예상값으로 보정했습니다. ${message}`
+      : message;
+  }
+
+  return partial
+    ? '일부 자동차 경로는 응답이 없어 예상값으로 보정했습니다.'
+    : '자동차 경로를 가져오지 못해 현재는 예상값으로 안내 중입니다.';
+}
+
+function getSnapshotStatus(liveCount: number, totalCount: number): RouteSnapshotStatus {
+  if (!liveCount) {
+    return 'error';
+  }
+
+  return liveCount === totalCount ? 'ready' : 'partial';
+}
+
+function mergeRouteResults(
+  results: PromiseSettledResult<TravelInfo>[],
+  fallbackTravelInfo: TravelInfo[],
+  liveSource: TravelInfo['source'],
+) {
+  const merged = results.map((result, index) => {
+    if (result.status === 'fulfilled') {
+      return result.value;
+    }
+
+    return fallbackTravelInfo[index];
+  });
+  const liveCount = merged.filter((item) => item.source === liveSource).length;
+
+  return {
+    merged,
+    liveCount,
+    firstRouteError: getFirstRouteError(results),
+  };
+}
+
+export function getParticipantRouteSignature(participants: Participant[]) {
+  return participants
+    .map((participant) =>
+      [
+        participant.id,
+        participant.coordinates.lat.toFixed(6),
+        participant.coordinates.lng.toFixed(6),
+        participant.travelMode ?? 'transit',
+      ].join(':'),
+    )
+    .sort()
+    .join('|');
+}
+
+function isTravelInfo(value: unknown): value is TravelInfo {
+  return (
+    Boolean(value) &&
+    typeof value === 'object' &&
+    typeof (value as TravelInfo).participantId === 'string' &&
+    typeof (value as TravelInfo).participantName === 'string' &&
+    typeof (value as TravelInfo).duration === 'number' &&
+    typeof (value as TravelInfo).distance === 'number' &&
+    typeof (value as TravelInfo).cost === 'number'
+  );
+}
+
+function normalizeTravelInfoArray(value: unknown) {
+  return Array.isArray(value) && value.every(isTravelInfo) ? value : null;
+}
+
+function normalizeSnapshotStatus(value: unknown): RouteSnapshotStatus {
+  return value === 'ready' || value === 'partial' || value === 'error' ? value : 'error';
+}
+
+export function normalizeWinnerRouteSnapshot(value: unknown): WinnerRouteSnapshot | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const snapshot = value as Partial<WinnerRouteSnapshot>;
+  const transitTravelInfo = normalizeTravelInfoArray(snapshot.transitTravelInfo);
+  const carTravelInfo = normalizeTravelInfoArray(snapshot.carTravelInfo);
+
+  if (
+    typeof snapshot.winnerId !== 'string' ||
+    typeof snapshot.participantSignature !== 'string' ||
+    !transitTravelInfo ||
+    !carTravelInfo
+  ) {
+    return null;
+  }
+
+  return {
+    winnerId: snapshot.winnerId,
+    participantSignature: snapshot.participantSignature,
+    transitServicePeriod: snapshot.transitServicePeriod === 'night' ? 'night' : 'day',
+    capturedAt:
+      typeof snapshot.capturedAt === 'string' ? snapshot.capturedAt : new Date(0).toISOString(),
+    transitTravelInfo,
+    carTravelInfo,
+    transitStatus: normalizeSnapshotStatus(snapshot.transitStatus),
+    carStatus: normalizeSnapshotStatus(snapshot.carStatus),
+    transitError: typeof snapshot.transitError === 'string' ? snapshot.transitError : null,
+    carError: typeof snapshot.carError === 'string' ? snapshot.carError : null,
+  };
+}
+
+export function isWinnerRouteSnapshotForInput(
+  snapshot: WinnerRouteSnapshot | null | undefined,
+  participants: Participant[],
+  winner: Candidate,
+) {
+  return Boolean(
+    snapshot &&
+      snapshot.winnerId === winner.id &&
+      snapshot.participantSignature === getParticipantRouteSignature(participants),
+  );
+}
+
+export async function buildWinnerRouteSnapshot(
+  participants: Participant[],
+  winner: Candidate,
+): Promise<WinnerRouteSnapshot> {
+  const transitTravelInfo = participants.map((participant) => getTravelInfo(participant, winner));
+  const fallbackCarTravelInfo = participants.map((participant) =>
+    getCarTravelInfo(participant, winner),
+  );
+  const [transitResults, carResults] = await Promise.all([
+    Promise.allSettled(
+      participants.map((participant) => fetchOdsayTransitTravelInfo(participant, winner)),
+    ),
+    Promise.allSettled(
+      participants.map((participant) => fetchDirectionsTravelInfo(participant, winner)),
+    ),
+  ]);
+  const transit = mergeRouteResults(transitResults, transitTravelInfo, 'transit');
+  const car = mergeRouteResults(carResults, fallbackCarTravelInfo, 'directions');
+  const transitStatus = getSnapshotStatus(transit.liveCount, transit.merged.length);
+  const carStatus = getSnapshotStatus(car.liveCount, car.merged.length);
+
+  return {
+    winnerId: winner.id,
+    participantSignature: getParticipantRouteSignature(participants),
+    transitServicePeriod: getTransitServicePeriodKey(),
+    capturedAt: new Date().toISOString(),
+    transitTravelInfo: transit.liveCount ? transit.merged : transitTravelInfo,
+    carTravelInfo: car.liveCount ? car.merged : fallbackCarTravelInfo,
+    transitStatus,
+    carStatus,
+    transitError:
+      transitStatus === 'ready'
+        ? null
+        : getTransitFallbackMessage(transit.firstRouteError, transitStatus === 'partial'),
+    carError:
+      carStatus === 'ready'
+        ? null
+        : getCarFallbackMessage(car.firstRouteError, carStatus === 'partial'),
+  };
+}

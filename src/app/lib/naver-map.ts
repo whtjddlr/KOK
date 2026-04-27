@@ -293,14 +293,20 @@ export function loadNaverMapSdk() {
 }
 
 export async function searchAddress(query: string) {
-  const maps = await loadNaverMapSdk();
-  const canGeocode = Boolean(window.naver?.maps?.Service?.geocode);
-
   const trimmedQuery = query.trim();
 
   if (!trimmedQuery) {
     return [] as AddressSearchResult[];
   }
+
+  const upfrontCuratedStationResults = getCuratedStationResults(trimmedQuery);
+
+  if (upfrontCuratedStationResults.length) {
+    return upfrontCuratedStationResults;
+  }
+
+  const maps = await loadNaverMapSdk();
+  const canGeocode = Boolean(window.naver?.maps?.Service?.geocode);
 
   if (canGeocode && looksLikeAddress(trimmedQuery)) {
     const addressFirstResults = await geocodeQuery(maps, trimmedQuery);

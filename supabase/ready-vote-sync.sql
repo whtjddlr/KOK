@@ -6,16 +6,19 @@ add column if not exists draw_ready_ids jsonb not null default '[]'::jsonb,
 add column if not exists redraw_votes jsonb not null default '[]'::jsonb,
 add column if not exists redraw_requested_at timestamptz,
 add column if not exists selected_mode text not null default 'balance',
-add column if not exists thrill_level integer not null default 1;
+add column if not exists thrill_level integer not null default 1,
+add column if not exists selected_route_snapshot jsonb;
 
 alter table public.profiles
 add column if not exists gender text not null default 'unspecified',
 add column if not exists avatar_url text;
 
 alter table public.saved_friends
+add column if not exists travel_mode text not null default 'transit',
 add column if not exists gender text not null default 'unspecified';
 
 alter table public.meeting_room_participants
+add column if not exists travel_mode text not null default 'transit',
 add column if not exists gender text not null default 'unspecified',
 add column if not exists avatar_url text;
 

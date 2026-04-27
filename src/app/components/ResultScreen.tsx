@@ -43,6 +43,7 @@ import {
   TravelInfo,
   TravelMode,
   TravelRouteStep,
+  WinnerRouteSnapshot,
 } from '../types';
 import { MapView } from './MapView';
 import { useWinnerTravelInfo } from '../hooks/useWinnerTravelInfo';
@@ -56,6 +57,7 @@ interface ResultScreenProps {
   selectedCategory: MeetCategoryKey;
   selectionMode: SelectionModeKey;
   currentUser?: AuthUser | null;
+  routeSnapshot?: WinnerRouteSnapshot | null;
   redrawControl?: {
     isOnlineRoom: boolean;
     voteCount: number;
@@ -359,6 +361,7 @@ export function ResultScreen({
   selectedCategory,
   selectionMode: _selectionMode,
   currentUser = null,
+  routeSnapshot = null,
   redrawControl = null,
   onBack,
   onNewDraw,
@@ -396,7 +399,7 @@ export function ResultScreen({
     error: carTravelError,
     transitStatus,
     transitError,
-  } = useWinnerTravelInfo(participants, winner);
+  } = useWinnerTravelInfo(participants, winner, routeSnapshot);
 
   const contentMeta = contentCategoryDefinitions[contentCategory];
   const recommendationOptions = useMemo(

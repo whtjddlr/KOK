@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Candidate, Participant, TravelInfo } from '../types';
+import { Candidate, Participant, TravelInfo, WinnerRouteSnapshot } from '../types';
 import { getCarTravelInfo, getTravelInfo } from '../lib/meeting';
 import { fetchDirectionsTravelInfo } from '../lib/naver-directions';
 import { fetchOdsayTransitTravelInfo, getTransitServicePeriodKey } from '../lib/odsay-transit';
+import { isWinnerRouteSnapshotForInput } from '../lib/route-snapshot';
 
 type TravelInfoStatus = 'loading' | 'ready' | 'partial' | 'error';
 
@@ -106,8 +107,16 @@ function getTransitFallbackMessage(message: string | null, partial: boolean) {
 export function useWinnerTravelInfo(
   participants: Participant[],
   winner: Candidate,
+  routeSnapshot?: WinnerRouteSnapshot | null,
 ): WinnerTravelInfoResult {
   const transitServicePeriod = getTransitServicePeriodKey();
+  const syncedRouteSnapshot = useMemo(
+    () =>
+      isWinnerRouteSnapshotForInput(routeSnapshot, participants, winner)
+        ? routeSnapshot
+        : null,
+    [participants, routeSnapshot, winner],
+  );
   const transitTravelInfo = useMemo(
     () => participants.map((participant) => getTravelInfo(participant, winner)),
     [participants, winner],
@@ -122,22 +131,35 @@ export function useWinnerTravelInfo(
   );
 
   const [travelInfo, setTravelInfo] = useState<TravelInfo[]>(
-    winnerCache.get(cacheKey) ?? fallbackCarTravelInfo,
+    syncedRouteSnapshot?.carTravelInfo ?? winnerCache.get(cacheKey) ?? fallbackCarTravelInfo,
   );
   const [liveTransitTravelInfo, setLiveTransitTravelInfo] = useState<TravelInfo[]>(
-    winnerTransitCache.get(cacheKey) ?? transitTravelInfo,
+    syncedRouteSnapshot?.transitTravelInfo ?? winnerTransitCache.get(cacheKey) ?? transitTravelInfo,
   );
   const [status, setStatus] = useState<TravelInfoStatus>(
-    winnerCache.has(cacheKey) ? 'ready' : 'loading',
+    syncedRouteSnapshot?.carStatus ?? (winnerCache.has(cacheKey) ? 'ready' : 'loading'),
   );
   const [transitStatus, setTransitStatus] = useState<TravelInfoStatus>(
-    winnerTransitCache.has(cacheKey) ? 'ready' : 'loading',
+    syncedRouteSnapshot?.transitStatus ??
+      (winnerTransitCache.has(cacheKey) ? 'ready' : 'loading'),
   );
-  const [error, setError] = useState<string | null>(null);
-  const [transitError, setTransitError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(syncedRouteSnapshot?.carError ?? null);
+  const [transitError, setTransitError] = useState<string | null>(
+    syncedRouteSnapshot?.transitError ?? null,
+  );
 
   useEffect(() => {
     let active = true;
+
+    if (syncedRouteSnapshot) {
+      setLiveTransitTravelInfo(syncedRouteSnapshot.transitTravelInfo);
+      setTransitStatus(syncedRouteSnapshot.transitStatus);
+      setTransitError(syncedRouteSnapshot.transitError);
+      return () => {
+        active = false;
+      };
+    }
+
     const cached = winnerTransitCache.get(cacheKey);
 
     if (cached) {
@@ -202,10 +224,20 @@ export function useWinnerTravelInfo(
     return () => {
       active = false;
     };
-  }, [cacheKey, participants, transitTravelInfo, winner]);
+  }, [cacheKey, participants, syncedRouteSnapshot, transitTravelInfo, winner]);
 
   useEffect(() => {
     let active = true;
+
+    if (syncedRouteSnapshot) {
+      setTravelInfo(syncedRouteSnapshot.carTravelInfo);
+      setStatus(syncedRouteSnapshot.carStatus);
+      setError(syncedRouteSnapshot.carError);
+      return () => {
+        active = false;
+      };
+    }
+
     const cached = winnerCache.get(cacheKey);
 
     if (cached) {
@@ -273,7 +305,7 @@ export function useWinnerTravelInfo(
     return () => {
       active = false;
     };
-  }, [cacheKey, fallbackCarTravelInfo, participants, winner]);
+  }, [cacheKey, fallbackCarTravelInfo, participants, syncedRouteSnapshot, winner]);
 
   const hasLiveData = travelInfo.some((item) => item.source === 'directions');
   const hasTransitLiveData = liveTransitTravelInfo.some((item) => item.source === 'transit');

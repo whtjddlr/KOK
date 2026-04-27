@@ -6,8 +6,10 @@ import {
   RoomMemberSummary,
   SelectionModeKey,
   ThrillLevel,
+  WinnerRouteSnapshot,
 } from '../types';
 import { normalizeParticipantGender } from './gender';
+import { normalizeWinnerRouteSnapshot } from './route-snapshot';
 import { getSafeLocationLabel } from './service-area';
 import {
   getSupabaseBrowserClient,
@@ -27,6 +29,7 @@ interface MeetingRoomRow {
   selected_mode?: string | null;
   thrill_level?: number | null;
   selected_candidate: Candidate | null;
+  selected_route_snapshot?: unknown;
   status: string | null;
   created_at: string;
   updated_at: string;
@@ -75,6 +78,7 @@ const CONTROL_ROOM_SELECT_COLUMNS = [
   'redraw_votes',
   'redraw_requested_at',
 ];
+const ROUTE_SNAPSHOT_ROOM_SELECT_COLUMNS = ['selected_route_snapshot'];
 const BASE_PARTICIPANT_SELECT =
   'id, room_id, created_by, name, location, latitude, longitude, max_travel_time, location_source, saved_friend_id';
 const PARTICIPANT_TRAVEL_MODE_SELECT = 'travel_mode';
@@ -86,6 +90,7 @@ const READY_VOTE_SCHEMA_HINT =
 
 let canUseRoomControlColumns: boolean | null = null;
 let canUseRoomPlanningColumns: boolean | null = null;
+let canUseRoomRouteSnapshotColumn: boolean | null = null;
 let canUseParticipantTravelModeColumn: boolean | null = null;
 let canUseParticipantGenderColumn: boolean | null = null;
 let canUseParticipantAvatarColumn: boolean | null = null;
@@ -147,6 +152,18 @@ function isMissingRoomPlanningColumnError(error: unknown) {
   return message.includes('selected_mode') || message.includes('thrill_level');
 }
 
+function isMissingRoomRouteSnapshotColumnError(error: unknown) {
+  const message =
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message
+      : '';
+
+  return message.includes('selected_route_snapshot');
+}
+
 function disableMissingRoomOptionalColumn(error: unknown) {
   let shouldRetry = false;
 
@@ -157,6 +174,14 @@ function disableMissingRoomOptionalColumn(error: unknown) {
 
   if (canUseRoomPlanningColumns !== false && isMissingRoomPlanningColumnError(error)) {
     canUseRoomPlanningColumns = false;
+    shouldRetry = true;
+  }
+
+  if (
+    canUseRoomRouteSnapshotColumn !== false &&
+    isMissingRoomRouteSnapshotColumnError(error)
+  ) {
+    canUseRoomRouteSnapshotColumn = false;
     shouldRetry = true;
   }
 
@@ -234,6 +259,7 @@ function getRoomSelectColumns() {
     ...BASE_ROOM_SELECT_COLUMNS,
     ...(canUseRoomPlanningColumns === false ? [] : PLANNING_ROOM_SELECT_COLUMNS),
     ...(canUseRoomControlColumns === false ? [] : CONTROL_ROOM_SELECT_COLUMNS),
+    ...(canUseRoomRouteSnapshotColumn === false ? [] : ROUTE_SNAPSHOT_ROOM_SELECT_COLUMNS),
   ].join(', ');
 }
 
@@ -323,6 +349,7 @@ function mapRoom(row: MeetingRoomRow): MeetingRoom {
     selectionMode: normalizeSelectionMode(row.selected_mode),
     thrillLevel: normalizeThrillLevel(row.thrill_level),
     selectedCandidate: row.selected_candidate ?? null,
+    selectedRouteSnapshot: normalizeWinnerRouteSnapshot(row.selected_route_snapshot),
     status: row.status === 'decided' ? 'decided' : 'planning',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -543,6 +570,10 @@ export async function createMeetingRoom(input: {
     if (!error && data) {
       if (canUseRoomPlanningColumns !== false) {
         canUseRoomPlanningColumns = true;
+      }
+
+      if (canUseRoomRouteSnapshotColumn !== false) {
+        canUseRoomRouteSnapshotColumn = true;
       }
 
       return mapRoom(data as MeetingRoomRow);
@@ -819,6 +850,10 @@ async function loadMeetingRoomControlStateByCode(code: string) {
     canUseRoomPlanningColumns = true;
   }
 
+  if (canUseRoomRouteSnapshotColumn !== false) {
+    canUseRoomRouteSnapshotColumn = true;
+  }
+
   return mapRoom(data as MeetingRoomRow);
 }
 
@@ -950,6 +985,7 @@ export async function updateRoomSelection(input: {
   selectionMode?: SelectionModeKey;
   thrillLevel?: ThrillLevel;
   selectedCandidate: Candidate;
+  selectedRouteSnapshot?: WinnerRouteSnapshot | null;
 }) {
   const supabase = getClientOrThrow();
   const controlReset =
@@ -967,12 +1003,19 @@ export async function updateRoomSelection(input: {
           selected_mode: input.selectionMode ?? 'balance',
           thrill_level: input.thrillLevel ?? 1,
         };
+  const routeSnapshotState =
+    canUseRoomRouteSnapshotColumn === false
+      ? {}
+      : {
+          selected_route_snapshot: input.selectedRouteSnapshot ?? null,
+        };
   let { data, error } = await supabase
     .from('meeting_rooms')
     .update({
       selected_category: input.selectedCategory,
       ...planningState,
       selected_candidate: input.selectedCandidate,
+      ...routeSnapshotState,
       status: 'decided',
       updated_at: new Date().toISOString(),
       ...controlReset,
@@ -989,6 +1032,7 @@ export async function updateRoomSelection(input: {
         selected_category: input.selectedCategory,
         ...planningState,
         selected_candidate: input.selectedCandidate,
+        ...routeSnapshotState,
         status: 'decided',
         updated_at: new Date().toISOString(),
       })
@@ -1004,6 +1048,28 @@ export async function updateRoomSelection(input: {
       .update({
         selected_category: input.selectedCategory,
         selected_candidate: input.selectedCandidate,
+        ...routeSnapshotState,
+        status: 'decided',
+        updated_at: new Date().toISOString(),
+        ...(canUseRoomControlColumns === false ? {} : controlReset),
+      })
+      .eq('id', input.roomId)
+      .select(getRoomSelectColumns())
+      .single());
+  }
+
+  if (
+    error &&
+    canUseRoomRouteSnapshotColumn !== false &&
+    isMissingRoomRouteSnapshotColumnError(error)
+  ) {
+    canUseRoomRouteSnapshotColumn = false;
+    ({ data, error } = await supabase
+      .from('meeting_rooms')
+      .update({
+        selected_category: input.selectedCategory,
+        ...(canUseRoomPlanningColumns === false ? {} : planningState),
+        selected_candidate: input.selectedCandidate,
         status: 'decided',
         updated_at: new Date().toISOString(),
         ...(canUseRoomControlColumns === false ? {} : controlReset),
@@ -1015,6 +1081,10 @@ export async function updateRoomSelection(input: {
 
   if (error) {
     throw error;
+  }
+
+  if (canUseRoomRouteSnapshotColumn !== false) {
+    canUseRoomRouteSnapshotColumn = true;
   }
 
   return mapRoom(data as MeetingRoomRow);
@@ -1159,12 +1229,19 @@ export async function resetRoomSelection(input: {
           selected_mode: input.selectionMode ?? 'balance',
           thrill_level: input.thrillLevel ?? 1,
         };
+  const routeSnapshotReset =
+    canUseRoomRouteSnapshotColumn === false
+      ? {}
+      : {
+          selected_route_snapshot: null,
+        };
   let { data, error } = await supabase
     .from('meeting_rooms')
     .update({
       selected_category: input.selectedCategory,
       ...planningState,
       selected_candidate: null,
+      ...routeSnapshotReset,
       status: 'planning',
       updated_at: new Date().toISOString(),
       ...controlReset,
@@ -1181,6 +1258,7 @@ export async function resetRoomSelection(input: {
         selected_category: input.selectedCategory,
         ...planningState,
         selected_candidate: null,
+        ...routeSnapshotReset,
         status: 'planning',
         updated_at: new Date().toISOString(),
       })
@@ -1196,6 +1274,28 @@ export async function resetRoomSelection(input: {
       .update({
         selected_category: input.selectedCategory,
         selected_candidate: null,
+        ...routeSnapshotReset,
+        status: 'planning',
+        updated_at: new Date().toISOString(),
+        ...(canUseRoomControlColumns === false ? {} : controlReset),
+      })
+      .eq('id', input.roomId)
+      .select(getRoomSelectColumns())
+      .single());
+  }
+
+  if (
+    error &&
+    canUseRoomRouteSnapshotColumn !== false &&
+    isMissingRoomRouteSnapshotColumnError(error)
+  ) {
+    canUseRoomRouteSnapshotColumn = false;
+    ({ data, error } = await supabase
+      .from('meeting_rooms')
+      .update({
+        selected_category: input.selectedCategory,
+        ...(canUseRoomPlanningColumns === false ? {} : planningState),
+        selected_candidate: null,
         status: 'planning',
         updated_at: new Date().toISOString(),
         ...(canUseRoomControlColumns === false ? {} : controlReset),
@@ -1207,6 +1307,10 @@ export async function resetRoomSelection(input: {
 
   if (error) {
     throw error;
+  }
+
+  if (canUseRoomRouteSnapshotColumn !== false) {
+    canUseRoomRouteSnapshotColumn = true;
   }
 
   return mapRoom(data as MeetingRoomRow);

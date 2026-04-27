@@ -59,6 +59,7 @@ export interface MeetingRoom {
   selectionMode: SelectionModeKey;
   thrillLevel: ThrillLevel;
   selectedCandidate: Candidate | null;
+  selectedRouteSnapshot?: WinnerRouteSnapshot | null;
   status: 'planning' | 'decided';
   createdAt: string;
   updatedAt: string;
@@ -146,6 +147,7 @@ export interface NearbyPlaceSection {
 
 export type TravelInfoSource = 'estimated' | 'directions' | 'transit';
 export type TravelMode = 'transit' | 'car';
+export type RouteSnapshotStatus = 'ready' | 'partial' | 'error';
 
 export interface TravelRouteStep {
   type: 'walk' | 'bus' | 'subway' | 'car';
@@ -175,6 +177,19 @@ export interface TravelInfo {
   routePath?: Coordinates[];
   firstStartStation?: string;
   lastEndStation?: string;
+}
+
+export interface WinnerRouteSnapshot {
+  winnerId: string;
+  participantSignature: string;
+  transitServicePeriod: 'day' | 'night';
+  capturedAt: string;
+  transitTravelInfo: TravelInfo[];
+  carTravelInfo: TravelInfo[];
+  transitStatus: RouteSnapshotStatus;
+  carStatus: RouteSnapshotStatus;
+  transitError: string | null;
+  carError: string | null;
 }
 
 export interface CandidateInsight {
