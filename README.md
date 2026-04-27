@@ -128,9 +128,3 @@ vercel deploy --prod
 - 사다리타기에서 진행자가 추가한 막대는 같은 방 참가자에게 실시간으로 전달됩니다.
 - 네이버 지도 표기는 지도 화면에서만 정상적으로 노출되어야 하며, 게임 화면 UI와 겹치지 않도록 관리합니다.
 
-## 라이선스와 출처
-
-초기 디자인 번들은 Figma 기반으로 생성되었습니다.
-
-- Figma 원본: [Random Meeting Place App](https://www.figma.com/design/KFqVg7C702zZ10sPCv0r8n/Random-Meeting-Place-App)
-- 추가 출처: [ATTRIBUTIONS.md](./ATTRIBUTIONS.md)
