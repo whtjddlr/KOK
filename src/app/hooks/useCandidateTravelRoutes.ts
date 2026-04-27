@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Candidate, Participant, TravelInfo } from '../types';
 import { getCarTravelInfo, getTravelInfo } from '../lib/meeting';
 import { fetchDirectionsTravelInfo } from '../lib/naver-directions';
@@ -99,11 +99,39 @@ function getRouteFallbackMessage(message: string | null, partial: boolean) {
     : '실제 경로 응답이 없어 예상 이동 정보로 보여드려요.';
 }
 
+function mergeStableRoutes(currentRoutes: TravelInfo[], fallbackRoutes: TravelInfo[]) {
+  const currentByParticipant = new Map(
+    currentRoutes.map((route) => [route.participantId, route] as const),
+  );
+
+  return fallbackRoutes.map((fallbackRoute) => {
+    const currentRoute = currentByParticipant.get(fallbackRoute.participantId);
+
+    if (
+      currentRoute &&
+      currentRoute.source !== 'estimated' &&
+      currentRoute.mode === fallbackRoute.mode
+    ) {
+      return currentRoute;
+    }
+
+    return fallbackRoute;
+  });
+}
+
 export function useCandidateTravelRoutes(
   participants: Participant[],
   candidate: Candidate | null,
 ): CandidateTravelRoutesResult {
   const transitServicePeriod = getTransitServicePeriodKey();
+  const routeReuseKey = candidate
+    ? [
+        candidate.id,
+        candidate.coordinates.lat.toFixed(6),
+        candidate.coordinates.lng.toFixed(6),
+        transitServicePeriod,
+      ].join(':')
+    : '';
   const fallbackRoutes = useMemo(
     () => (candidate ? participants.map((participant) => getFallbackRoute(participant, candidate)) : []),
     [candidate, participants],
@@ -115,11 +143,13 @@ export function useCandidateTravelRoutes(
   const [routes, setRoutes] = useState<TravelInfo[]>(fallbackRoutes);
   const [status, setStatus] = useState<RouteStatus>(candidate ? 'loading' : 'idle');
   const [error, setError] = useState<string | null>(null);
+  const routeReuseKeyRef = useRef(routeReuseKey);
 
   useEffect(() => {
     let active = true;
 
     if (!candidate || !participants.length) {
+      routeReuseKeyRef.current = routeReuseKey;
       setRoutes([]);
       setStatus('idle');
       setError(null);
@@ -128,7 +158,11 @@ export function useCandidateTravelRoutes(
       };
     }
 
-    setRoutes(fallbackRoutes);
+    const canReuseCurrentRoutes = routeReuseKeyRef.current === routeReuseKey;
+    routeReuseKeyRef.current = routeReuseKey;
+    setRoutes((currentRoutes) =>
+      canReuseCurrentRoutes ? mergeStableRoutes(currentRoutes, fallbackRoutes) : fallbackRoutes,
+    );
     setStatus('loading');
     setError(null);
 
@@ -171,7 +205,9 @@ export function useCandidateTravelRoutes(
           return;
         }
 
-        setRoutes(fallbackRoutes);
+        setRoutes((currentRoutes) =>
+          canReuseCurrentRoutes ? mergeStableRoutes(currentRoutes, fallbackRoutes) : fallbackRoutes,
+        );
         setStatus('error');
         setError(getReasonMessage(error) ?? '실제 경로 응답이 없어 예상 이동 정보로 보여드려요.');
       });
@@ -179,7 +215,7 @@ export function useCandidateTravelRoutes(
     return () => {
       active = false;
     };
-  }, [candidate, fallbackRoutes, participants, routeSignature]);
+  }, [candidate, fallbackRoutes, participants, routeReuseKey, routeSignature]);
 
   return {
     routes,

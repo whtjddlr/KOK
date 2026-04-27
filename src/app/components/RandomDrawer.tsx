@@ -27,7 +27,12 @@ interface RandomDrawerProps {
   lockedWinner?: CandidateInsight | null;
   canChoose?: boolean;
   autoChoose?: boolean;
+  sharedSelectedSlotIndex?: number | null;
+  sharedChoicePlayAt?: string | null;
+  initialLadderBars?: LadderBar[] | null;
   waitingMessage?: string;
+  onChoice?: (slotIndex: number, state?: { ladderBars: LadderBar[] }) => void;
+  onLadderBarsChange?: (bars: LadderBar[]) => void;
   onComplete: (winner: Candidate, proof: DrawProof) => void;
   onClose: () => void;
 }
@@ -136,7 +141,7 @@ function getLadderColumnX(index: number, count: number) {
   return ((index + 0.5) * 100) / count;
 }
 
-type LadderBar = {
+export type LadderBar = {
   id: string;
   leftIndex: number;
   source?: 'auto' | 'user';
@@ -178,6 +183,12 @@ function getLadderBars(lock: DrawChoiceLock): LadderBar[] {
 
 function sortLadderBars(bars: LadderBar[]) {
   return [...bars].sort((first, second) => first.y - second.y);
+}
+
+function getLadderBarsSignature(bars: LadderBar[]) {
+  return sortLadderBars(bars)
+    .map((bar) => `${bar.id}:${bar.leftIndex}:${bar.y}:${bar.source ?? 'auto'}`)
+    .join('|');
 }
 
 function getLadderResultIndex(
@@ -2637,7 +2648,12 @@ export function RandomDrawer({
   lockedWinner = null,
   canChoose = true,
   autoChoose = false,
+  sharedSelectedSlotIndex = null,
+  sharedChoicePlayAt = null,
+  initialLadderBars = null,
   waitingMessage,
+  onChoice,
+  onLadderBarsChange,
   onComplete,
   onClose,
 }: RandomDrawerProps) {
@@ -2647,8 +2663,12 @@ export function RandomDrawer({
   const [choiceLock] = useState<DrawChoiceLock>(() =>
     buildChoiceLock(candidateInsights, variant, drawSeed),
   );
-  const [ladderBars, setLadderBars] = useState<LadderBar[]>(() => getLadderBars(choiceLock));
+  const [ladderBars, setLadderBars] = useState<LadderBar[]>(() =>
+    initialLadderBars ? sortLadderBars(initialLadderBars) : getLadderBars(choiceLock),
+  );
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
+  const [pendingSelectedSlotIndex, setPendingSelectedSlotIndex] = useState<number | null>(null);
+  const pendingChoiceTimerRef = useRef<number | null>(null);
   const autoChoiceIndex = useMemo(
     () =>
       choiceLock.slots.length
@@ -2719,6 +2739,61 @@ export function RandomDrawer({
   const variantLabel = variant ? drawVariantDisplayLabels[variant] : '게임 선택';
   const winnerCandidateId = plan.winner.candidate.id;
   const isLadderVariant = variant === 'ladder-game';
+  const clearPendingChoiceTimer = () => {
+    if (pendingChoiceTimerRef.current !== null) {
+      window.clearTimeout(pendingChoiceTimerRef.current);
+      pendingChoiceTimerRef.current = null;
+    }
+  };
+  const scheduleSlotSelection = (index: number, playAt?: string | null) => {
+    if (index < 0 || index >= choiceLock.slots.length) {
+      return;
+    }
+
+    clearPendingChoiceTimer();
+
+    const playAtMs = playAt ? Date.parse(playAt) : NaN;
+    const delayMs = Number.isFinite(playAtMs) ? Math.max(0, playAtMs - Date.now()) : 0;
+
+    if (delayMs <= 30) {
+      setPendingSelectedSlotIndex(null);
+      setSelectedSlotIndex((current) => current ?? index);
+      return;
+    }
+
+    setPendingSelectedSlotIndex(index);
+    pendingChoiceTimerRef.current = window.setTimeout(() => {
+      pendingChoiceTimerRef.current = null;
+      setPendingSelectedSlotIndex(null);
+      setSelectedSlotIndex((current) => current ?? index);
+    }, delayMs);
+  };
+  const updateLadderBars = (bars: LadderBar[]) => {
+    const nextBars = sortLadderBars(bars);
+
+    if (getLadderBarsSignature(ladderBars) === getLadderBarsSignature(nextBars)) {
+      return;
+    }
+
+    setLadderBars(nextBars);
+    onLadderBarsChange?.(nextBars);
+  };
+  const chooseSlot = (index: number) => {
+    if (index < 0 || index >= choiceLock.slots.length) {
+      return;
+    }
+
+    onChoice?.(index, { ladderBars: sortLadderBars(ladderBars) });
+    if (!onChoice) {
+      scheduleSlotSelection(index);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      clearPendingChoiceTimer();
+    };
+  }, []);
 
   useEffect(() => {
     completePayloadRef.current = {
@@ -2732,12 +2807,35 @@ export function RandomDrawer({
   });
 
   useEffect(() => {
+    if (!initialLadderBars || selectedSlotIndex !== null) {
+      return;
+    }
+
+    const nextBars = sortLadderBars(initialLadderBars);
+    setLadderBars((current) =>
+      getLadderBarsSignature(current) === getLadderBarsSignature(nextBars) ? current : nextBars,
+    );
+  }, [initialLadderBars, selectedSlotIndex]);
+
+  useEffect(() => {
+    if (
+      sharedSelectedSlotIndex === null ||
+      sharedSelectedSlotIndex < 0 ||
+      sharedSelectedSlotIndex >= choiceLock.slots.length
+    ) {
+      return;
+    }
+
+    scheduleSlotSelection(sharedSelectedSlotIndex, sharedChoicePlayAt);
+  }, [choiceLock.slots.length, sharedChoicePlayAt, sharedSelectedSlotIndex]);
+
+  useEffect(() => {
     if (!autoChoose || selectedSlotIndex !== null || !choiceLock.slots.length) {
       return;
     }
 
     const timeoutId = window.setTimeout(() => {
-      setSelectedSlotIndex(autoChoiceIndex);
+      chooseSlot(autoChoiceIndex);
     }, 850);
 
     return () => {
@@ -2862,11 +2960,11 @@ export function RandomDrawer({
                 lock={choiceLock}
                 ladderBars={ladderBars}
                 candidatePoints={visiblePoints}
-                onLadderBarsChange={canChoose && !autoChoose ? setLadderBars : undefined}
+                onLadderBarsChange={canChoose && !autoChoose ? updateLadderBars : undefined}
                 onChoose={
-                  canChoose && !autoChoose
+                  canChoose && !autoChoose && pendingSelectedSlotIndex === null
                     ? (index) => {
-                        setSelectedSlotIndex(index);
+                        chooseSlot(index);
                       }
                     : undefined
                 }
@@ -2891,11 +2989,11 @@ export function RandomDrawer({
                 lock={choiceLock}
                 ladderBars={ladderBars}
                 candidatePoints={visiblePoints}
-                onLadderBarsChange={canChoose && !autoChoose ? setLadderBars : undefined}
+                onLadderBarsChange={canChoose && !autoChoose ? updateLadderBars : undefined}
                 onChoose={
-                  canChoose && !autoChoose
+                  canChoose && !autoChoose && pendingSelectedSlotIndex === null
                     ? (index) => {
-                        setSelectedSlotIndex(index);
+                        chooseSlot(index);
                       }
                     : undefined
                 }

@@ -43,7 +43,7 @@ import {
 import { ParticipantCard } from './ParticipantCard';
 import { MapView } from './MapView';
 import { CandidateCard } from './CandidateCard';
-import { RandomDrawer } from './RandomDrawer';
+import { RandomDrawer, type LadderBar } from './RandomDrawer';
 import { AiConfigSheet } from './AiConfigSheet';
 import { useAiGeneratedCandidates } from '../hooks/useAiGeneratedCandidates';
 import { useLiveCandidateSearch } from '../hooks/useLiveCandidateSearch';
@@ -115,6 +115,7 @@ import {
   looksLikeUnsupportedServiceAreaQuery,
   SERVICE_AREA_UNSUPPORTED_MESSAGE,
 } from '../lib/service-area';
+import { getSupabasePublicClient } from '../lib/supabase';
 
 interface PlannerScreenProps {
   currentUserId: string;
@@ -147,7 +148,35 @@ interface DrawSessionSnapshot {
   candidateInsights: CandidateInsight[];
   participants: Participant[];
   seed?: string;
+  ladderBars?: LadderBar[];
 }
+
+interface SharedDrawChoice {
+  roomId: string;
+  seed: string;
+  selectedSlotIndex: number;
+  selectedAt: string;
+  playAt: string;
+  controllerId: string | null;
+  snapshot: DrawSessionSnapshot | null;
+}
+
+interface SharedDrawLadderBars {
+  roomId: string;
+  seed: string;
+  ladderBars: LadderBar[];
+  updatedAt: string;
+  controllerId: string | null;
+  snapshot: DrawSessionSnapshot | null;
+}
+
+type DrawChoiceChannel = {
+  send: (message: {
+    type: 'broadcast';
+    event: string;
+    payload: unknown;
+  }) => Promise<unknown>;
+};
 
 const PARTICIPANT_COLORS = ['#ff7b6b', '#4ecdc4', '#ffd166', '#a78bfa', '#f59e0b', '#ec4899'];
 
@@ -205,6 +234,130 @@ function getParticipantNameByActorId(participants: Participant[], actorId: strin
   return (
     participants.find((participant) => getParticipantActorKey(participant) === actorId)?.name ?? ''
   );
+}
+
+function normalizeSharedLadderBars(value: unknown): LadderBar[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value
+    .flatMap((item, index) => {
+      if (!item || typeof item !== 'object') {
+        return [];
+      }
+
+      const bar = item as Partial<LadderBar>;
+      const leftIndex = Number(bar.leftIndex);
+      const y = Number(bar.y);
+
+      if (!Number.isInteger(leftIndex) || leftIndex < 0 || !Number.isFinite(y)) {
+        return [];
+      }
+
+      return [
+        {
+          id:
+            typeof bar.id === 'string' && bar.id
+              ? bar.id
+              : `shared-ladder-${index}-${leftIndex}-${Math.round(y * 100)}`,
+          leftIndex,
+          source: bar.source === 'user' ? 'user' : 'auto',
+          y: Math.min(Math.max(y, 0), 100),
+        } satisfies LadderBar,
+      ];
+    })
+    .sort((first, second) => first.y - second.y);
+}
+
+function normalizeSharedDrawChoice(payload: unknown, roomId: string) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const value = payload as Partial<SharedDrawChoice>;
+  const selectedSlotIndex = Number(value.selectedSlotIndex);
+  const rawSnapshot =
+    value.snapshot && typeof value.snapshot === 'object'
+      ? (value.snapshot as Partial<DrawSessionSnapshot>)
+      : null;
+  const snapshot =
+    rawSnapshot &&
+    Array.isArray(rawSnapshot.candidateInsights) &&
+    Array.isArray(rawSnapshot.participants)
+      ? {
+          candidateInsights: rawSnapshot.candidateInsights as CandidateInsight[],
+          participants: rawSnapshot.participants as Participant[],
+          seed: value.seed,
+          ladderBars: normalizeSharedLadderBars(rawSnapshot.ladderBars),
+        }
+      : null;
+
+  if (
+    value.roomId !== roomId ||
+    typeof value.seed !== 'string' ||
+    !value.seed ||
+    !Number.isInteger(selectedSlotIndex) ||
+    selectedSlotIndex < 0
+  ) {
+    return null;
+  }
+
+  return {
+    roomId,
+    seed: value.seed,
+    selectedSlotIndex,
+    selectedAt:
+      typeof value.selectedAt === 'string' && value.selectedAt
+        ? value.selectedAt
+        : new Date().toISOString(),
+    playAt:
+      typeof value.playAt === 'string' && value.playAt
+        ? value.playAt
+        : new Date(Date.now() + 1000).toISOString(),
+    controllerId: typeof value.controllerId === 'string' ? value.controllerId : null,
+    snapshot,
+  } satisfies SharedDrawChoice;
+}
+
+function normalizeSharedDrawLadderBars(payload: unknown, roomId: string) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const value = payload as Partial<SharedDrawLadderBars>;
+  const ladderBars = normalizeSharedLadderBars(value.ladderBars);
+  const rawSnapshot =
+    value.snapshot && typeof value.snapshot === 'object'
+      ? (value.snapshot as Partial<DrawSessionSnapshot>)
+      : null;
+  const snapshot =
+    rawSnapshot &&
+    Array.isArray(rawSnapshot.candidateInsights) &&
+    Array.isArray(rawSnapshot.participants)
+      ? {
+          candidateInsights: rawSnapshot.candidateInsights as CandidateInsight[],
+          participants: rawSnapshot.participants as Participant[],
+          seed: value.seed,
+          ladderBars: ladderBars ?? normalizeSharedLadderBars(rawSnapshot.ladderBars),
+        }
+      : null;
+
+  if (value.roomId !== roomId || typeof value.seed !== 'string' || !value.seed || !ladderBars) {
+    return null;
+  }
+
+  return {
+    roomId,
+    seed: value.seed,
+    ladderBars,
+    updatedAt:
+      typeof value.updatedAt === 'string' && value.updatedAt
+        ? value.updatedAt
+        : new Date().toISOString(),
+    controllerId: typeof value.controllerId === 'string' ? value.controllerId : null,
+    snapshot,
+  } satisfies SharedDrawLadderBars;
 }
 
 function getParticipantsSignature(participants: Participant[]) {
@@ -533,6 +686,12 @@ export function PlannerScreen({
   const participantsRef = useRef<Participant[]>(initialParticipants);
   const seenRoomWinnerRef = useRef<string | null>(null);
   const pendingRoomParticipantIdsRef = useRef<Set<string>>(new Set());
+  const emptyParticipantsSyncTimerRef = useRef<number | null>(null);
+  const autoAddedSelfProfileKeyRef = useRef('');
+  const drawChoiceChannelRef = useRef<DrawChoiceChannel | null>(null);
+  const showDrawerRef = useRef(false);
+  const isCurrentDrawControllerRef = useRef(false);
+  const delayedDecidedRoomTimerRef = useRef<number | null>(null);
 
   const [participants, setParticipants] = useState<Participant[]>(initialParticipants);
   const [savedFriends, setSavedFriends] = useState<SavedFriend[]>([]);
@@ -544,6 +703,7 @@ export function PlannerScreen({
   const [showAddForm, setShowAddForm] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
   const [drawSessionSnapshot, setDrawSessionSnapshot] = useState<DrawSessionSnapshot | null>(null);
+  const [sharedDrawChoice, setSharedDrawChoice] = useState<SharedDrawChoice | null>(null);
   const [saveNewFriend, setSaveNewFriend] = useState(true);
   const [newName, setNewName] = useState('');
   const [locationMode, setLocationMode] = useState<LocationMode>('address');
@@ -596,6 +756,83 @@ export function PlannerScreen({
   useEffect(() => {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
+
+  useEffect(() => {
+    showDrawerRef.current = showDrawer;
+  }, [showDrawer]);
+
+  useEffect(() => {
+    if (!onlineRoom) {
+      drawChoiceChannelRef.current = null;
+      setSharedDrawChoice(null);
+      return;
+    }
+
+    const supabase = getSupabasePublicClient();
+
+    if (!supabase) {
+      drawChoiceChannelRef.current = null;
+      return;
+    }
+
+    const roomId = onlineRoom.id;
+    const channel = supabase
+      .channel(`room-draw-choice-${roomId}`)
+      .on('broadcast', { event: 'draw-choice' }, (message) => {
+        const nextChoice = normalizeSharedDrawChoice(message.payload, roomId);
+
+        if (!nextChoice) {
+          return;
+        }
+
+        setSharedDrawChoice((current) =>
+          current?.seed === nextChoice.seed &&
+          current.selectedSlotIndex === nextChoice.selectedSlotIndex
+            ? current
+            : nextChoice,
+        );
+
+        if (nextChoice.snapshot) {
+          setDrawSessionSnapshot(nextChoice.snapshot);
+          openedReadyDrawSessionRef.current = nextChoice.seed;
+          setShowDrawer(true);
+        }
+      })
+      .on('broadcast', { event: 'draw-ladder-bars' }, (message) => {
+        const nextBars = normalizeSharedDrawLadderBars(message.payload, roomId);
+
+        if (!nextBars) {
+          return;
+        }
+
+        setDrawSessionSnapshot((current) => {
+          if (current?.seed === nextBars.seed) {
+            return {
+              ...current,
+              ladderBars: nextBars.ladderBars,
+            };
+          }
+
+          return nextBars.snapshot ?? current;
+        });
+
+        if (nextBars.snapshot) {
+          openedReadyDrawSessionRef.current = nextBars.seed;
+          setShowDrawer(true);
+        }
+      })
+      .subscribe();
+
+    drawChoiceChannelRef.current = channel;
+
+    return () => {
+      if (drawChoiceChannelRef.current === channel) {
+        drawChoiceChannelRef.current = null;
+      }
+
+      void supabase.removeChannel(channel);
+    };
+  }, [onlineRoom?.id]);
 
   useEffect(() => {
     participantsRef.current = participants;
@@ -663,23 +900,58 @@ export function PlannerScreen({
         return;
       }
 
-      seenRoomWinnerRef.current = winnerKey;
-      pendingDecidedRoom = null;
-      onCategoryChangeRef.current(room.selectedCategory);
-      onSelectionModeChangeRef.current(room.selectionMode);
-      onThrillLevelChangeRef.current(room.thrillLevel);
-      onCompleteRef.current(
-        room.selectedCandidate,
-        roomParticipants,
-        room.selectedCategory,
-        null,
-        room.selectedRouteSnapshot ?? null,
-      );
+      const finishDecidedRoom = () => {
+        if (!active || seenRoomWinnerRef.current === winnerKey) {
+          return;
+        }
+
+        seenRoomWinnerRef.current = winnerKey;
+        pendingDecidedRoom = null;
+        onCategoryChangeRef.current(room.selectedCategory);
+        onSelectionModeChangeRef.current(room.selectionMode);
+        onThrillLevelChangeRef.current(room.thrillLevel);
+        onCompleteRef.current(
+          room.selectedCandidate,
+          roomParticipants,
+          room.selectedCategory,
+          null,
+          room.selectedRouteSnapshot ?? null,
+        );
+      };
+
+      if (showDrawerRef.current && !isCurrentDrawControllerRef.current) {
+        if (delayedDecidedRoomTimerRef.current !== null) {
+          window.clearTimeout(delayedDecidedRoomTimerRef.current);
+        }
+
+        delayedDecidedRoomTimerRef.current = window.setTimeout(() => {
+          delayedDecidedRoomTimerRef.current = null;
+          finishDecidedRoom();
+        }, 5200);
+        return;
+      }
+
+      finishDecidedRoom();
     };
 
     const applyParticipants = (nextParticipants: Participant[]) => {
       if (!active) {
         return;
+      }
+
+      if (!nextParticipants.length && latestParticipants.length) {
+        if (emptyParticipantsSyncTimerRef.current === null) {
+          emptyParticipantsSyncTimerRef.current = window.setTimeout(() => {
+            emptyParticipantsSyncTimerRef.current = null;
+            applyParticipants([]);
+          }, 650);
+        }
+        return;
+      }
+
+      if (emptyParticipantsSyncTimerRef.current !== null) {
+        window.clearTimeout(emptyParticipantsSyncTimerRef.current);
+        emptyParticipantsSyncTimerRef.current = null;
       }
 
       latestParticipants = mergeSyncedParticipantsWithPending(
@@ -773,6 +1045,14 @@ export function PlannerScreen({
 
     return () => {
       active = false;
+      if (emptyParticipantsSyncTimerRef.current !== null) {
+        window.clearTimeout(emptyParticipantsSyncTimerRef.current);
+        emptyParticipantsSyncTimerRef.current = null;
+      }
+      if (delayedDecidedRoomTimerRef.current !== null) {
+        window.clearTimeout(delayedDecidedRoomTimerRef.current);
+        delayedDecidedRoomTimerRef.current = null;
+      }
       unsubscribeParticipants();
       unsubscribeRoom();
       window.clearInterval(participantsIntervalId);
@@ -1199,6 +1479,9 @@ export function PlannerScreen({
   const isCurrentDrawController = Boolean(
     !onlineRoom || (currentReadyActorId && currentReadyActorId === activeDrawControllerId),
   );
+  useEffect(() => {
+    isCurrentDrawControllerRef.current = isCurrentDrawController;
+  }, [isCurrentDrawController]);
   const openDrawDrawer = async () => {
     if (isOpeningDrawSessionRef.current) {
       return;
@@ -1250,6 +1533,46 @@ export function PlannerScreen({
     setShowDrawer(false);
     setDrawSessionSnapshot(null);
   };
+  useEffect(() => {
+    if (
+      !sharedDrawChoice ||
+      sharedDrawChoice.snapshot ||
+      !readyDrawSessionSeed ||
+      sharedDrawChoice.seed === readyDrawSessionSeed
+    ) {
+      return;
+    }
+
+    setSharedDrawChoice(null);
+  }, [readyDrawSessionSeed, sharedDrawChoice]);
+  useEffect(() => {
+    if (
+      !onlineRoom ||
+      !sharedDrawChoice ||
+      showDrawer ||
+      roomState?.status === 'decided'
+    ) {
+      return;
+    }
+
+    if (sharedDrawChoice.snapshot) {
+      setDrawSessionSnapshot(sharedDrawChoice.snapshot);
+      setShowDrawer(true);
+      return;
+    }
+
+    if (!readyDrawSessionSeed || sharedDrawChoice.seed !== readyDrawSessionSeed) {
+      return;
+    }
+
+    void openDrawDrawer();
+  }, [
+    onlineRoom,
+    readyDrawSessionSeed,
+    roomState?.status,
+    sharedDrawChoice,
+    showDrawer,
+  ]);
   useEffect(() => {
     if (
       !onlineRoom ||
@@ -1355,11 +1678,7 @@ export function PlannerScreen({
     ? selectedCandidateRoutes.find((route) => route.participantId === selectedRouteParticipant.id) ??
       null
     : null;
-  const selectedRouteDetail =
-    rawSelectedRouteDetail &&
-    !(selectedRouteStatus === 'loading' && rawSelectedRouteDetail.source === 'estimated')
-      ? rawSelectedRouteDetail
-      : null;
+  const selectedRouteDetail = rawSelectedRouteDetail;
 	  const selectedRouteDetailKey =
 	    selectedInsight && selectedRouteParticipant
 	      ? getRouteSelectionKey(selectedInsight.candidate.id, selectedRouteParticipant.id)
@@ -1848,6 +2167,33 @@ export function PlannerScreen({
     }
   };
 
+  useEffect(() => {
+    if (!onlineRoom || !currentUserId || !currentUserHomeLocation || isSelfProfileAdded) {
+      return;
+    }
+
+    const autoAddKey = [
+      onlineRoom.id,
+      currentUserId,
+      currentUserHomeLocation.location,
+      currentUserHomeLocation.coordinates.lat,
+      currentUserHomeLocation.coordinates.lng,
+    ].join(':');
+
+    if (autoAddedSelfProfileKeyRef.current === autoAddKey) {
+      return;
+    }
+
+    autoAddedSelfProfileKeyRef.current = autoAddKey;
+    handleQuickAddSelfProfile();
+  }, [
+    currentUserHomeLocation,
+    currentUserId,
+    handleQuickAddSelfProfile,
+    isSelfProfileAdded,
+    onlineRoom?.id,
+  ]);
+
   const handleEditSelfLocationForThisRoom = () => {
     if (!currentUserId || !currentUserHomeLocation) {
       onOpenProfile?.();
@@ -2252,6 +2598,95 @@ export function PlannerScreen({
     candidateInsights: drawPool,
     participants,
     seed: readyDrawSessionSeed ?? undefined,
+    ladderBars: undefined,
+  };
+  const sharedSelectedSlotIndex =
+    onlineRoom &&
+    activeDrawSession.seed &&
+    sharedDrawChoice?.seed === activeDrawSession.seed
+      ? sharedDrawChoice.selectedSlotIndex
+      : null;
+  const sharedChoicePlayAt =
+    onlineRoom &&
+    activeDrawSession.seed &&
+    sharedDrawChoice?.seed === activeDrawSession.seed
+      ? sharedDrawChoice.playAt
+      : null;
+  const handleDrawLadderBarsChange = (ladderBars: LadderBar[]) => {
+    if (!onlineRoom || !activeDrawSession.seed || !isCurrentDrawController) {
+      return;
+    }
+
+    const nextSnapshot: DrawSessionSnapshot = {
+      candidateInsights: activeDrawSession.candidateInsights,
+      participants: activeDrawSession.participants,
+      seed: activeDrawSession.seed,
+      ladderBars,
+    };
+    const nextBars: SharedDrawLadderBars = {
+      roomId: onlineRoom.id,
+      seed: activeDrawSession.seed,
+      ladderBars,
+      updatedAt: new Date().toISOString(),
+      controllerId: activeDrawControllerId ?? currentReadyActorId ?? null,
+      snapshot: nextSnapshot,
+    };
+
+    setDrawSessionSnapshot((current) =>
+      current?.seed === activeDrawSession.seed
+        ? {
+            ...current,
+            ladderBars,
+          }
+        : nextSnapshot,
+    );
+
+    void drawChoiceChannelRef.current
+      ?.send({
+        type: 'broadcast',
+        event: 'draw-ladder-bars',
+        payload: nextBars,
+      })
+      .catch(() => {
+        setRoomMessage('사다리 추가 동기화가 잠시 지연되고 있어요. 선택 시 최종 사다리는 다시 공유됩니다.');
+      });
+  };
+  const handleDrawChoice = (
+    selectedSlotIndex: number,
+    state?: {
+      ladderBars?: LadderBar[];
+    },
+  ) => {
+    if (!onlineRoom || !activeDrawSession.seed || !isCurrentDrawController) {
+      return;
+    }
+
+    const ladderBars = state?.ladderBars ?? activeDrawSession.ladderBars;
+    const nextChoice: SharedDrawChoice = {
+      roomId: onlineRoom.id,
+      seed: activeDrawSession.seed,
+      selectedSlotIndex,
+      selectedAt: new Date().toISOString(),
+      playAt: new Date(Date.now() + 1300).toISOString(),
+      controllerId: activeDrawControllerId ?? currentReadyActorId ?? null,
+      snapshot: {
+        candidateInsights: activeDrawSession.candidateInsights,
+        participants: activeDrawSession.participants,
+        seed: activeDrawSession.seed,
+        ladderBars,
+      },
+    };
+
+    setSharedDrawChoice(nextChoice);
+    void drawChoiceChannelRef.current
+      ?.send({
+        type: 'broadcast',
+        event: 'draw-choice',
+        payload: nextChoice,
+      })
+      .catch(() => {
+        setRoomMessage('게임 진행 동기화가 잠시 지연되고 있어요. 결과는 방에 저장됩니다.');
+      });
   };
 
   return (
@@ -3288,12 +3723,17 @@ export function PlannerScreen({
           participants={activeDrawSession.participants}
           drawSeed={activeDrawSession.seed}
           canChoose={isCurrentDrawController}
-          autoChoose={Boolean(onlineRoom)}
+          autoChoose={false}
+          sharedSelectedSlotIndex={sharedSelectedSlotIndex}
+          sharedChoicePlayAt={sharedChoicePlayAt}
+          initialLadderBars={activeDrawSession.ladderBars ?? null}
           waitingMessage={
             onlineRoom && !isCurrentDrawController
               ? `${activeDrawControllerName}님이 게임을 진행 중이에요. 결과가 정해지면 자동으로 넘어갑니다.`
               : undefined
           }
+          onChoice={handleDrawChoice}
+          onLadderBarsChange={handleDrawLadderBarsChange}
           onComplete={handleDrawComplete}
           onClose={closeDrawDrawer}
         />

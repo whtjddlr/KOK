@@ -21,6 +21,7 @@ import {
   getParticipantActorKey,
   getRedrawRequiredVotes,
   loadMeetingRoomByCode,
+  loadRoomParticipants,
   loadOwnedMeetingRooms,
   requestRoomRedrawVote,
   resetRoomSelection,
@@ -236,6 +237,7 @@ function getMeetingRoomSignature(room: MeetingRoom | null) {
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>('signup');
   const [profileOpen, setProfileOpen] = useState(false);
@@ -256,6 +258,7 @@ export default function App() {
   const [selectionMode, setSelectionMode] = useState<SelectionModeKey>('balance');
   const [thrillLevel, setThrillLevel] = useState<ThrillLevel>(1);
   const currentUserSignatureRef = useRef('');
+  const handledInviteCodeRef = useRef('');
 
   const setCurrentUserIfChanged = (user: AuthUser | null) => {
     const nextSignature = getAuthUserSignature(user);
@@ -271,11 +274,22 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
 
-    loadSessionUser().then((user) => {
-      if (mounted) {
-        setCurrentUserIfChanged(user);
-      }
-    });
+    loadSessionUser()
+      .then((user) => {
+        if (mounted) {
+          setCurrentUserIfChanged(user);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setCurrentUserIfChanged(null);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setIsAuthReady(true);
+        }
+      });
 
     const unsubscribe = subscribeToAuthChanges((user) => {
       if (mounted) {
@@ -330,11 +344,30 @@ export default function App() {
       return;
     }
 
+    if (!isAuthReady) {
+      return;
+    }
+
     const code = getRoomCodeFromUrl();
 
     if (!code) {
       return;
     }
+
+    if (!currentUser) {
+      handledInviteCodeRef.current = '';
+      setCurrentScreen('home');
+      setRoomError('초대 링크로 들어왔어요. 회원가입 또는 로그인하면 바로 방에 참여해요.');
+      setAuthMode('signup');
+      setAuthOpen(true);
+      return;
+    }
+
+    if (handledInviteCodeRef.current === code) {
+      return;
+    }
+
+    handledInviteCodeRef.current = code;
 
     setIsOpeningRoom(true);
     setRoomError(null);
@@ -344,18 +377,24 @@ export default function App() {
       7000,
       '방 정보를 불러오는 응답이 지연되고 있어요.',
     )
-      .then((room) => {
+      .then(async (room) => {
         if (!room) {
           setRoomError('찾을 수 없는 약속방이에요.');
           setCurrentScreen('home');
           return;
         }
 
+        const roomParticipants = await withTimeout(
+          loadRoomParticipants(room.id),
+          7000,
+          '참가자 목록 응답이 지연되고 있어요.',
+        ).catch(() => [] as Participant[]);
+
         setActiveRoom(room);
         setSelectedCategory(room.selectedCategory);
         setSelectionMode(room.selectionMode);
         setThrillLevel(room.thrillLevel);
-        setCurrentParticipants([]);
+        setCurrentParticipants(roomParticipants);
         setCurrentScreen('planner');
       })
       .catch((error: Error) => {
@@ -364,7 +403,7 @@ export default function App() {
       .finally(() => {
         setIsOpeningRoom(false);
       });
-  }, []);
+  }, [currentUser?.id, isAuthReady]);
 
   useEffect(() => {
     if (!activeRoom || currentScreen !== 'result') {
@@ -624,12 +663,18 @@ export default function App() {
         return;
       }
 
+      const roomParticipants = await withTimeout(
+        loadRoomParticipants(room.id),
+        7000,
+        '참가자 목록 응답이 지연되고 있어요.',
+      ).catch(() => [] as Participant[]);
+
       setActiveRoom(room);
       syncRoomUrl(room);
       setSelectedCategory(room.selectedCategory);
       setSelectionMode(room.selectionMode);
       setThrillLevel(room.thrillLevel);
-      setCurrentParticipants([]);
+      setCurrentParticipants(roomParticipants);
       setSelectedWinner(null);
       setSelectedRouteSnapshot(null);
       setDrawProof(null);
@@ -824,6 +869,7 @@ export default function App() {
     const roomCodeFromUrl = getRoomCodeFromUrl();
 
     if (roomCodeFromUrl) {
+      handledInviteCodeRef.current = roomCodeFromUrl;
       void handleJoinRoom(roomCodeFromUrl);
       void refreshOwnedRooms(user.id);
       return;
