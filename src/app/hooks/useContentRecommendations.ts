@@ -373,7 +373,13 @@ async function fetchRecommendationResults(queries: string[]) {
   const collected: Awaited<ReturnType<typeof fetchNearbySearchResults>> = [];
 
   for (const searchQuery of queries) {
-    const results = await fetchNearbySearchResults(searchQuery, 10, 'comment');
+    let results: Awaited<ReturnType<typeof fetchNearbySearchResults>> = [];
+
+    try {
+      results = await fetchNearbySearchResults(searchQuery, 10, 'comment');
+    } catch {
+      continue;
+    }
 
     results.forEach((result) => {
       const key = getRecommendationIdentityKey(result);

@@ -151,12 +151,16 @@ async function buildNearbySections(
   const definitions = nearbySearchPresets[selectedCategory] ?? nearbySearchPresets.dining;
 
   const sections = await Promise.all(
-    definitions.map((definition) =>
-      buildNearbySection(candidate, selectedCategory, definition, groupGenderContext),
-    ),
+    definitions.map(async (definition) => {
+      try {
+        return await buildNearbySection(candidate, selectedCategory, definition, groupGenderContext);
+      } catch {
+        return null;
+      }
+    }),
   );
 
-  return sections.filter((section) => section.items.length > 0);
+  return sections.filter((section): section is NearbyPlaceSection => Boolean(section?.items.length));
 }
 
 export function getDefaultNearbyCategory(selectedCategory: MeetCategoryKey): NearbyPlaceCategory {

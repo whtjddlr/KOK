@@ -37,6 +37,15 @@ export interface NearbySearchItem {
 
 export type NaverLocalSearchSort = 'random' | 'comment';
 
+const nearbySearchCache = new Map<string, NearbySearchItem[]>();
+const nearbySearchInFlight = new Map<string, Promise<NearbySearchItem[]>>();
+
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 function cleanHtmlText(value: string) {
   return value
     .replace(/<[^>]*>/g, ' ')
@@ -59,7 +68,7 @@ function parseNaverLocalCoordinate(value?: string) {
   return numericValue / 10000000;
 }
 
-export async function fetchNearbySearchResults(
+async function fetchNearbySearchResultsOnce(
   query: string,
   display = 4,
   sort: NaverLocalSearchSort = 'comment',
@@ -91,4 +100,48 @@ export async function fetchNearbySearchResults(
       coordinates: hasCoordinates ? { lat, lng } : undefined,
     };
   });
+}
+
+export async function fetchNearbySearchResults(
+  query: string,
+  display = 4,
+  sort: NaverLocalSearchSort = 'comment',
+) {
+  const cacheKey = `${query.trim()}:${display}:${sort}`;
+  const cached = nearbySearchCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const inFlight = nearbySearchInFlight.get(cacheKey);
+
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const request = (async () => {
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await fetchNearbySearchResultsOnce(query, display, sort);
+      } catch (error) {
+        lastError = error;
+        await wait(450 * (attempt + 1));
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('주변 정보를 가져오지 못했습니다.');
+  })();
+
+  nearbySearchInFlight.set(cacheKey, request);
+
+  try {
+    const results = await request;
+    nearbySearchCache.set(cacheKey, results);
+    return results;
+  } finally {
+    nearbySearchInFlight.delete(cacheKey);
+  }
 }
