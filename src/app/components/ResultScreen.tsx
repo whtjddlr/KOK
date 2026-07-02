@@ -835,6 +835,17 @@ export function ResultScreen({
   );
   const stationAccent = stationProfile.primaryLine?.color ?? '#12B886';
   const stationMarker = stationProfile.primaryLine?.marker ?? 'KoK';
+  const stationNameLength = Array.from(winner.name.replace(/\s/g, '')).length;
+  const stationNameSizeClass =
+    stationNameLength >= 9
+      ? 'text-[1.45rem] sm:text-[2.7rem]'
+      : stationNameLength >= 7
+        ? 'text-[1.75rem] sm:text-[3.1rem]'
+        : stationNameLength >= 6
+          ? 'text-[2.05rem] sm:text-[3.45rem]'
+          : stationNameLength >= 5
+            ? 'text-[2.35rem] sm:text-[4rem]'
+            : 'text-[2.8rem] sm:text-6xl';
   const shouldShowParkingInfo =
     travelMode === 'car' ||
     (travelMode === 'preferred' &&
@@ -1162,7 +1173,7 @@ export function ResultScreen({
                 </div>
 
                 <div className="min-w-0 text-center">
-                  <div className="mx-auto max-w-[14rem] truncate text-[2.8rem] font-black leading-none text-[#16241D] sm:max-w-[22rem] sm:text-6xl">
+                  <div className={`mx-auto max-w-full whitespace-nowrap font-black leading-none text-[#16241D] ${stationNameSizeClass}`}>
                     {winner.name}
                   </div>
                 </div>
