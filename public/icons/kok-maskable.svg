@@ -1,7 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="KoK">
-  <rect width="512" height="512" fill="#1f2a44"/>
-  <circle cx="256" cy="238" r="150" fill="#ff7468"/>
-  <circle cx="256" cy="238" r="112" fill="#fff6ef"/>
-  <path d="M256 112c-48 0-86 37-86 82 0 61 86 140 86 140s86-79 86-140c0-45-38-82-86-82Zm0 118c-21 0-38-16-38-36s17-36 38-36 38 16 38 36-17 36-38 36Z" fill="#1f2a44"/>
-  <text x="256" y="412" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="74" font-weight="800" fill="#ffffff">KoK</text>
+  <defs>
+    <linearGradient id="kok-mask-bg" x1="64" y1="52" x2="454" y2="464" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#20304f"/>
+      <stop offset="1" stop-color="#101a30"/>
+    </linearGradient>
+    <linearGradient id="kok-mask-pin" x1="204" y1="162" x2="316" y2="334" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff8a76"/>
+      <stop offset="1" stop-color="#ff4f62"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#kok-mask-bg)"/>
+  <path d="M136 154c48 10 82 38 116 92" fill="none" stroke="#5dd9d0" stroke-width="30" stroke-linecap="round"/>
+  <path d="M376 154c-48 10-82 38-116 92" fill="none" stroke="#8d7cff" stroke-width="30" stroke-linecap="round"/>
+  <path d="M130 358c54-14 91-46 127-104" fill="none" stroke="#ffd166" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="124" cy="152" r="38" fill="#f8fbf7" stroke="#5dd9d0" stroke-width="12"/>
+  <circle cx="388" cy="152" r="38" fill="#f8fbf7" stroke="#8d7cff" stroke-width="12"/>
+  <circle cx="121" cy="366" r="38" fill="#f8fbf7" stroke="#ffd166" stroke-width="12"/>
+  <circle cx="256" cy="256" r="122" fill="#f8fbf7"/>
+  <path d="M256 152c-56 0-98 42-98 96 0 70 98 144 98 144s98-74 98-144c0-54-42-96-98-96Z" fill="url(#kok-mask-pin)"/>
+  <circle cx="256" cy="242" r="39" fill="#17233c"/>
+  <path d="M214 196c16-21 41-34 70-33 26 1 50 13 65 33-18-10-39-16-62-16-30 0-55 6-73 16Z" fill="#ffb1a5" opacity=".82"/>
 </svg>

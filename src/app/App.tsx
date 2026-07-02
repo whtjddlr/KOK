@@ -8,6 +8,7 @@ import { ProfileSheet } from './components/ProfileSheet';
 import {
   AuthUser,
   ProfileSettingsInput,
+  deleteAccount,
   loadSessionUser,
   signOut,
   subscribeToAuthChanges,
@@ -56,6 +57,7 @@ function isStandaloneApp() {
   const navigatorWithStandalone = window.navigator as Navigator & { standalone?: boolean };
 
   return (
+    window.navigator.userAgent.includes('KoK-iOS') ||
     window.matchMedia('(display-mode: standalone)').matches ||
     navigatorWithStandalone.standalone === true
   );
@@ -116,7 +118,7 @@ function InstallAppButton() {
         onClick={() => {
           void handleInstallClick();
         }}
-        className="fixed left-4 top-4 z-50 inline-flex h-11 items-center gap-2 rounded-full border border-white/80 bg-white/92 px-4 text-sm font-extrabold tracking-[-0.03em] text-[#1f2a44] shadow-[0_12px_30px_rgba(26,26,46,0.14)] backdrop-blur-md transition-transform active:scale-95"
+        className="fixed left-4 top-4 z-50 inline-flex h-11 items-center gap-2 rounded-full border border-white/80 bg-white/92 px-4 text-sm font-extrabold tracking-normal text-[#17233c] shadow-[0_12px_30px_rgba(23,35,60,0.14)] backdrop-blur-md transition-transform active:scale-95"
         aria-label="KoK 앱 설치"
       >
         <Download className="h-4 w-4" />
@@ -124,8 +126,8 @@ function InstallAppButton() {
       </button>
 
       {guideOpen && (
-        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-[#1f2a44]/30 px-4 pb-4 backdrop-blur-sm sm:items-center sm:pb-0">
-          <section className="w-full max-w-[420px] rounded-[1.75rem] bg-white p-6 text-[#1f2a44] shadow-[0_30px_80px_rgba(26,26,46,0.24)]">
+        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-[#17233c]/30 px-4 pb-4 backdrop-blur-sm sm:items-center sm:pb-0">
+          <section className="w-full max-w-[420px] rounded-[1.75rem] bg-white p-6 text-[#17233c] shadow-[0_30px_80px_rgba(23,35,60,0.24)]">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-bold text-[#ff7468]">KoK 설치</p>
@@ -134,7 +136,7 @@ function InstallAppButton() {
               <button
                 type="button"
                 onClick={() => setGuideOpen(false)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#f5f1eb] text-[#1f2a44]"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#eef7f3] text-[#17233c]"
                 aria-label="설치 안내 닫기"
               >
                 <X className="h-5 w-5" />
@@ -537,13 +539,6 @@ export default function App() {
     }
   };
 
-  const handleContinueAsGuest = () => {
-    setActiveRoom(null);
-    syncRoomUrl(null);
-    setCurrentParticipants([]);
-    setCurrentScreen('planner');
-  };
-
   const handleCreateRoomFromHome = () => {
     if (!currentUser) {
       openAuth('login');
@@ -909,14 +904,38 @@ export default function App() {
     return result;
   };
 
+  const handleAccountDelete = async () => {
+    if (!currentUser) {
+      return { error: '로그인이 필요해요.' };
+    }
+
+    const result = await deleteAccount(currentUser);
+
+    if (result.error) {
+      return result;
+    }
+
+    setCurrentUserIfChanged(null);
+    setProfileOpen(false);
+    setActiveRoom(null);
+    setOwnedRooms([]);
+    setSelectedWinner(null);
+    setDrawProof(null);
+    setCurrentParticipants([]);
+    setRoomError(null);
+    syncRoomUrl(null);
+    setCurrentScreen('home');
+
+    return {};
+  };
+
   return (
-    <div className="min-h-screen w-full bg-[#f5f1eb] text-[#1f2a44]">
+    <div className="min-h-screen w-full bg-[#f8fbf7] text-[#17233c]">
       {currentScreen === 'home' && <InstallAppButton />}
 
       {currentScreen === 'home' && (
         <HomeScreen
           currentUser={currentUser}
-          onContinueAsGuest={handleContinueAsGuest}
           onCreateRoom={handleCreateRoomFromHome}
           createdRooms={ownedRooms}
           isLoadingCreatedRooms={isLoadingOwnedRooms}
@@ -946,6 +965,18 @@ export default function App() {
           currentUserHomeLocation={currentUser?.homeLocation ?? null}
           onlineRoom={activeRoom}
           onOpenProfile={currentUser ? openProfile : undefined}
+          onUpdateHomeLocation={
+            currentUser
+              ? (homeLocation) =>
+                  handleProfileSave({
+                    name: currentUser.name,
+                    avatarUrl: currentUser.avatarUrl,
+                    gender: currentUser.gender,
+                    preferences: currentUser.preferences,
+                    homeLocation,
+                  })
+              : undefined
+          }
           initialParticipants={currentParticipants}
           selectedCategory={selectedCategory}
           onCategoryChange={setSelectedCategory}
@@ -966,6 +997,7 @@ export default function App() {
           selectionMode={selectionMode}
           currentUser={currentUser}
           routeSnapshot={selectedRouteSnapshot ?? activeRoom?.selectedRouteSnapshot ?? null}
+          onlineRoomCode={activeRoom?.code ?? null}
           redrawControl={
             activeRoom
               ? {
@@ -1001,6 +1033,7 @@ export default function App() {
         currentUser={currentUser}
         onClose={() => setProfileOpen(false)}
         onSave={handleProfileSave}
+        onDeleteAccount={handleAccountDelete}
       />
     </div>
   );

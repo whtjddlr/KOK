@@ -1,7 +1,11 @@
-const CACHE_NAME = "kok-pwa-v1";
+const CACHE_NAME = "kok-pwa-v3";
 const APP_SHELL = [
   "/",
+  "/landing",
+  "/invite",
   "/index.html",
+  "/apple-app-site-association",
+  "/.well-known/apple-app-site-association",
   "/manifest.webmanifest",
   "/icons/kok-icon.svg",
   "/icons/kok-icon-192.png",

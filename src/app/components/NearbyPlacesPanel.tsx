@@ -1,4 +1,4 @@
-import { ExternalLink, LoaderCircle, MapPin, Sparkles } from 'lucide-react';
+import { ExternalLink, MapPin, Sparkles } from 'lucide-react';
 import { Candidate, NearbyPlaceCategory, NearbyPlaceSection } from '../types';
 import { buildNaverMapSearchLink } from '../lib/naver-links';
 
@@ -59,9 +59,17 @@ export function NearbyPlacesPanel({
       </div>
 
       {status === 'loading' && (
-        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-[#faf7f2] px-4 py-3 text-sm text-[#6b7280]">
-          <LoaderCircle className="h-4 w-4 animate-spin" />
-          근처 장소를 모으는 중이에요.
+        <div className="kok-loading-card mt-4 rounded-2xl bg-[#faf7f2] px-4 py-3 text-sm text-[#6b7280]">
+          <div className="flex items-center gap-3">
+            <div className="kok-route-loader scale-75">
+              <span />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold text-[#1a1a2e]">근처 장소를 모으는 중이에요</div>
+              <div className="mt-1 text-xs text-[#7a8491]">맛집, 카페, 놀거리 순서로 정리하고 있어요.</div>
+            </div>
+          </div>
+          <div className="mt-3 kok-loading-progress" />
         </div>
       )}
 
@@ -99,7 +107,7 @@ export function NearbyPlacesPanel({
           </div>
 
           {activeSection && (
-            <div className="mt-4 space-y-2">
+            <div className="kok-stagger-list mt-4 space-y-2">
               {activeSection.items.slice(0, compact ? 3 : activeSection.items.length).map((place) => (
                 <div
                   key={place.id}

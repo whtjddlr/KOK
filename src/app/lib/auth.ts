@@ -133,6 +133,7 @@ export const preferenceKeywordOptions = [
 const USERS_KEY = 'randommeet.auth.users';
 const SESSION_KEY = 'randommeet.auth.session';
 const PROFILE_SETTINGS_KEY_PREFIX = 'randommeet.profile.';
+const SAVED_FRIENDS_KEY_PREFIX = 'randommeet.saved-friends.';
 const PROFILE_BASE_SELECT = 'id, email, name, favorite_categories, vibe, favorite_keywords';
 const PROFILE_HOME_SELECT = 'home_location, home_latitude, home_longitude, home_location_source';
 const SYNTHETIC_EMAIL_DOMAIN = 'drop.local';
@@ -422,6 +423,15 @@ function persistStoredProfileSettings(
   }
 
   window.localStorage.setItem(getProfileSettingsKey(userId), JSON.stringify(input));
+}
+
+function clearStoredUserArtifacts(userId: string) {
+  if (!canUseStorage() || !userId) {
+    return;
+  }
+
+  window.localStorage.removeItem(getProfileSettingsKey(userId));
+  window.localStorage.removeItem(`${SAVED_FRIENDS_KEY_PREFIX}${userId}`);
 }
 
 async function hashPassword(password: string) {
@@ -764,6 +774,67 @@ export async function signOut() {
   }
 
   persistSession(null);
+}
+
+export async function deleteAccount(currentUser: AuthUser) {
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabaseBrowserClient();
+
+    if (!supabase) {
+      return { error: 'Supabase 클라이언트를 초기화하지 못했어요.' };
+    }
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError || !session?.access_token) {
+      return { error: '로그인 정보를 다시 확인해 주세요.' };
+    }
+
+    let response: Response;
+
+    try {
+      response = await fetch('/api/account-delete', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId: currentUser.id }),
+      });
+    } catch {
+      return { error: '계정 삭제 서버에 연결하지 못했어요.' };
+    }
+
+    const body = await response.json().catch(() => ({} as { message?: string }));
+
+    if (!response.ok) {
+      return {
+        error:
+          typeof body.message === 'string' && body.message
+            ? body.message
+            : '계정을 삭제하지 못했어요.',
+      };
+    }
+
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch {
+      // 삭제된 계정의 로컬 세션 정리는 실패해도 다음 화면 흐름을 막지 않는다.
+    }
+
+    clearStoredUserArtifacts(currentUser.id);
+    return {};
+  }
+
+  const users = readStoredUsers();
+  persistStoredUsers(users.filter((user) => user.id !== currentUser.id));
+  persistSession(null);
+  clearStoredUserArtifacts(currentUser.id);
+
+  return {};
 }
 
 export async function updateProfileSettings(

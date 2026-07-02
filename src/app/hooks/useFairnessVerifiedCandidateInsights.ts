@@ -217,8 +217,8 @@ export function useFairnessVerifiedCandidateInsights(
 
         if (!liveRouteCount) {
           setStatus('error');
-          setMessage('실제 경로를 받지 못해 예상 이동시간 기준으로 후보를 보여줘요.');
-          setError('실제 경로를 받지 못했어요.');
+          setMessage('예상 이동시간 기준으로 후보를 보여줘요.');
+          setError('예상 이동시간 기준으로 안내 중이에요.');
           return;
         }
 
@@ -240,7 +240,7 @@ export function useFairnessVerifiedCandidateInsights(
 
         setVerifiedInsights(limitedInsights);
         setStatus('error');
-        setMessage('실제 경로 재검증이 지연되어 예상 이동시간 기준으로 후보를 보여줘요.');
+        setMessage('예상 이동시간 기준으로 후보를 보여줘요.');
         setError(
           verifyError instanceof Error
             ? verifyError.message

@@ -89,19 +89,19 @@ function getTransitFallbackMessage(message: string | null, partial: boolean) {
 
   if (hasOdsayNoRoute) {
     return partial
-      ? '일부 대중교통 경로는 실시간 응답이 없어 예상값으로 보정했습니다.'
-      : '대중교통 실시간 경로를 못 받아서 예상 이동시간으로 보정했습니다.';
+      ? '일부 대중교통 경로는 예상 이동시간 기준으로 안내합니다.'
+      : '대중교통 예상 이동시간 기준으로 안내합니다.';
   }
 
   if (message) {
     return partial
-      ? `일부 대중교통 경로는 예상값으로 보정했습니다. ${message}`
-      : message;
+      ? '일부 대중교통 경로는 예상 이동시간 기준으로 안내합니다.'
+      : '대중교통 예상 이동시간 기준으로 안내합니다.';
   }
 
   return partial
-    ? '일부 대중교통 경로는 응답이 없어 예상값으로 보정했습니다.'
-    : '대중교통 경로를 가져오지 못해 예상값으로 안내 중입니다.';
+    ? '일부 대중교통 경로는 예상 이동시간 기준으로 안내합니다.'
+    : '대중교통 예상 이동시간 기준으로 안내합니다.';
 }
 
 export function useWinnerTravelInfo(
@@ -216,9 +216,7 @@ export function useWinnerTravelInfo(
 
         setLiveTransitTravelInfo(transitTravelInfo);
         setTransitStatus('error');
-        setTransitError(
-          getReasonMessage(error) ?? '대중교통 경로를 가져오지 못해 예상값으로 안내 중입니다.',
-        );
+        setTransitError('대중교통 예상 이동시간 기준으로 안내합니다.');
       });
 
     return () => {
@@ -275,7 +273,7 @@ export function useWinnerTravelInfo(
         if (!liveCount) {
           setTravelInfo(fallbackCarTravelInfo);
           setStatus('error');
-          setError(firstRouteError ?? '자동차 경로를 가져오지 못해 현재는 예상값으로 안내 중입니다.');
+          setError('자동차 예상 이동시간 기준으로 안내합니다.');
           return;
         }
 
@@ -285,9 +283,7 @@ export function useWinnerTravelInfo(
         setError(
           liveCount === merged.length
             ? null
-            : firstRouteError
-              ? `일부 자동차 경로는 예상값으로 보정했습니다. ${firstRouteError}`
-              : '일부 자동차 경로는 응답이 없어 예상값으로 보정했습니다.',
+            : '일부 자동차 경로는 예상 이동시간 기준으로 안내합니다.',
         );
       })
       .catch((error) => {
@@ -297,9 +293,7 @@ export function useWinnerTravelInfo(
 
         setTravelInfo(fallbackCarTravelInfo);
         setStatus('error');
-        setError(
-          getReasonMessage(error) ?? '자동차 경로를 가져오지 못해 현재는 예상값으로 안내 중입니다.',
-        );
+        setError('자동차 예상 이동시간 기준으로 안내합니다.');
       });
 
     return () => {

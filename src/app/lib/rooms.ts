@@ -526,14 +526,12 @@ export function getRoomShareUrl(code: string) {
   const publicOrigin = import.meta.env.VITE_PUBLIC_APP_URL?.trim() || 'https://kok-meet.vercel.app';
 
   if (typeof window === 'undefined') {
-    return `${publicOrigin}?room=${encodeURIComponent(code)}`;
+    return `${publicOrigin.replace(/\/+$/, '')}/invite?room=${encodeURIComponent(code)}`;
   }
 
-  const isLocalPreview =
-    window.location.protocol === 'file:' ||
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1';
-  const url = new URL(isLocalPreview ? publicOrigin : window.location.href);
+  const url = new URL(publicOrigin);
+  url.pathname = '/invite';
+  url.hash = '';
   url.searchParams.set('room', code);
   return url.toString();
 }

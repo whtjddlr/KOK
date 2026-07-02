@@ -215,20 +215,6 @@ export interface CandidateInsight {
   farthestDuration: number;
 }
 
-export interface Settlement {
-  from: string;
-  to: string;
-  amount: number;
-}
-
-export interface ParticipantSettlement {
-  participant: Participant;
-  travelCost: number;
-  shouldPay: number;
-  paid: number;
-  balance: number;
-}
-
 export interface DrawPlan {
   winner: CandidateInsight;
   finalists: CandidateInsight[];

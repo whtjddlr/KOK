@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, CheckCircle2, LoaderCircle, MapPin, Search, Trash2, X } from 'lucide-react';
+import { Camera, CheckCircle2, ExternalLink, LoaderCircle, MapPin, Search, Trash2, X } from 'lucide-react';
 import {
   AuthUser,
   MAX_FAVORITE_CATEGORIES,
@@ -29,6 +29,7 @@ interface ProfileSheetProps {
   currentUser: AuthUser | null;
   onClose: () => void;
   onSave: (input: ProfileSettingsInput) => Promise<{ user?: AuthUser; error?: string }>;
+  onDeleteAccount: () => Promise<{ error?: string }>;
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
@@ -104,7 +105,13 @@ async function createAvatarPreview(file: File) {
   return canvas.toDataURL('image/jpeg', 0.82);
 }
 
-export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileSheetProps) {
+export function ProfileSheet({
+  open,
+  currentUser,
+  onClose,
+  onSave,
+  onDeleteAccount,
+}: ProfileSheetProps) {
   const [name, setName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [favoriteCategories, setFavoriteCategories] = useState<UserPreferenceCategory[]>([]);
@@ -118,6 +125,8 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [isAvatarProcessing, setIsAvatarProcessing] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -140,6 +149,8 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
     setError(null);
     setSuccess(null);
     setIsSaving(false);
+    setDeleteConfirmOpen(false);
+    setIsDeletingAccount(false);
   }, [currentUser, open]);
 
   if (!open || !currentUser) {
@@ -300,6 +311,32 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
     setLocationResults([]);
     setError(null);
     setSuccess('기본 출발지가 선택됐어요. 저장을 눌러 확정해 주세요.');
+  };
+
+  const handleDeleteAccount = async () => {
+    setIsDeletingAccount(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const result = await withTimeout(
+        onDeleteAccount(),
+        10000,
+        '계정 삭제 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.',
+      );
+
+      if (result.error) {
+        setError(result.error);
+      }
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : '계정을 삭제하지 못했어요.',
+      );
+    } finally {
+      setIsDeletingAccount(false);
+    }
   };
 
   return (
@@ -610,12 +647,73 @@ export function ProfileSheet({ open, currentUser, onClose, onSave }: ProfileShee
         <button
           type="button"
           onClick={handleSave}
-          disabled={isSaving}
+          disabled={isSaving || isDeletingAccount}
           className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#1f2a44] text-white transition-transform active:scale-95 disabled:opacity-60"
         >
           {isSaving && <LoaderCircle className="h-4 w-4 animate-spin" />}
           프로필 저장
         </button>
+
+        <div className="mt-5 rounded-[24px] border border-[#ffe1dc] bg-[#fff8f6] p-4">
+          <div className="text-sm font-semibold text-[#9f3d2f]">계정 삭제</div>
+          <div className="mt-1 text-xs leading-relaxed text-[#b36a5d]">
+            프로필, 저장된 친구, 내가 만든 약속방 참여 기록이 삭제되며 되돌릴 수 없어요.
+          </div>
+
+          {deleteConfirmOpen ? (
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => {
+                  void handleDeleteAccount();
+                }}
+                disabled={isDeletingAccount || isSaving}
+                className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-2xl bg-[#d94a38] px-4 text-sm font-semibold text-white transition-transform active:scale-95 disabled:opacity-60"
+              >
+                {isDeletingAccount && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                영구 삭제
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmOpen(false)}
+                disabled={isDeletingAccount}
+                className="h-10 flex-1 rounded-2xl bg-white px-4 text-sm font-semibold text-[#8a594f] transition-transform active:scale-95 disabled:opacity-60"
+              >
+                취소
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteConfirmOpen(true);
+                setError(null);
+                setSuccess(null);
+              }}
+              disabled={isSaving}
+              className="mt-3 h-10 w-full rounded-2xl bg-white px-4 text-sm font-semibold text-[#b84535] transition-transform active:scale-95 disabled:opacity-60"
+            >
+              계정 삭제하기
+            </button>
+          )}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs font-semibold text-[#8a94a2]">
+          <a
+            href="/privacy.html"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-[#f5f1eb] hover:text-[#1f2a44]"
+          >
+            개인정보처리방침
+            <ExternalLink className="h-3 w-3" />
+          </a>
+          <a
+            href="/support.html"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-[#f5f1eb] hover:text-[#1f2a44]"
+          >
+            지원
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
       </div>
     </div>
   );

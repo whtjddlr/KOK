@@ -1,13 +1,13 @@
 {
   "name": "KoK",
   "short_name": "KoK",
-  "description": "KoK meeting place picker",
+  "description": "친구들의 출발지를 모아 약속 장소 후보를 비교하고 가볍게 뽑아주는 KoK 앱",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#fbf7f0",
-  "theme_color": "#1f2a44",
+  "background_color": "#f8fbf7",
+  "theme_color": "#17233c",
   "categories": ["navigation", "food", "social"],
   "icons": [
     {
@@ -37,9 +37,14 @@
   ],
   "shortcuts": [
     {
-      "name": "Start KoK",
-      "short_name": "Start",
+      "name": "KoK 시작하기",
+      "short_name": "시작",
       "url": "/"
+    },
+    {
+      "name": "KoK 소개 보기",
+      "short_name": "소개",
+      "url": "/landing"
     }
   ]
 }

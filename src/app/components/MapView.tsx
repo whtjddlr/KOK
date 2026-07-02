@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Crosshair, ExternalLink, MapPin, Minus, Plus, Search, X } from 'lucide-react';
+import { ExternalLink, LoaderCircle, LocateFixed, MapPin, Minus, Plus, Search, X } from 'lucide-react';
 import { Candidate, Coordinates, NearbyPlace, Participant, TravelInfo } from '../types';
 import { loadNaverMapSdk } from '../lib/naver-map';
 import { buildNaverMapReservationLink, buildNaverMapSearchLink } from '../lib/naver-links';
@@ -100,7 +100,7 @@ function createNearbyPlaceIcon(label: string, category: NearbyPlace['category'])
 }
 
 function getRouteDistanceLabel(route: TravelInfo) {
-  return route.source === 'estimated' ? '실경로 확인 전' : `${route.distance}km`;
+  return route.source === 'estimated' ? '예상 거리' : `${route.distance}km`;
 }
 
 function createRouteInfoIcon(participantName: string, route: TravelInfo, color: string) {
@@ -205,6 +205,18 @@ function buildViewportSignature(
   });
 }
 
+function getMapLocationErrorMessage(error: GeolocationPositionError) {
+  if (error.code === error.PERMISSION_DENIED) {
+    return '위치 권한을 허용하면 현재 위치로 이동할 수 있어요.';
+  }
+
+  if (error.code === error.POSITION_UNAVAILABLE) {
+    return '현재 위치를 찾지 못했어요.';
+  }
+
+  return '위치를 가져오는 데 시간이 걸렸어요.';
+}
+
 export function MapView({
   participants,
   candidates = [],
@@ -223,7 +235,6 @@ export function MapView({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
-  const fitViewRef = useRef<(() => void) | null>(null);
   const mapListenersRef = useRef<any[]>([]);
   const lastViewportSignatureRef = useRef<string>('');
   const lastWheelZoomAtRef = useRef(0);
@@ -232,6 +243,8 @@ export function MapView({
   const [error, setError] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number | null>(null);
   const [activeDetail, setActiveDetail] = useState<ActiveMapDetail | null>(null);
+  const [mapCenterError, setMapCenterError] = useState<string | null>(null);
+  const [isLocatingMapCenter, setIsLocatingMapCenter] = useState(false);
 
   const reachableCandidates = useMemo(
     () => candidates.filter((candidate) => reachableCandidateIds.includes(candidate.id)),
@@ -577,15 +590,12 @@ export function MapView({
       setZoomLevel(map.getZoom());
     };
 
-    fitViewRef.current = fitMapToData;
-
     if (lastViewportSignatureRef.current !== viewportSignature) {
       fitMapToData();
       lastViewportSignatureRef.current = viewportSignature;
     }
 
     return () => {
-      fitViewRef.current = null;
       overlaysRef.current.forEach((overlay) => overlay.setMap(null));
       overlaysRef.current = [];
     };
@@ -717,8 +727,54 @@ export function MapView({
     setZoomLevel(nextZoom);
   };
 
-  const handleResetView = () => {
-    fitViewRef.current?.();
+  const handleMoveToCurrentLocation = () => {
+    if (!mapRef.current || !window.naver?.maps) {
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      setMapCenterError('이 브라우저에서는 현재 위치 기능을 지원하지 않아요.');
+      return;
+    }
+
+    setIsLocatingMapCenter(true);
+    setMapCenterError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        if (!mapRef.current || !window.naver?.maps) {
+          setIsLocatingMapCenter(false);
+          return;
+        }
+
+        const map = mapRef.current;
+        const nextCenter = new window.naver.maps.LatLng(
+          position.coords.latitude,
+          position.coords.longitude,
+        );
+        const currentZoom = map.getZoom?.() ?? 11;
+        const nextZoom = Math.max(14, currentZoom);
+
+        if (typeof map.panTo === 'function') {
+          map.panTo(nextCenter);
+        } else {
+          map.setCenter(nextCenter);
+        }
+
+        map.setZoom(nextZoom, true);
+        setZoomLevel(map.getZoom?.() ?? nextZoom);
+        setIsLocatingMapCenter(false);
+      },
+      (locationError) => {
+        setMapCenterError(getMapLocationErrorMessage(locationError));
+        setIsLocatingMapCenter(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000,
+      },
+    );
   };
 
   if (error) {
@@ -735,9 +791,18 @@ export function MapView({
       <div ref={containerRef} className="absolute inset-0 h-full w-full" />
 
       {!sdkReady && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.92),rgba(240,244,248,0.95))]">
-          <div className="rounded-[1.25rem] bg-white/90 px-4 py-3 text-sm text-[#76777e] shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-sm">
-            네이버 지도 불러오는 중...
+        <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.92),rgba(240,244,248,0.95))] px-6">
+          <div className="kok-loading-card w-full max-w-[320px] rounded-[1.5rem] bg-white/90 px-5 py-4 text-sm text-[#76777e] shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-sm">
+            <div className="flex items-center gap-3">
+              <div className="kok-route-loader scale-90">
+                <span />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-bold text-[#17233c]">지도 여는 중</div>
+                <div className="mt-1 text-xs">후보와 출발지를 지도 위에 올리고 있어요.</div>
+              </div>
+            </div>
+            <div className="mt-4 kok-loading-progress" />
           </div>
         </div>
       )}
@@ -859,19 +924,28 @@ export function MapView({
         </button>
         <button
           type="button"
-          onClick={handleResetView}
+          onClick={handleMoveToCurrentLocation}
+          disabled={isLocatingMapCenter || !sdkReady}
           className="flex h-12 w-12 items-center justify-center rounded-full border border-[#314062] bg-[#1f2a44]/92 text-white shadow-[0_10px_30px_rgba(26,26,46,0.16)] backdrop-blur-sm transition-transform active:scale-95"
-          aria-label="전체 범위 보기"
+          aria-label="현재 위치로 이동"
         >
-          <Crosshair className="h-4 w-4" />
+          {isLocatingMapCenter ? (
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+          ) : (
+            <LocateFixed className="h-4 w-4" />
+          )}
         </button>
       </div>
 
-      {zoomLevel !== null && !activeNearbyPlaceDetail && (
+      {mapCenterError && !activeNearbyPlaceDetail ? (
+        <div className="pointer-events-none absolute bottom-4 left-4 max-w-[240px] rounded-2xl bg-white/92 px-3 py-2 text-[11px] leading-relaxed text-[#a24b41] shadow-sm backdrop-blur-sm">
+          {mapCenterError}
+        </div>
+      ) : zoomLevel !== null && !activeNearbyPlaceDetail ? (
         <div className="pointer-events-none absolute bottom-4 left-4 rounded-full bg-white/88 px-3 py-1.5 text-[11px] text-[#6b7280] shadow-sm backdrop-blur-sm">
           Zoom {zoomLevel}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -6,9 +6,7 @@ import {
   DrawPlan,
   MeetCategoryKey,
   Participant,
-  ParticipantSettlement,
   SelectionModeKey,
-  Settlement,
   ThrillLevel,
   TravelInfo,
 } from '../types';
@@ -24,7 +22,6 @@ const CAR_FUEL_PRICE_PER_KM = 170;
 const BASE_FARE = 1500;
 const FARE_PER_KM = 110;
 const MIN_TRAVEL_MINUTES = 12;
-const MAX_SETTLEMENT_ADJUSTMENT = 3000;
 const INCHEON_KEYWORDS = [
   '인천',
   '송도',
@@ -3243,91 +3240,5 @@ export function buildDrawPlan(
     finalists,
     sequence: [...rapidShuffle, ...finalStretch],
     fallbackNotice,
-  };
-}
-
-export function buildSettlementPreview(
-  winner: Candidate,
-  participants: Participant[],
-  payments: Record<string, number>,
-  totalCost: number,
-  travelInfoOverride?: TravelInfo[],
-) {
-  const travelInfo =
-    travelInfoOverride && travelInfoOverride.length
-      ? participants.map((participant) => {
-          return (
-            travelInfoOverride.find((info) => info.participantId === participant.id) ??
-            getParticipantEstimatedTravelInfo(participant, winner)
-          );
-        })
-      : participants.map((participant) => getParticipantEstimatedTravelInfo(participant, winner));
-  const perPersonBase = participants.length ? totalCost / participants.length : 0;
-  const averageTravelCost =
-    travelInfo.reduce((sum, info) => sum + info.cost, 0) / Math.max(travelInfo.length, 1);
-
-  const rows: ParticipantSettlement[] = participants.map((participant) => {
-    const travelCost =
-      travelInfo.find((info) => info.participantId === participant.id)?.cost ?? averageTravelCost;
-    const rawAdjustment = travelCost - averageTravelCost;
-    const adjustment = Math.max(
-      -MAX_SETTLEMENT_ADJUSTMENT,
-      Math.min(MAX_SETTLEMENT_ADJUSTMENT, Math.round(rawAdjustment * 0.6)),
-    );
-    const shouldPay = Math.max(0, Math.round(perPersonBase - adjustment));
-    const paid = payments[participant.id] ?? 0;
-
-    return {
-      participant,
-      travelCost,
-      shouldPay,
-      paid,
-      balance: paid - shouldPay,
-    };
-  });
-
-  const debtors = rows
-    .filter((row) => row.balance < 0)
-    .map((row) => ({ name: row.participant.name, remaining: Math.abs(row.balance) }));
-  const creditors = rows
-    .filter((row) => row.balance > 0)
-    .map((row) => ({ name: row.participant.name, remaining: row.balance }));
-
-  const settlements: Settlement[] = [];
-  let debtorIndex = 0;
-  let creditorIndex = 0;
-
-  while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
-    const debtor = debtors[debtorIndex];
-    const creditor = creditors[creditorIndex];
-    const amount = Math.min(debtor.remaining, creditor.remaining);
-
-    if (amount > 0) {
-      settlements.push({
-        from: debtor.name,
-        to: creditor.name,
-        amount,
-      });
-    }
-
-    debtor.remaining -= amount;
-    creditor.remaining -= amount;
-
-    if (debtor.remaining <= 0) {
-      debtorIndex += 1;
-    }
-
-    if (creditor.remaining <= 0) {
-      creditorIndex += 1;
-    }
-  }
-
-  return {
-    travelInfo,
-    rows,
-    settlements,
-    averageTravelCost: Math.round(averageTravelCost),
-    totalPaid: Object.values(payments).reduce((sum, amount) => sum + amount, 0),
-    totalExpected: Math.round(rows.reduce((sum, row) => sum + row.shouldPay, 0)),
   };
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  CalendarPlus,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -50,6 +51,7 @@ import { useWinnerTravelInfo } from '../hooks/useWinnerTravelInfo';
 import { buildNaverMapReservationLink, buildNaverMapSearchLink } from '../lib/naver-links';
 import { buildGroupGenderContext } from '../lib/gender';
 import { fetchNearbySearchResults, type NearbySearchItem } from '../lib/naver-local-search';
+import { getRoomShareUrl } from '../lib/rooms';
 
 interface ResultScreenProps {
   winner: Candidate;
@@ -58,6 +60,7 @@ interface ResultScreenProps {
   selectionMode: SelectionModeKey;
   currentUser?: AuthUser | null;
   routeSnapshot?: WinnerRouteSnapshot | null;
+  onlineRoomCode?: string | null;
   redrawControl?: {
     isOnlineRoom: boolean;
     voteCount: number;
@@ -272,7 +275,7 @@ function getTravelSourceLabel(mode: TravelMode, travelInfo: TravelInfo[]) {
 }
 
 function getTravelDistanceLabel(info: TravelInfo) {
-  return info.source === 'estimated' ? '실경로 확인 전' : `${info.distance}km`;
+  return info.source === 'estimated' ? '예상 거리' : `${info.distance}km`;
 }
 
 function formatRouteStepDistance(distance?: number) {
@@ -337,11 +340,11 @@ function getRouteDetailMeta(route: TravelInfo) {
 function getMissingRouteStepMessage(route: TravelInfo) {
   if (route.source === 'estimated') {
     return route.mode === 'car'
-      ? '자동차 상세 경로를 받지 못해 임시 예상 시간만 표시 중이에요.'
-      : '대중교통 상세 경로를 받지 못해 임시 예상 시간만 표시 중이에요.';
+      ? '예상 자동차 이동시간 기준으로 요약 표시 중이에요.'
+      : '예상 대중교통 이동시간 기준으로 요약 표시 중이에요.';
   }
 
-  return '실시간 경로는 받았지만 단계 안내가 비어 있어 요약만 표시 중이에요.';
+  return '경로 단계는 요약으로 표시 중이에요.';
 }
 
 function getInitialTravelMode(participants: Participant[]): DisplayTravelMode {
@@ -355,6 +358,42 @@ function getInitialTravelMode(participants: Participant[]): DisplayTravelMode {
   return hasCar ? 'car' : 'transit';
 }
 
+function toDateTimeLocalValue(date: Date) {
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return offsetDate.toISOString().slice(0, 16);
+}
+
+function getDefaultCalendarDateTime() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(19, 0, 0, 0);
+  return toDateTimeLocalValue(date);
+}
+
+function formatIcsDate(date: Date) {
+  return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+}
+
+function escapeIcsValue(value: string) {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/,/g, '\\,')
+    .replace(/;/g, '\\;');
+}
+
+function downloadTextFile(fileName: string, content: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function ResultScreen({
   winner,
   participants,
@@ -362,6 +401,7 @@ export function ResultScreen({
   selectionMode: _selectionMode,
   currentUser = null,
   routeSnapshot = null,
+  onlineRoomCode = null,
   redrawControl = null,
   onBack,
   onNewDraw,
@@ -388,6 +428,8 @@ export function ResultScreen({
   const [travelMode, setTravelMode] = useState<DisplayTravelMode>(initialTravelMode);
   const [expandedTravelKeys, setExpandedTravelKeys] = useState<string[]>([]);
   const [copiedPlaceShare, setCopiedPlaceShare] = useState(false);
+  const [calendarDateTime, setCalendarDateTime] = useState(getDefaultCalendarDateTime);
+  const [calendarSaved, setCalendarSaved] = useState(false);
   const [copiedRecommendationShareId, setCopiedRecommendationShareId] = useState<string | null>(null);
   const [visibleRecommendationCount, setVisibleRecommendationCount] = useState(6);
   const [parkingPlaces, setParkingPlaces] = useState<ParkingPlace[]>([]);
@@ -575,6 +617,7 @@ export function ResultScreen({
     setIsConfirmed(false);
     setTravelMode(initialTravelMode);
     setExpandedTravelKeys([]);
+    setCalendarSaved(false);
   }, [winner.id, selectedCategory, currentUser, initialTravelMode, groupGenderContext]);
 
   useEffect(() => {
@@ -675,6 +718,7 @@ export function ResultScreen({
 
   const handleSharePlace = async () => {
     const placeUrl = buildNaverMapSearchLink(winner.name);
+    const roomUrl = onlineRoomCode ? getRoomShareUrl(onlineRoomCode) : null;
     const shareText = [
       `KoK 약속장소: ${winner.name}`,
       participants.length
@@ -683,6 +727,7 @@ export function ResultScreen({
       selectedTravelSummary.averageDuration
         ? `평균 이동시간: ${selectedTravelSummary.averageDuration}분`
         : null,
+      roomUrl ? `약속방: ${roomUrl}` : null,
     ]
       .filter(Boolean)
       .join('\n');
@@ -709,6 +754,53 @@ export function ResultScreen({
         // 공유 실패는 사용 흐름을 막지 않는다.
       }
     }
+  };
+
+  const handleDownloadCalendar = () => {
+    const startDate = new Date(calendarDateTime);
+
+    if (Number.isNaN(startDate.getTime())) {
+      return;
+    }
+
+    const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+    const placeUrl = buildNaverMapSearchLink(winner.name);
+    const roomUrl = onlineRoomCode ? getRoomShareUrl(onlineRoomCode) : null;
+    const participantNames = participants.map((participant) => participant.name).join(', ');
+    const description = [
+      `KoK이 추천한 약속 장소: ${winner.name}`,
+      participantNames ? `참여자: ${participantNames}` : null,
+      selectedTravelSummary.averageDuration
+        ? `평균 이동시간: ${selectedTravelSummary.averageDuration}분`
+        : null,
+      `지도: ${placeUrl}`,
+      roomUrl ? `약속방: ${roomUrl}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const safeWinnerName = winner.name.replace(/[\\/:*?"<>|]/g, '').trim() || 'kok-place';
+    const ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//KoK//Meeting Place//KO',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'BEGIN:VEVENT',
+      `UID:kok-${winner.id}-${startDate.getTime()}@kok-meet.vercel.app`,
+      `DTSTAMP:${formatIcsDate(new Date())}`,
+      `DTSTART:${formatIcsDate(startDate)}`,
+      `DTEND:${formatIcsDate(endDate)}`,
+      `SUMMARY:${escapeIcsValue(`KoK 약속 - ${winner.name}`)}`,
+      `LOCATION:${escapeIcsValue(winner.name)}`,
+      `DESCRIPTION:${escapeIcsValue(description)}`,
+      `URL:${placeUrl}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+
+    downloadTextFile(`KoK-${safeWinnerName}.ics`, ics, 'text/calendar;charset=utf-8');
+    setCalendarSaved(true);
+    window.setTimeout(() => setCalendarSaved(false), 1800);
   };
 
   const handleShareRecommendationPlace = async (place: ContentRecommendationItem) => {
@@ -752,7 +844,7 @@ export function ResultScreen({
   }, [contentCategory, detailQuery, winner.id]);
 
   return (
-    <div className="min-h-screen bg-[#fbf8fb] pb-28 text-[#1f2a44]">
+    <div className="kok-screen-enter min-h-screen bg-[#fbf8fb] pb-28 text-[#1f2a44]">
       <header className="sticky top-0 z-30 flex items-center justify-between rounded-b-[2rem] bg-[#f5f1eb]/88 px-6 py-4 shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-md">
         <button className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1f2a44] text-white shadow-sm">
           <Compass className="h-5 w-5" />
@@ -860,6 +952,37 @@ export function ResultScreen({
               {redrawStatusText}
             </div>
           )}
+
+          <div className="mt-4 rounded-2xl border border-[#eef2f6] bg-[#f8fafc] px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-[#1f2a44]">
+              <CalendarPlus className="h-4 w-4 text-[#ff7b6b]" />
+              일정 메모
+            </div>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                type="datetime-local"
+                value={calendarDateTime}
+                onChange={(event) => {
+                  setCalendarDateTime(event.target.value);
+                  setCalendarSaved(false);
+                }}
+                className="min-h-12 flex-1 rounded-2xl border border-[#e5e9ec] bg-white px-4 text-sm font-semibold text-[#1f2a44] outline-none transition focus:border-[#ff7b6b]"
+                aria-label="약속 날짜와 시간"
+              />
+              <button
+                type="button"
+                onClick={handleDownloadCalendar}
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-[#1f2a44] px-5 text-sm font-bold text-white transition-transform active:scale-95"
+              >
+                {calendarSaved ? (
+                  <CheckCircle2 className="h-4 w-4 text-[#9ff3b8]" />
+                ) : (
+                  <CalendarPlus className="h-4 w-4" />
+                )}
+                {calendarSaved ? '저장됨' : '캘린더에 추가'}
+              </button>
+            </div>
+          </div>
 
           {preferenceSummary ? (
             <div className="mt-4 flex flex-wrap gap-2">
@@ -1094,8 +1217,16 @@ export function ResultScreen({
               </div>
 
               {parkingStatus === 'loading' ? (
-                <div className="rounded-2xl bg-white px-4 py-3 text-xs text-[#7a8491]">
-                  목적지 주변 주차장을 찾는 중이에요.
+                <div className="kok-loading-card rounded-2xl bg-white px-4 py-3 text-xs text-[#7a8491]">
+                  <div className="flex items-center gap-3">
+                    <div className="kok-route-loader scale-75">
+                      <span />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-[#1f2a44]">주차장을 찾는 중이에요</div>
+                      <div className="mt-1 kok-loading-progress" />
+                    </div>
+                  </div>
                 </div>
               ) : null}
 
@@ -1135,22 +1266,27 @@ export function ResultScreen({
           ) : null}
 
           {travelMode === 'transit' && transitStatus !== 'ready' ? (
-            <div className="mt-4 rounded-2xl bg-[#f8fbfd] px-4 py-3 text-xs text-[#6b7280]">
+            <div className="kok-loading-card mt-4 rounded-2xl bg-[#f8fbfd] px-4 py-3 text-xs text-[#6b7280]">
               {transitError ?? '대중교통 경로를 확인하는 중입니다.'}
+              {!transitError && <div className="mt-2 kok-loading-progress" />}
             </div>
           ) : null}
 
           {travelMode === 'car' && carTravelStatus !== 'ready' ? (
-            <div className="mt-4 rounded-2xl bg-[#f8fbfd] px-4 py-3 text-xs text-[#6b7280]">
+            <div className="kok-loading-card mt-4 rounded-2xl bg-[#f8fbfd] px-4 py-3 text-xs text-[#6b7280]">
               {carTravelError ?? '자동차 경로를 확인하는 중입니다.'}
+              {!carTravelError && <div className="mt-2 kok-loading-progress" />}
             </div>
           ) : null}
 
           {travelMode === 'preferred' &&
           (transitStatus !== 'ready' || carTravelStatus !== 'ready') ? (
-            <div className="mt-4 rounded-2xl bg-[#f8fbfd] px-4 py-3 text-xs text-[#6b7280]">
+            <div className="kok-loading-card mt-4 rounded-2xl bg-[#f8fbfd] px-4 py-3 text-xs text-[#6b7280]">
               {[transitError, carTravelError].filter(Boolean).join(' ') ||
                 '각자 선택한 이동수단 기준으로 경로를 확인하는 중입니다.'}
+              {![transitError, carTravelError].filter(Boolean).length && (
+                <div className="mt-2 kok-loading-progress" />
+              )}
             </div>
           ) : null}
         </section>
@@ -1305,13 +1441,24 @@ export function ResultScreen({
           </div>
 
           {recommendationStatus === 'loading' && (
-            <div className="mt-5 rounded-2xl bg-[#faf7f2] px-4 py-4 text-sm text-[#6b7280]">
-              {winner.name} 근처 인기 장소를 찾는 중이에요.
+            <div className="kok-loading-card mt-5 rounded-2xl bg-[#faf7f2] px-4 py-4 text-sm text-[#6b7280]">
+              <div className="flex items-center gap-3">
+                <div className="kok-route-loader scale-75">
+                  <span />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-[#1f2a44]">
+                    {winner.name} 근처 인기 장소를 찾는 중이에요
+                  </div>
+                  <div className="mt-1 text-xs text-[#7a8491]">후보를 모아서 보기 좋은 순서로 정리하고 있어요.</div>
+                </div>
+              </div>
+              <div className="mt-3 kok-loading-progress" />
             </div>
           )}
 
           {recommendationStatus === 'ready' && recommendationItems.length > 0 && (
-            <div className="mt-5 grid gap-3">
+            <div className="kok-stagger-list mt-5 grid gap-3">
               {recommendationItems.slice(0, visibleRecommendationCount).map((item) => {
                 const active = selectedPlace?.id === item.id;
 
