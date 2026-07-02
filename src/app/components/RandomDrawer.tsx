@@ -74,7 +74,7 @@ const drawVariantAccents: Record<DrawVariant, string> = {
   'card-shuffle': '#f59e0b',
   'shell-game': '#a78bfa',
   'ladder-game': '#22c55e',
-  'spin-wheel': '#5dd9d0',
+  'spin-wheel': '#0CA178',
   'dart-map': '#ef4444',
 };
 
@@ -293,10 +293,10 @@ function shouldAddLadderBar(bars: LadderBar[], nextBar: LadderBar) {
 }
 
 const wheelColors = [
-  '#ff7b6b',
+  '#12B886',
   '#f59e0b',
   '#22c55e',
-  '#5dd9d0',
+  '#0CA178',
   '#60a5fa',
   '#a78bfa',
   '#f472b6',
@@ -497,7 +497,7 @@ function PinMarker({
     <div className="relative flex flex-col items-center">
       {(active || winner) && (
         <motion.div
-          className="absolute top-8 h-10 w-10 rounded-full bg-[#ff7b6b]/24"
+          className="absolute top-8 h-10 w-10 rounded-full bg-[#12B886]/24"
           animate={{ scale: [0.55, 1.8, 1.15], opacity: [0.6, 0.04, 0.2] }}
           transition={{
             duration: winner ? 1.1 : 0.7,
@@ -507,21 +507,21 @@ function PinMarker({
         />
       )}
       <div
-        className={`relative flex h-12 w-12 items-center justify-center rounded-full shadow-[0_14px_28px_rgba(31,42,68,0.18)] ${
+        className={`relative flex h-12 w-12 items-center justify-center rounded-full shadow-[0_14px_28px_rgba(20,35,29,0.18)] ${
           winner
-            ? 'bg-[#ff7b6b] text-white'
+            ? 'bg-[#12B886] text-white'
             : active
-              ? 'bg-[#1f2a44] text-white'
+              ? 'bg-[#16241D] text-white'
               : landed
-                ? 'bg-white text-[#1f2a44]'
-                : 'bg-[#f5f1eb] text-[#6b7280]'
+                ? 'bg-white text-[#16241D]'
+                : 'bg-[#FFFFFF] text-[#6E7C75]'
         }`}
       >
         <MapPin className="h-6 w-6" strokeWidth={2.4} />
       </div>
       <div
         className={`mt-[-2px] h-2.5 w-2.5 rotate-45 rounded-[3px] ${
-          winner ? 'bg-[#ff7b6b]' : active ? 'bg-[#1f2a44]' : 'bg-white'
+          winner ? 'bg-[#12B886]' : active ? 'bg-[#16241D]' : 'bg-white'
         }`}
       />
     </div>
@@ -555,8 +555,8 @@ function PinDropStage({
 }) {
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e7edf2] bg-[#eef3f7] shadow-inner">
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(31,42,68,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(31,42,68,0.06)_1px,transparent_1px)] bg-[size:34px_34px]" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_18%,rgba(255,123,107,0.12),transparent_28%),radial-gradient(circle_at_78%_72%,rgba(78,205,196,0.14),transparent_25%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(20,35,29,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(20,35,29,0.06)_1px,transparent_1px)] bg-[size:34px_34px]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_18%,rgba(18,184,134,0.12),transparent_28%),radial-gradient(circle_at_78%_72%,rgba(78,205,196,0.14),transparent_25%)]" />
 
       <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
         <motion.div
@@ -568,7 +568,7 @@ function PinDropStage({
             <path
               d="M7 24 L20 15 L35 19 L47 13 L61 21 L76 15 L91 27 L87 43 L92 60 L80 80 L63 88 L49 82 L31 90 L15 79 L12 61 L7 45 Z"
               fill="rgba(255,255,255,0.62)"
-              stroke="rgba(31,42,68,0.08)"
+              stroke="rgba(20,35,29,0.08)"
               strokeWidth="0.8"
             />
             <path
@@ -581,18 +581,18 @@ function PinDropStage({
             <path
               d="M15 34 L27 30 L40 36 L54 30 L69 36 L83 32"
               fill="none"
-              stroke="rgba(31,42,68,0.15)"
+              stroke="rgba(20,35,29,0.15)"
               strokeWidth="0.9"
               strokeDasharray="2 3"
             />
             <path
               d="M17 72 L31 64 L45 69 L59 61 L74 67 L88 60"
               fill="none"
-              stroke="rgba(31,42,68,0.13)"
+              stroke="rgba(20,35,29,0.13)"
               strokeWidth="0.9"
               strokeDasharray="2 3"
             />
-            <text x="43" y="49" fontSize="3.2" fill="rgba(31,42,68,0.28)">
+            <text x="43" y="49" fontSize="3.2" fill="rgba(20,35,29,0.28)">
               RIVER
             </text>
           </svg>
@@ -623,7 +623,7 @@ function PinDropStage({
                   <motion.div
                     initial={{ opacity: 0, y: 5, scale: 0.94 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
-                    className="absolute left-1/2 top-full mt-1 -translate-x-1/2 rounded-full bg-white/95 px-3 py-1.5 text-xs text-[#1f2a44] shadow-sm"
+                    className="absolute left-1/2 top-full mt-1 -translate-x-1/2 rounded-full bg-white/95 px-3 py-1.5 text-xs text-[#16241D] shadow-sm"
                   >
                     {point.insight.candidate.name}
                   </motion.div>
@@ -660,7 +660,7 @@ function PinDropStage({
             initial={{ opacity: 0.7, scale: 0.22 }}
             animate={{ opacity: 0, scale: 3 }}
             transition={{ duration: 0.58, ease: 'easeOut' }}
-            className="absolute h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#ff7b6b] bg-[#ff7b6b]/20"
+            className="absolute h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#12B886] bg-[#12B886]/20"
             style={{ left: `${winnerPoint.x}%`, top: `${winnerPoint.y}%` }}
           />
         ) : null}
@@ -690,7 +690,7 @@ function CardShuffleStage({
 
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e8e0d6] bg-[#171f35] shadow-inner">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(255,123,107,0.24),transparent_28%),radial-gradient(circle_at_78%_70%,rgba(78,205,196,0.2),transparent_24%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(18,184,134,0.24),transparent_28%),radial-gradient(circle_at_78%_70%,rgba(78,205,196,0.2),transparent_24%)]" />
       <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[size:28px_28px]" />
 
       <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
@@ -709,8 +709,8 @@ function CardShuffleStage({
                 key={`${insight.candidate.id}-${index}`}
                 className={`absolute h-56 w-40 rounded-[1.6rem] border p-4 shadow-[0_28px_55px_rgba(0,0,0,0.28)] ${
                   isWinner
-                    ? 'border-[#ff7b6b] bg-[#ff7b6b] text-white'
-                    : 'border-white/24 bg-white text-[#1f2a44]'
+                    ? 'border-[#12B886] bg-[#12B886] text-white'
+                    : 'border-white/24 bg-white text-[#16241D]'
                 }`}
                 initial={{ x: offset * 54, y: 18, rotate: offset * 9, opacity: 0 }}
                 animate={{
@@ -783,14 +783,14 @@ function DartMapStage({
 
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e4e8ee] bg-[#edf5ef] shadow-inner">
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(31,42,68,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(31,42,68,0.06)_1px,transparent_1px)] bg-[size:32px_32px]" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_48%_48%,rgba(255,255,255,0.72),transparent_18%),radial-gradient(circle_at_20%_30%,rgba(78,205,196,0.18),transparent_25%),radial-gradient(circle_at_78%_65%,rgba(255,123,107,0.16),transparent_24%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(20,35,29,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(20,35,29,0.06)_1px,transparent_1px)] bg-[size:32px_32px]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_48%_48%,rgba(255,255,255,0.72),transparent_18%),radial-gradient(circle_at_20%_30%,rgba(78,205,196,0.18),transparent_25%),radial-gradient(circle_at_78%_65%,rgba(18,184,134,0.16),transparent_24%)]" />
 
       <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
-          <path d="M8 30 C23 16, 36 25, 47 21 S74 8, 91 25 L88 78 C71 91, 55 77, 42 84 S20 92, 9 70 Z" fill="rgba(255,255,255,0.56)" stroke="rgba(31,42,68,0.1)" />
+          <path d="M8 30 C23 16, 36 25, 47 21 S74 8, 91 25 L88 78 C71 91, 55 77, 42 84 S20 92, 9 70 Z" fill="rgba(255,255,255,0.56)" stroke="rgba(20,35,29,0.1)" />
           <path d="M12 62 C28 48, 36 68, 51 55 S73 42, 89 56" fill="none" stroke="rgba(78,205,196,0.5)" strokeWidth="2.2" strokeLinecap="round" />
-          <path d="M18 38 L36 33 L50 39 L66 31 L84 36" fill="none" stroke="rgba(31,42,68,0.15)" strokeWidth="1" strokeDasharray="2 3" />
+          <path d="M18 38 L36 33 L50 39 L66 31 L84 36" fill="none" stroke="rgba(20,35,29,0.15)" strokeWidth="1" strokeDasharray="2 3" />
         </svg>
 
         {visiblePoints.map((point) => {
@@ -806,10 +806,10 @@ function DartMapStage({
               <motion.div
                 className={`h-5 w-5 rounded-full border-4 shadow-sm ${
                   isWinner
-                    ? 'border-[#ff7b6b] bg-white'
+                    ? 'border-[#12B886] bg-white'
                     : isActive
-                      ? 'border-[#1f2a44] bg-white'
-                      : 'border-white bg-[#1f2a44]/52'
+                      ? 'border-[#16241D] bg-white'
+                      : 'border-white bg-[#16241D]/52'
                 }`}
                 animate={{ scale: isWinner ? [1, 1.55, 1.08] : isActive ? 1.2 : 1 }}
                 transition={{ duration: 0.45, repeat: isWinner ? 2 : 0 }}
@@ -834,8 +834,8 @@ function DartMapStage({
             transition={{ type: 'spring', stiffness: 180, damping: 16, mass: 0.7 }}
           >
             <div className="relative">
-              <MousePointer2 className="h-16 w-16 fill-[#ff7b6b] text-[#ff7b6b] drop-shadow-[0_14px_24px_rgba(255,123,107,0.28)]" />
-              <Crosshair className="absolute -bottom-2 -right-2 h-8 w-8 rounded-full bg-white p-1.5 text-[#1f2a44] shadow-sm" />
+              <MousePointer2 className="h-16 w-16 fill-[#12B886] text-[#12B886] drop-shadow-[0_14px_24px_rgba(18,184,134,0.28)]" />
+              <Crosshair className="absolute -bottom-2 -right-2 h-8 w-8 rounded-full bg-white p-1.5 text-[#16241D] shadow-sm" />
             </div>
           </motion.div>
         )}
@@ -845,7 +845,7 @@ function DartMapStage({
             initial={{ opacity: 0.75, scale: 0.2 }}
             animate={{ opacity: 0, scale: 3.4 }}
             transition={{ duration: 0.6, ease: 'easeOut' }}
-            className="absolute h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#ff7b6b] bg-[#ff7b6b]/16"
+            className="absolute h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#12B886] bg-[#12B886]/16"
             style={{ left: `${winnerPoint.x}%`, top: `${winnerPoint.y}%` }}
           />
         )}
@@ -879,12 +879,12 @@ function RadarStage({
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:34px_34px]" />
 
       <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
-        <div className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#4ecdc4]/20" />
-        <div className="absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#4ecdc4]/20" />
-        <div className="absolute left-1/2 top-1/2 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#4ecdc4]/20" />
+        <div className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#0CA178]/20" />
+        <div className="absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#0CA178]/20" />
+        <div className="absolute left-1/2 top-1/2 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#0CA178]/20" />
 
         <motion.div
-          className="absolute left-1/2 top-1/2 h-[34rem] w-1 origin-top rounded-full bg-[linear-gradient(180deg,#4ecdc4,transparent)]"
+          className="absolute left-1/2 top-1/2 h-[34rem] w-1 origin-top rounded-full bg-[linear-gradient(180deg,#0CA178,transparent)]"
           animate={{ rotate: phase === 'revealed' ? 520 : 1440 }}
           transition={{ duration: phase === 'revealed' ? 0.6 : 3.8, ease: 'easeOut' }}
         />
@@ -901,7 +901,7 @@ function RadarStage({
             >
               <motion.div
                 className={`h-4 w-4 rounded-full ${
-                  isWinner ? 'bg-[#ff7b6b]' : isActive ? 'bg-[#4ecdc4]' : 'bg-white/40'
+                  isWinner ? 'bg-[#12B886]' : isActive ? 'bg-[#0CA178]' : 'bg-white/40'
                 }`}
                 animate={{
                   scale: isWinner ? [1, 1.9, 1.2] : isActive ? [1, 1.35, 1] : 1,
@@ -910,7 +910,7 @@ function RadarStage({
                 transition={{ duration: 0.5, repeat: isWinner ? 2 : isActive ? 2 : 0 }}
               />
               {(isActive || isWinner) && (
-                <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded-full bg-white px-3 py-1 text-xs text-[#1f2a44] shadow-sm">
+                <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded-full bg-white px-3 py-1 text-xs text-[#16241D] shadow-sm">
                   {point.insight.candidate.name}
                 </div>
               )}
@@ -925,7 +925,7 @@ function RadarStage({
             initial={{ opacity: 0, scale: 0.7 }}
             animate={{ opacity: 1, scale: 1 }}
           >
-            <ScanLine className="h-20 w-20 text-[#ff7b6b] drop-shadow-[0_0_22px_rgba(255,123,107,0.48)]" />
+            <ScanLine className="h-20 w-20 text-[#12B886] drop-shadow-[0_0_22px_rgba(18,184,134,0.48)]" />
           </motion.div>
         )}
 
@@ -954,7 +954,7 @@ function ShellGameStage({
 
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e7ddff] bg-[#f7f2ff] shadow-inner">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_18%,rgba(167,139,250,0.22),transparent_30%),radial-gradient(circle_at_82%_72%,rgba(255,123,107,0.16),transparent_24%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_18%,rgba(167,139,250,0.22),transparent_30%),radial-gradient(circle_at_82%_72%,rgba(18,184,134,0.16),transparent_24%)]" />
       <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
         <div className="absolute inset-x-4 top-8 grid grid-cols-3 gap-4">
           {Array.from({ length: 3 }, (_, index) => {
@@ -971,11 +971,11 @@ function ShellGameStage({
                 transition={{ duration: 0.7, repeat: phase === 'revealed' ? 0 : 2, repeatDelay: 0.12 }}
               >
                 <div
-                  className={`h-36 w-full rounded-b-[4rem] rounded-t-[1.4rem] shadow-[0_24px_48px_rgba(31,42,68,0.18)] ${
+                  className={`h-36 w-full rounded-b-[4rem] rounded-t-[1.4rem] shadow-[0_24px_48px_rgba(20,35,29,0.18)] ${
                     isPicked && phase === 'revealed' ? 'bg-[#a78bfa]' : 'bg-white'
                   }`}
                 />
-                <div className="mt-3 rounded-full bg-[#1f2a44]/10 px-3 py-1 text-xs text-[#1f2a44]">
+                <div className="mt-3 rounded-full bg-[#16241D]/10 px-3 py-1 text-xs text-[#16241D]">
                   {index + 1}
                 </div>
                 {isPicked && phase === 'revealed' && (
@@ -984,10 +984,10 @@ function ShellGameStage({
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     className="absolute top-40 rounded-2xl bg-white px-4 py-3 text-center shadow-sm"
                   >
-                    <div className="text-lg font-semibold tracking-[-0.03em] text-[#1a1a2e]">
+                    <div className="text-lg font-semibold tracking-[-0.03em] text-[#16241D]">
                       {plan.winner.candidate.name}
                     </div>
-                    <div className="mt-1 text-xs text-[#8a94a2]">선택한 컵</div>
+                    <div className="mt-1 text-xs text-[#9AA8A1]">선택한 컵</div>
                   </motion.div>
                 )}
               </motion.div>
@@ -996,7 +996,7 @@ function ShellGameStage({
         </div>
 
         {phase !== 'revealed' && (
-          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-white/86 px-5 py-2 text-sm text-[#1f2a44] shadow-sm">
+          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-white/86 px-5 py-2 text-sm text-[#16241D] shadow-sm">
             {currentInsight.candidate.name}
           </div>
         )}
@@ -1052,7 +1052,7 @@ function CardBackGraphic({
         <div
           className="absolute inset-[0.45rem] overflow-hidden rounded-[1rem]"
           style={{
-            background: `radial-gradient(circle at 22% 18%, rgba(255,255,255,0.5), transparent 28%), linear-gradient(145deg, ${accent}, #1f2a44 72%)`,
+            background: `radial-gradient(circle at 22% 18%, rgba(255,255,255,0.5), transparent 28%), linear-gradient(145deg, ${accent}, #16241D 72%)`,
           }}
         >
           <div className="absolute inset-0 opacity-35 [background:radial-gradient(circle_at_center,transparent_0_28%,rgba(255,255,255,0.9)_29%,transparent_31%),linear-gradient(45deg,rgba(255,255,255,0.18)_1px,transparent_1px)] bg-[size:26px_26px,12px_12px]" />
@@ -1121,8 +1121,8 @@ function TarotChoiceCard({
       aria-label={`${choiceLabel} 선택`}
     >
       <motion.div
-        className={`relative h-full rounded-[1.05rem] border bg-white p-1.5 shadow-[0_14px_28px_rgba(31,42,68,0.12)] [transform-style:preserve-3d] ${
-          active && revealed ? 'border-[#1f2a44]' : 'border-[#e8edf3]'
+        className={`relative h-full rounded-[1.05rem] border bg-white p-1.5 shadow-[0_14px_28px_rgba(20,35,29,0.12)] [transform-style:preserve-3d] ${
+          active && revealed ? 'border-[#16241D]' : 'border-[#E4EFE9]'
         }`}
         animate={{ rotateY: showFront ? 180 : 0 }}
         transition={{ duration: 0.82, ease: [0.16, 1, 0.3, 1] }}
@@ -1132,7 +1132,7 @@ function TarotChoiceCard({
           style={{ backfaceVisibility: 'hidden' }}
         >
           <div
-            className="relative h-full overflow-hidden rounded-[0.78rem] bg-[#1f2a44]"
+            className="relative h-full overflow-hidden rounded-[0.78rem] bg-[#16241D]"
             style={{
               boxShadow: `inset 0 0 0 1px ${accent}22`,
             }}
@@ -1141,13 +1141,13 @@ function TarotChoiceCard({
             <div className="absolute inset-[1rem] rounded-[0.45rem] border border-white/10" />
             <div className="absolute left-3 top-2.5 text-center text-[13px] font-black leading-none text-white">
               <div>{rank}</div>
-              <div className="mt-0.5 text-[11px]" style={{ color: isRedSuit ? '#ff7b6b' : '#ffffff' }}>
+              <div className="mt-0.5 text-[11px]" style={{ color: isRedSuit ? '#12B886' : '#ffffff' }}>
                 {suit}
               </div>
             </div>
             <div className="absolute bottom-2.5 right-3 rotate-180 text-center text-[13px] font-black leading-none text-white">
               <div>{rank}</div>
-              <div className="mt-0.5 text-[11px]" style={{ color: isRedSuit ? '#ff7b6b' : '#ffffff' }}>
+              <div className="mt-0.5 text-[11px]" style={{ color: isRedSuit ? '#12B886' : '#ffffff' }}>
                 {suit}
               </div>
             </div>
@@ -1168,7 +1168,7 @@ function TarotChoiceCard({
 
         <div
           className={`absolute inset-0 flex flex-col justify-between rounded-[1.05rem] border p-3 text-center [backface-visibility:hidden] ${
-            active && revealed ? 'bg-[#1f2a44] text-white' : 'bg-white text-[#1f2a44]'
+            active && revealed ? 'bg-[#16241D] text-white' : 'bg-white text-[#16241D]'
           }`}
           style={{
             backfaceVisibility: 'hidden',
@@ -1176,7 +1176,7 @@ function TarotChoiceCard({
           }}
         >
           <div
-            className={`text-left text-base font-black leading-none ${active && revealed ? 'text-white/80' : isRedSuit ? 'text-[#ff7b6b]' : 'text-[#1f2a44]'}`}
+            className={`text-left text-base font-black leading-none ${active && revealed ? 'text-white/80' : isRedSuit ? 'text-[#12B886]' : 'text-[#16241D]'}`}
           >
             <div>{rank}</div>
             <div className="mt-0.5 text-sm">{suit}</div>
@@ -1191,7 +1191,7 @@ function TarotChoiceCard({
               {slot.insight.candidate.name}
             </div>
           </motion.div>
-          <div className={`self-end rotate-180 text-base font-black leading-none ${active && revealed ? 'text-white/80' : isRedSuit ? 'text-[#ff7b6b]' : 'text-[#1f2a44]'}`}>
+          <div className={`self-end rotate-180 text-base font-black leading-none ${active && revealed ? 'text-white/80' : isRedSuit ? 'text-[#12B886]' : 'text-[#16241D]'}`}>
             <div>{rank}</div>
             <div className="mt-0.5 text-sm">{suit}</div>
           </div>
@@ -1276,10 +1276,13 @@ function WheelFace({
 }) {
   const count = Math.max(lock.slots.length, 1);
   const selectedSlot = selectedIndex === null ? null : lock.slots[selectedIndex] ?? null;
+  const wheelSize = 'min(18rem, 72vw, 43dvh)';
+  const wheelLabelRadius = 'min(6.8rem, 26vw, 16dvh)';
+  const wheelCenterSize = 'min(7rem, 28vw, 16dvh)';
 
   return (
     <div className="relative mx-auto w-full max-w-sm">
-      <div className="absolute left-1/2 top-0 z-20 h-0 w-0 -translate-x-1/2 -translate-y-2 border-x-[13px] border-t-[24px] border-x-transparent border-t-[#1f2a44] drop-shadow-[0_8px_12px_rgba(31,42,68,0.2)]" />
+      <div className="absolute left-1/2 top-0 z-20 h-0 w-0 -translate-x-1/2 -translate-y-2 border-x-[13px] border-t-[24px] border-x-transparent border-t-[#16241D] drop-shadow-[0_8px_12px_rgba(20,35,29,0.2)]" />
       <div
         role={onPointerDown ? 'slider' : 'img'}
         aria-label="드래그해서 돌림판 돌리기"
@@ -1288,7 +1291,8 @@ function WheelFace({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
-        className={`relative mx-auto flex h-72 w-72 touch-none select-none items-center justify-center rounded-full border-[10px] border-white bg-white shadow-[0_28px_70px_rgba(31,42,68,0.18)] ${
+        style={{ height: wheelSize, width: wheelSize }}
+        className={`relative mx-auto flex touch-none select-none items-center justify-center rounded-full border-[10px] border-white bg-white shadow-[0_28px_70px_rgba(20,35,29,0.18)] ${
           onPointerDown ? 'cursor-grab active:cursor-grabbing' : ''
         }`}
       >
@@ -1312,10 +1316,10 @@ function WheelFace({
               <div
                 key={`wheel-label-${slot.id}`}
                 className={`absolute left-1/2 top-1/2 flex h-8 w-8 items-center justify-center rounded-full text-xs font-black shadow-sm ${
-                  active && revealed ? 'bg-[#1f2a44] text-white' : 'bg-white/88 text-[#1f2a44]'
+                  active && revealed ? 'bg-[#16241D] text-white' : 'bg-white/88 text-[#16241D]'
                 }`}
                 style={{
-                  transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-6.8rem) rotate(${-angle}deg)`,
+                  transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(calc(${wheelLabelRadius} * -1)) rotate(${-angle}deg)`,
                 }}
               >
                 {index + 1}
@@ -1325,7 +1329,10 @@ function WheelFace({
           <div className="absolute inset-[4.15rem] rounded-full border border-white/45 bg-white/16" />
         </motion.div>
 
-        <div className="relative z-10 flex h-28 w-28 flex-col items-center justify-center rounded-full border border-white/80 bg-white/94 px-3 text-center shadow-[0_18px_38px_rgba(31,42,68,0.18)]">
+        <div
+          style={{ height: wheelCenterSize, width: wheelCenterSize }}
+          className="relative z-10 flex flex-col items-center justify-center rounded-full border border-white/80 bg-white/94 px-3 text-center shadow-[0_18px_38px_rgba(20,35,29,0.18)]"
+        >
           {revealed && selectedSlot ? (
             <motion.div
               initial={{ opacity: 0, y: 8, scale: 0.96 }}
@@ -1336,15 +1343,15 @@ function WheelFace({
               <div className="text-[10px] font-black" style={{ color: accent }}>
                 {selectedIndex !== null ? `${selectedIndex + 1}번` : '결과'}
               </div>
-              <div className="mt-1 line-clamp-2 text-base font-black leading-tight tracking-[-0.05em] text-[#1f2a44]">
+              <div className="mt-1 line-clamp-2 text-sm font-black leading-tight tracking-[-0.05em] text-[#16241D] sm:text-base">
                 {selectedSlot.insight.candidate.name}
               </div>
             </motion.div>
           ) : isSpinning ? (
             <>
-              <div className="text-xs font-bold text-[#8a94a2]">돌아가는 중</div>
+              <div className="text-xs font-bold text-[#9AA8A1]">돌아가는 중</div>
               <motion.div
-                className="mt-2 h-2 w-14 overflow-hidden rounded-full bg-[#f0edf0]"
+                className="mt-2 h-2 w-14 overflow-hidden rounded-full bg-[#F0F5F2]"
                 animate={{ opacity: [0.65, 1, 0.65] }}
                 transition={{ duration: 0.75, repeat: 2 }}
               >
@@ -1353,40 +1360,42 @@ function WheelFace({
             </>
           ) : (
             <>
-              <div className="text-xs font-bold text-[#8a94a2]">
+              <div className="text-xs font-bold text-[#9AA8A1]">
                 {isDragging ? '힘 조절 중' : '드래그'}
               </div>
-              <div className="mt-1 text-2xl font-black text-[#1f2a44]">돌림</div>
+              <div className="mt-1 text-xl font-black text-[#16241D] sm:text-2xl">돌림</div>
             </>
           )}
         </div>
       </div>
 
-      <div className="mx-auto mt-4 max-w-xs rounded-2xl bg-white/82 px-4 py-3 shadow-sm">
-        <div className="flex items-center justify-between text-xs font-bold text-[#76777e]">
-          <span>세기</span>
-          <span>{Math.round(dragStrength * 100)}%</span>
+      {!revealed && (
+        <div className="mx-auto mt-3 max-w-xs rounded-2xl bg-white/82 px-4 py-2.5 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-bold text-[#6E7C75]">
+            <span>세기</span>
+            <span>{Math.round(dragStrength * 100)}%</span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#e7edf2]">
+            <motion.div
+              className="h-full rounded-full"
+              style={{ backgroundColor: accent }}
+              animate={{ width: `${Math.max(dragStrength * 100, isDragging ? 8 : 0)}%` }}
+              transition={{ duration: 0.14 }}
+            />
+          </div>
         </div>
-        <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#e7edf2]">
-          <motion.div
-            className="h-full rounded-full"
-            style={{ backgroundColor: accent }}
-            animate={{ width: `${Math.max(dragStrength * 100, isDragging ? 8 : 0)}%` }}
-            transition={{ duration: 0.14 }}
-          />
-        </div>
-      </div>
+      )}
 
       {revealed ? (
-        <div className="mt-3 max-h-24 overflow-y-auto rounded-2xl bg-white/70 p-2">
-          <div className="grid grid-cols-2 gap-1.5">
+        <div className="mt-3 overflow-x-auto rounded-2xl bg-white/70 p-2">
+          <div className="flex min-w-max gap-1.5">
             {lock.slots.map((slot, index) => (
               <div
                 key={`wheel-option-${slot.id}`}
-                className={`min-w-0 rounded-full px-2.5 py-1.5 text-[11px] font-semibold ${
+                className={`max-w-[9rem] shrink-0 truncate rounded-full px-2.5 py-1.5 text-[11px] font-semibold ${
                   selectedIndex === index
-                    ? 'bg-[#1f2a44] text-white'
-                    : 'bg-white text-[#1f2a44]'
+                    ? 'bg-[#16241D] text-white'
+                    : 'bg-white text-[#16241D]'
                 }`}
               >
                 <span className="mr-1 font-black">{index + 1}</span>
@@ -1396,7 +1405,7 @@ function WheelFace({
           </div>
         </div>
       ) : (
-        <div className="mt-3 rounded-2xl bg-white/70 px-4 py-3 text-center text-xs font-semibold text-[#76777e] shadow-sm">
+        <div className="mt-2 rounded-2xl bg-white/70 px-4 py-2.5 text-center text-xs font-semibold text-[#6E7C75] shadow-sm">
           잡고 끌었다 놓으면 회전 세기가 정해져요.
         </div>
       )}
@@ -1646,8 +1655,8 @@ function LadderBoard({
                 disabled={!onChoose}
                 className={`flex min-w-0 items-center justify-center rounded-xl border font-bold shadow-sm transition-transform active:scale-95 ${topButtonClass} ${
                   active
-                    ? 'border-[#1f2a44] bg-[#1f2a44] text-white'
-                    : 'border-[#dbe3ea] bg-white text-[#1f2a44] disabled:text-[#1f2a44]'
+                    ? 'border-[#16241D] bg-[#16241D] text-white'
+                    : 'border-[#E4EFE9] bg-white text-[#16241D] disabled:text-[#16241D]'
                 }`}
               >
                 <span className="block truncate px-1">{slot.label}</span>
@@ -1684,7 +1693,7 @@ function LadderBoard({
                   x2={x}
                   y1="0"
                   y2="100"
-                  stroke="rgba(31,42,68,0.38)"
+                  stroke="rgba(20,35,29,0.38)"
                   strokeWidth="1.35"
                   strokeLinecap="round"
                 />
@@ -1702,7 +1711,7 @@ function LadderBoard({
                   x2={x2}
                   y1={bar.y}
                   y2={bar.y}
-                  stroke="rgba(31,42,68,0.38)"
+                  stroke="rgba(20,35,29,0.38)"
                   strokeWidth="1.55"
                   strokeLinecap="round"
                 />
@@ -1749,10 +1758,10 @@ function LadderBoard({
                   revealed ? resultChipClass : hiddenResultChipClass
                 } ${
                   active && revealed
-                    ? 'border-[#1f2a44] bg-[#1f2a44] text-white'
+                    ? 'border-[#16241D] bg-[#16241D] text-white'
                     : revealed
-                      ? 'border-[#dbe3ea] bg-white text-[#1f2a44]'
-                      : 'border-[#edf2f5] bg-white text-[#8a94a2]'
+                      ? 'border-[#E4EFE9] bg-white text-[#16241D]'
+                      : 'border-[#E4EFE9] bg-white text-[#9AA8A1]'
                 }`}
               >
                 {revealed ? (
@@ -1782,11 +1791,11 @@ function LadderBoard({
 function DartGraphic({ compact = false }: { compact?: boolean }) {
   return (
     <div className={`relative ${compact ? 'h-12 w-16' : 'h-20 w-28'} rotate-[-28deg]`}>
-      <div className="absolute left-5 top-1/2 h-1.5 w-16 -translate-y-1/2 rounded-full bg-[#1f2a44] shadow-[0_8px_18px_rgba(0,0,0,0.24)]" />
+      <div className="absolute left-5 top-1/2 h-1.5 w-16 -translate-y-1/2 rounded-full bg-[#16241D] shadow-[0_8px_18px_rgba(0,0,0,0.24)]" />
       <div className="absolute right-2 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[6px] border-l-[18px] border-y-transparent border-l-[#f8fafc]" />
-      <div className="absolute left-0 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[11px] border-r-[28px] border-y-transparent border-r-[#ff7b6b]" />
+      <div className="absolute left-0 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[11px] border-r-[28px] border-y-transparent border-r-[#12B886]" />
       <div className="absolute left-1 top-[calc(50%-13px)] h-0 w-0 border-x-[11px] border-b-[16px] border-x-transparent border-b-[#ffd166]" />
-      <div className="absolute left-1 top-[calc(50%-3px)] h-0 w-0 border-x-[11px] border-t-[16px] border-x-transparent border-t-[#4ecdc4]" />
+      <div className="absolute left-1 top-[calc(50%-3px)] h-0 w-0 border-x-[11px] border-t-[16px] border-x-transparent border-t-[#0CA178]" />
     </div>
   );
 }
@@ -1797,12 +1806,12 @@ function MarkerPenGraphic({ compact = false }: { compact?: boolean }) {
       <div
         className={`absolute left-0 top-1/2 h-0 w-0 -translate-y-1/2 border-y-transparent ${
           compact
-            ? 'border-y-[6px] border-r-[18px] border-r-[#1f2a44]'
-            : 'border-y-[8px] border-r-[24px] border-r-[#1f2a44]'
+            ? 'border-y-[6px] border-r-[18px] border-r-[#16241D]'
+            : 'border-y-[8px] border-r-[24px] border-r-[#16241D]'
         }`}
       />
       <div
-        className={`absolute top-1/2 -translate-y-1/2 rounded-r-full rounded-l-md bg-[#1f2a44] shadow-[0_18px_34px_rgba(31,42,68,0.24)] ${
+        className={`absolute top-1/2 -translate-y-1/2 rounded-r-full rounded-l-md bg-[#16241D] shadow-[0_18px_34px_rgba(20,35,29,0.24)] ${
           compact ? 'left-4 h-5 w-20' : 'left-5 h-7 w-28'
         }`}
       >
@@ -1810,7 +1819,7 @@ function MarkerPenGraphic({ compact = false }: { compact?: boolean }) {
         <div className="absolute bottom-1.5 left-6 right-8 h-1 rounded-full bg-white/22" />
       </div>
       <div
-        className={`absolute top-1/2 -translate-y-1/2 rounded-r-full bg-[#ff7b6b] ${
+        className={`absolute top-1/2 -translate-y-1/2 rounded-r-full bg-[#12B886] ${
           compact ? 'left-[5.7rem] h-7 w-8' : 'left-[7.5rem] h-9 w-11'
         }`}
       />
@@ -1887,35 +1896,35 @@ function MapSnapshotLayer({
         <path
           d="M6 48 L19 41 L32 47 L47 39 L63 45 L79 37 L93 43"
           fill="none"
-          stroke="rgba(31,42,68,0.14)"
+          stroke="rgba(20,35,29,0.14)"
           strokeWidth="0.9"
           strokeDasharray="2 3"
         />
         <path
           d="M8 18 L22 23 L36 18 L51 25 L66 19 L84 24"
           fill="none"
-          stroke="rgba(31,42,68,0.11)"
+          stroke="rgba(20,35,29,0.11)"
           strokeWidth="0.8"
           strokeDasharray="2 3"
         />
-        <text x="13" y="33" fontSize="5" fontWeight="700" fill="rgba(31,42,68,0.3)">
+        <text x="13" y="33" fontSize="5" fontWeight="700" fill="rgba(20,35,29,0.3)">
           은평
         </text>
-        <text x="39" y="45" fontSize="5" fontWeight="700" fill="rgba(31,42,68,0.28)">
+        <text x="39" y="45" fontSize="5" fontWeight="700" fill="rgba(20,35,29,0.28)">
           종로
         </text>
-        <text x="65" y="52" fontSize="5" fontWeight="700" fill="rgba(31,42,68,0.28)">
+        <text x="65" y="52" fontSize="5" fontWeight="700" fill="rgba(20,35,29,0.28)">
           성동
         </text>
-        <text x="45" y="78" fontSize="5" fontWeight="700" fill="rgba(31,42,68,0.28)">
+        <text x="45" y="78" fontSize="5" fontWeight="700" fill="rgba(20,35,29,0.28)">
           용산
         </text>
       </svg>
 
-      <div className="absolute left-3 top-3 rounded-full bg-white/86 px-3 py-1.5 text-[11px] font-semibold text-[#1f2a44] shadow-sm">
+      <div className="absolute left-3 top-3 rounded-full bg-white/86 px-3 py-1.5 text-[11px] font-semibold text-[#16241D] shadow-sm">
         후보 지도 캡처
       </div>
-      <div className="absolute bottom-3 left-3 rounded-full bg-white/88 px-3 py-1.5 text-xs text-[#6b7280] shadow-sm">
+      <div className="absolute bottom-3 left-3 rounded-full bg-white/88 px-3 py-1.5 text-xs text-[#6E7C75] shadow-sm">
         Zoom 11
       </div>
 
@@ -1932,11 +1941,11 @@ function MapSnapshotLayer({
             style={{ left: `${point.x}%`, top: `${point.y}%` }}
           >
             <motion.div
-              className={`relative flex h-6 w-6 items-center justify-center rounded-full border-[3px] shadow-[0_8px_18px_rgba(31,42,68,0.16)] ${
+              className={`relative flex h-6 w-6 items-center justify-center rounded-full border-[3px] shadow-[0_8px_18px_rgba(20,35,29,0.16)] ${
                 isWinner
-                  ? 'border-white bg-[#ff7b6b]'
+                  ? 'border-white bg-[#12B886]'
                   : isActive
-                    ? 'border-white bg-[#1f2a44]'
+                    ? 'border-white bg-[#16241D]'
                     : 'border-white bg-[#4f7cff]'
               }`}
               animate={{
@@ -1947,7 +1956,7 @@ function MapSnapshotLayer({
               <span className="text-[10px] font-bold text-white">{index + 1}</span>
               {isWinner && (
                 <motion.span
-                  className="absolute inset-[-12px] rounded-full border-2 border-[#ff7b6b]"
+                  className="absolute inset-[-12px] rounded-full border-2 border-[#12B886]"
                   initial={{ scale: 0.3, opacity: 0.65 }}
                   animate={{ scale: 1.9, opacity: 0 }}
                   transition={{ duration: 0.8, repeat: 2, ease: 'easeOut' }}
@@ -1958,7 +1967,7 @@ function MapSnapshotLayer({
             {showLabel && (
               <div
                 className={`absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] shadow-sm ${
-                  isWinner ? 'bg-[#ff7b6b] text-white' : 'bg-white/92 text-[#1f2a44]'
+                  isWinner ? 'bg-[#12B886] text-white' : 'bg-white/92 text-[#16241D]'
                 }`}
               >
                 {point.insight.candidate.name}
@@ -1987,17 +1996,17 @@ function createLiveCandidateMarkerIcon(
 ) {
   const isWinner = state === 'winner';
   const isActive = state === 'active';
-  const markerColor = isWinner ? '#ff7b6b' : isActive ? '#1f2a44' : '#2f6df6';
+  const markerColor = isWinner ? '#12B886' : isActive ? '#16241D' : '#0CA178';
   const label = escapeMapLabel(name);
 
   return {
     content: `
       <div style="display:flex;flex-direction:column;align-items:center;gap:5px;transform:translateY(-8px);">
-        <div style="position:relative;display:flex;align-items:center;justify-content:center;width:${isWinner ? 34 : 28}px;height:${isWinner ? 34 : 28}px;border-radius:9999px;background:${markerColor};color:white;border:3px solid rgba(255,255,255,0.96);box-shadow:0 12px 26px rgba(31,42,68,0.22);font-size:12px;font-weight:800;">
+        <div style="position:relative;display:flex;align-items:center;justify-content:center;width:${isWinner ? 34 : 28}px;height:${isWinner ? 34 : 28}px;border-radius:9999px;background:${markerColor};color:white;border:3px solid rgba(255,255,255,0.96);box-shadow:0 12px 26px rgba(20,35,29,0.22);font-size:12px;font-weight:800;">
           ${index + 1}
-          ${isWinner ? '<span style="position:absolute;inset:-12px;border:2px solid rgba(255,123,107,0.72);border-radius:9999px;"></span>' : ''}
+          ${isWinner ? '<span style="position:absolute;inset:-12px;border:2px solid rgba(18,184,134,0.72);border-radius:9999px;"></span>' : ''}
         </div>
-        <div style="max-width:124px;padding:4px 8px;border-radius:9999px;background:${isWinner ? 'rgba(255,123,107,0.96)' : 'rgba(255,255,255,0.94)'};color:${isWinner ? '#ffffff' : '#1f2a44'};font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 8px 18px rgba(31,42,68,0.12);">
+        <div style="max-width:124px;padding:4px 8px;border-radius:9999px;background:${isWinner ? 'rgba(18,184,134,0.96)' : 'rgba(255,255,255,0.94)'};color:${isWinner ? '#ffffff' : '#16241D'};font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 8px 18px rgba(20,35,29,0.12);">
           ${label}
         </div>
       </div>
@@ -2179,7 +2188,7 @@ function LiveCandidateMapLayer({
       {!sdkReady && (
         <MapSnapshotLayer points={points} winnerId={winnerId} activeId={activeId} />
       )}
-      <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-[#1f2a44] shadow-sm">
+      <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-[#16241D] shadow-sm">
         실시간 후보 지도
       </div>
     </div>
@@ -2231,7 +2240,7 @@ function DrawChoiceStage({
           isLadder
             ? 'relative min-h-[22rem] p-1.5 sm:min-h-[24rem] sm:p-2'
             : variant === 'spin-wheel'
-              ? 'relative min-h-[24rem] px-2 py-4 sm:min-h-[26rem] sm:px-4'
+              ? 'relative min-h-[20rem] px-2 py-3 sm:min-h-[26rem] sm:px-4 sm:py-4'
               : 'relative px-1 py-2 sm:px-2'
         }
       >
@@ -2250,7 +2259,7 @@ function DrawChoiceStage({
               type="button"
               onClick={() => onChoose?.(Math.floor(Math.random() * lock.slots.length))}
               disabled={!canChoose}
-              className="absolute bottom-4 left-1/2 inline-flex h-12 -translate-x-1/2 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-5 text-sm font-semibold text-white shadow-[0_18px_34px_rgba(31,42,68,0.22)] transition-transform active:scale-95 disabled:opacity-50"
+              className="absolute bottom-4 left-1/2 inline-flex h-12 -translate-x-1/2 items-center justify-center gap-2 rounded-full bg-[#16241D] px-5 text-sm font-semibold text-white shadow-[0_18px_34px_rgba(20,35,29,0.22)] transition-transform active:scale-95 disabled:opacity-50"
             >
               <Crosshair className="h-4 w-4" />
               {action}
@@ -2320,7 +2329,7 @@ function DrawChoiceStage({
         )}
 
         {!canChoose && waitingMessage ? (
-          <div className="absolute inset-x-4 bottom-4 z-20 rounded-2xl border border-white/80 bg-white/95 px-4 py-3 text-center text-sm font-semibold text-[#1f2a44] shadow-[0_18px_42px_rgba(31,42,68,0.14)]">
+          <div className="absolute inset-x-4 bottom-4 z-20 rounded-2xl border border-white/80 bg-white/95 px-4 py-3 text-center text-sm font-semibold text-[#16241D] shadow-[0_18px_42px_rgba(20,35,29,0.14)]">
             {waitingMessage}
           </div>
         ) : null}
@@ -2400,7 +2409,7 @@ function PickedChoiceStage({
           isLadder
             ? 'min-h-[21.75rem] p-1.5 sm:min-h-[23.5rem] sm:p-2'
             : variant === 'spin-wheel'
-              ? 'min-h-[24rem] justify-between px-2 py-4 sm:min-h-[26rem] sm:px-4'
+              ? 'min-h-[20rem] justify-between px-2 py-3 sm:min-h-[26rem] sm:px-4 sm:py-4'
               : 'min-h-[20rem] justify-between px-1 py-2 sm:min-h-[22rem] sm:px-2'
         }`}
       >
@@ -2546,7 +2555,7 @@ function PickedChoiceStage({
 
               {(phase === 'impact' || isRevealed) && (
                 <motion.div
-                  className="absolute z-10 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#ff7b6b] bg-[#ff7b6b]/18"
+                  className="absolute z-10 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#12B886] bg-[#12B886]/18"
                   style={{ left: `${mapWinnerPoint.x}%`, top: `${mapWinnerPoint.y}%` }}
                   initial={{ opacity: 0.8, scale: 0.18 }}
                   animate={{ opacity: 0, scale: 2.8 }}
@@ -2558,9 +2567,9 @@ function PickedChoiceStage({
                 <motion.div
                   initial={{ opacity: 0, y: 18, scale: 0.96 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  className="absolute bottom-4 left-4 right-4 z-30 rounded-2xl bg-white/94 px-4 py-3 text-center text-[#1a1a2e] shadow-sm backdrop-blur-sm"
+                  className="absolute bottom-4 left-4 right-4 z-30 rounded-2xl bg-white/94 px-4 py-3 text-center text-[#16241D] shadow-sm backdrop-blur-sm"
                 >
-                  <div className="text-xs font-semibold text-[#ff7b6b]">사인펜이 찍은 곳</div>
+                  <div className="text-xs font-semibold text-[#12B886]">사인펜이 찍은 곳</div>
                   <div className="mt-1 text-xl font-bold tracking-[-0.04em]">{candidate.name}</div>
                 </motion.div>
               ) : null}
@@ -2591,10 +2600,10 @@ function PickedChoiceStage({
                 }}
               />
               {variant === 'card-shuffle' ? (
-                <div className="absolute inset-3 rounded-[1.2rem] border border-[#1f2a44]/10" />
+                <div className="absolute inset-3 rounded-[1.2rem] border border-[#16241D]/10" />
               ) : null}
-              <div className="text-xs text-[#8a94a2]">{choiceLabel}</div>
-              <div className="relative mt-8 text-5xl font-semibold tracking-[-0.05em] text-[#1a1a2e]">
+              <div className="text-xs text-[#9AA8A1]">{choiceLabel}</div>
+              <div className="relative mt-8 text-5xl font-semibold tracking-[-0.05em] text-[#16241D]">
                 {isRevealed ? candidate.name : '?'}
               </div>
             </motion.div>
@@ -2619,14 +2628,14 @@ function DrawStatusCard({
       <div className="rounded-2xl bg-white/88 px-4 py-3 shadow-sm backdrop-blur-sm">
         <div className="flex items-center gap-3">
           <div className="min-w-0">
-            <div className="truncate text-lg text-[#1a1a2e]">
+            <div className="truncate text-lg text-[#16241D]">
               {currentInsight.candidate.name}
             </div>
           </div>
         </div>
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#e7ded2]">
           <motion.div
-            className="h-full rounded-full bg-[linear-gradient(90deg,#1f2a44,#ff7b6b)]"
+            className="h-full rounded-full bg-[linear-gradient(90deg,#16241D,#12B886)]"
             animate={{
               width: `${phase === 'revealed' ? 100 : Math.max(progress * 100, 4)}%`,
             }}
@@ -2927,10 +2936,10 @@ export function RandomDrawer({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto px-2 py-2 sm:items-center"
+      className="fixed inset-0 z-[9999] flex items-end justify-center overflow-y-auto px-2 py-2 sm:items-center"
     >
       <div
-        className="absolute inset-0 bg-white/82 backdrop-blur-sm"
+        className="absolute inset-0 bg-[#F5F9F7]"
         onClick={phase === 'choosing' || phase === 'revealed' ? onClose : undefined}
       />
 
@@ -2944,8 +2953,8 @@ export function RandomDrawer({
           onClick={phase === 'choosing' || phase === 'revealed' ? onClose : undefined}
           className={`fixed right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full border shadow-sm transition-colors ${
             phase === 'choosing' || phase === 'revealed'
-              ? 'border-[#e8edf3] bg-white text-[#1f2a44]'
-              : 'border-white/40 bg-white/30 text-[#1f2a44]/35'
+              ? 'border-[#E4EFE9] bg-white text-[#16241D]'
+              : 'border-white/40 bg-white/30 text-[#16241D]/35'
           }`}
           aria-label="닫기"
         >

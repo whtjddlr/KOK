@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 interface RuntimeCapabilitiesResponse {
   ai?: {
     connected?: boolean;
-    provider?: 'upstage' | 'openai' | null;
+    provider?: 'gms' | 'upstage' | 'openai' | null;
     model?: string | null;
   };
   naverSearch?: {
@@ -18,7 +18,7 @@ interface RuntimeCapabilitiesState {
   status: 'idle' | 'loading' | 'ready' | 'error';
   ai: {
     connected: boolean;
-    provider: 'upstage' | 'openai' | null;
+    provider: 'gms' | 'upstage' | 'openai' | null;
     model: string | null;
   };
   naverSearch: {

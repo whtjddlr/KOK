@@ -212,7 +212,7 @@ export function useNearbyPlaces(
       setSections([]);
       setStatus('idle');
       setError(null);
-      setMessage('궁금할 때만 근처 정보를 불러올게요.');
+      setMessage('필요하면 불러와요.');
       return () => {
         active = false;
       };
@@ -220,7 +220,7 @@ export function useNearbyPlaces(
 
     setStatus('loading');
     setError(null);
-    setMessage(`${candidate.name} 근처 정보를 찾는 중이에요.`);
+    setMessage('근처 찾는 중이에요.');
 
     buildNearbySections(candidate, selectedCategory, groupGenderContext)
       .then((nextSections) => {
@@ -228,9 +228,9 @@ export function useNearbyPlaces(
           return;
         }
 
-        const nextMessage = nextSections.length
-          ? `${candidate.name} 근처에서 모임에 어울리는 곳을 정리했어요.`
-          : `${candidate.name} 근처에서 바로 보여줄 정보를 아직 찾지 못했어요.`;
+	        const nextMessage = nextSections.length
+	          ? '근처 정보가 있어요.'
+	          : '근처 정보가 없어요.';
 
         nearbyPlacesCache.set(cacheKey, {
           sections: nextSections,
@@ -250,7 +250,7 @@ export function useNearbyPlaces(
         setSections([]);
         setStatus('error');
         setError(
-          nextError instanceof Error ? nextError.message : '근처 정보를 불러오지 못했습니다.',
+          nextError instanceof Error ? nextError.message : '근처 정보를 못 불러왔어요.',
         );
         setMessage(null);
       });

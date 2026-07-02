@@ -2955,11 +2955,11 @@ export function getDrawPool(
       );
       const relaxedNotice =
         includesImpossibleFairnessCandidate
-          ? '서로 멀리 떨어져 완전 공평한 중간 후보가 좁아요. 대신 중심축과 평균 이동시간이 가장 덜 무리한 후보를 보여줘요.'
+          ? '거리가 멀어 가까운 중간 후보만 골랐어요.'
           : includesOverLimitCandidate
-          ? '서로 거리가 멀어서 기본 이동시간을 조금 넘는 후보까지 포함했어요. 그래도 편차와 중심축이 덜 무리한 곳만 남겼어요.'
+          ? '조금 먼 후보까지 포함했어요.'
           : autoRelaxedPool.relaxedToLevel > thrillLevel
-          ? `중간 후보가 부족해서 Lv${autoRelaxedPool.relaxedToLevel} 기준까지 자동으로 넓혔어요. 그래도 중심축에서 크게 벗어나는 후보는 제외했어요.`
+          ? `범위를 Lv${autoRelaxedPool.relaxedToLevel}까지 넓혔어요.`
           : autoRelaxedPool.pool.length < preferredPoolSize
             ? '중간 후보를 최소 3개 기준으로 압축했어요.'
             : null;
@@ -2972,7 +2972,7 @@ export function getDrawPool(
 
     return {
       pool: [],
-      fallbackNotice: `중간 후보가 최소 ${minPoolSize}개가 되지 않아요. Lv5까지 넓혀도 튀는 후보뿐이라 핫플에서 만나로 바꿔보세요.`,
+      fallbackNotice: `중간 후보가 ${minPoolSize}개보다 적어요.`,
     };
   }
 
@@ -2983,7 +2983,7 @@ export function getDrawPool(
       pool: verifiedFairPool.slice(0, Math.min(targetSize, verifiedFairPool.length)),
       fallbackNotice:
         verifiedFairPool.length < Math.min(3, targetSize)
-          ? '실제 이동시간으로 공정도 기준을 통과한 후보만 추첨 풀에 넣었어요.'
+          ? '시간 차이가 적은 후보만 남겼어요.'
           : null,
     };
   }

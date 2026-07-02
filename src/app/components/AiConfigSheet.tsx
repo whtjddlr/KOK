@@ -11,6 +11,10 @@ interface AiConfigSheetProps {
 }
 
 const providerPresets: Record<AiProvider, { label: string; model: string; baseUrl?: string }> = {
+  gms: {
+    label: 'GMS AI',
+    model: '',
+  },
   upstage: {
     label: 'Upstage',
     model: 'solar-pro3',
@@ -60,7 +64,9 @@ export function AiConfigSheet({
   };
 
   const handleSave = () => {
-    if (!apiKey.trim() || !model.trim()) {
+    const nextBaseUrl = baseUrl.trim() || providerPresets[provider].baseUrl;
+
+    if (!apiKey.trim() || !model.trim() || (provider !== 'openai' && !nextBaseUrl)) {
       return;
     }
 
@@ -70,7 +76,7 @@ export function AiConfigSheet({
       provider,
       apiKey: apiKey.trim(),
       model: model.trim(),
-      baseUrl: provider === 'upstage' ? (baseUrl.trim() || providerPresets.upstage.baseUrl) : undefined,
+      baseUrl: provider !== 'openai' ? nextBaseUrl : undefined,
     });
 
     setIsSaving(false);
@@ -81,27 +87,27 @@ export function AiConfigSheet({
       <div className="w-full max-w-md rounded-[32px] bg-white p-6 shadow-2xl">
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
-            <div className="text-2xl text-[#1a1a2e]">AI 연결</div>
-            <div className="mt-1 text-sm leading-relaxed text-[#6b7280]">
-              이 기기에서만 쓰는 로컬 설정입니다. Upstage나 OpenAI 키를 붙이면 후보군을 AI가 먼저 골라줘요.
+            <div className="text-2xl text-[#16241D]">AI 연결</div>
+            <div className="mt-1 text-sm leading-relaxed text-[#6E7C75]">
+              이 기기에서만 쓰는 로컬 설정입니다. GMS AI, Upstage, OpenAI 키를 붙이면 후보군을 AI가 먼저 골라줘요.
             </div>
           </div>
           <button
             onClick={onClose}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f5f1eb] text-[#44505b]"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#FFFFFF] text-[#44505b]"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="mb-4 grid grid-cols-2 gap-2 rounded-2xl bg-[#f5f1eb] p-1">
-          {(['upstage', 'openai'] as AiProvider[]).map((option) => (
+        <div className="mb-4 grid grid-cols-3 gap-2 rounded-2xl bg-[#FFFFFF] p-1">
+          {(['gms', 'upstage', 'openai'] as AiProvider[]).map((option) => (
             <button
               key={option}
               type="button"
               onClick={() => handleProviderChange(option)}
               className={`h-11 rounded-[18px] text-sm transition-all ${
-                provider === option ? 'bg-white text-[#1a1a2e] shadow-sm' : 'text-[#6b7280]'
+                provider === option ? 'bg-white text-[#16241D] shadow-sm' : 'text-[#6E7C75]'
               }`}
             >
               {providerPresets[option].label}
@@ -110,24 +116,24 @@ export function AiConfigSheet({
         </div>
 
         <div className="space-y-3">
-          <div className="rounded-2xl border border-[#edf2f5] bg-[#f8fbfd] px-4 py-3 text-sm text-[#44505b]">
-            <div className="flex items-center gap-2 text-[#1a1a2e]">
-              <Bot className="h-4 w-4 text-[#2d3561]" />
+          <div className="rounded-2xl border border-[#E4EFE9] bg-[#F5F9F7] px-4 py-3 text-sm text-[#44505b]">
+            <div className="flex items-center gap-2 text-[#16241D]">
+              <Bot className="h-4 w-4 text-[#16241D]" />
               <span>{providerPresets[provider].label}를 후보 생성용으로 연결합니다.</span>
             </div>
           </div>
 
-          <div className="rounded-2xl bg-[#f9f7f4] px-4 py-3">
+          <div className="rounded-2xl bg-[#F5F9F7] px-4 py-3">
             <div className="mb-2 flex items-center gap-2 text-sm text-[#44505b]">
-              <KeyRound className="h-4 w-4 text-[#2d3561]" />
+              <KeyRound className="h-4 w-4 text-[#16241D]" />
               <span>API Key</span>
             </div>
             <input
               type="password"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              placeholder={provider === 'upstage' ? 'up_...' : 'sk-...'}
-              className="h-11 w-full rounded-xl bg-white px-4 text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:ring-2 focus:ring-[#2d3561]/20"
+              placeholder={provider === 'gms' ? 'S00...' : provider === 'upstage' ? 'up_...' : 'sk-...'}
+              className="h-11 w-full rounded-xl bg-white px-4 text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:ring-2 focus:ring-[#16241D]/20"
             />
           </div>
 
@@ -135,15 +141,15 @@ export function AiConfigSheet({
             value={model}
             onChange={(event) => setModel(event.target.value)}
             placeholder="모델 이름"
-            className="h-12 w-full rounded-2xl bg-[#f9f7f4] px-4 text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:ring-2 focus:ring-[#2d3561]/20"
+            className="h-12 w-full rounded-2xl bg-[#F5F9F7] px-4 text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:ring-2 focus:ring-[#16241D]/20"
           />
 
-          {provider === 'upstage' && (
+          {provider !== 'openai' && (
             <input
               value={baseUrl}
               onChange={(event) => setBaseUrl(event.target.value)}
-              placeholder="https://api.upstage.ai/v1"
-              className="h-12 w-full rounded-2xl bg-[#f9f7f4] px-4 text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:ring-2 focus:ring-[#2d3561]/20"
+              placeholder={provider === 'gms' ? 'GMS AI API base URL' : 'https://api.upstage.ai/v1'}
+              className="h-12 w-full rounded-2xl bg-[#F5F9F7] px-4 text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:ring-2 focus:ring-[#16241D]/20"
             />
           )}
         </div>
@@ -152,8 +158,13 @@ export function AiConfigSheet({
           <button
             type="button"
             onClick={handleSave}
-            disabled={isSaving || !apiKey.trim() || !model.trim()}
-            className="flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-[#1f2a44] text-white transition-transform active:scale-95 disabled:opacity-60"
+            disabled={
+              isSaving ||
+              !apiKey.trim() ||
+              !model.trim() ||
+              (provider !== 'openai' && !(baseUrl.trim() || providerPresets[provider].baseUrl))
+            }
+            className="flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-[#16241D] text-white transition-transform active:scale-95 disabled:opacity-60"
           >
             {isSaving && <LoaderCircle className="h-4 w-4 animate-spin" />}
             연결 저장
@@ -161,7 +172,7 @@ export function AiConfigSheet({
           <button
             type="button"
             onClick={onClear}
-            className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#f5f1eb] px-4 text-sm text-[#44505b] transition-transform active:scale-95"
+            className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#FFFFFF] px-4 text-sm text-[#44505b] transition-transform active:scale-95"
           >
             <RotateCcw className="h-4 w-4" />
             해제

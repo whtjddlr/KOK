@@ -4,8 +4,8 @@ import {
   fetchOpenAiCandidateSelection,
   fetchUpstageCandidateSelection,
   getRuntimeAiConfig,
+  getServerAiProviders,
   json,
-  pickFirstEnv,
   pickTargetCount,
   readJsonBody,
   reorderCandidateIdsByFairness,
@@ -47,37 +47,8 @@ export default async function handler(req: any, res: any) {
     }
 
     const env = process.env;
-    const rawOpenAiKey = pickFirstEnv(env, ['OPENAI_API_KEY', 'AI_API_KEY', 'VITE_OPENAI_API_KEY']);
-    const rawUpstageKey = pickFirstEnv(env, [
-      'UPSTAGE_API_KEY',
-      'SOLAR_API_KEY',
-      'VITE_UPSTAGE_API_KEY',
-    ]);
-    const detectedUpstageKey =
-      rawUpstageKey || (rawOpenAiKey.startsWith('up_') ? rawOpenAiKey : '');
-    const detectedOpenAiKey =
-      detectedUpstageKey && rawOpenAiKey === detectedUpstageKey ? '' : rawOpenAiKey;
     const runtimeAiConfig = getRuntimeAiConfig(body);
-    const effectiveUpstageApiKey =
-      runtimeAiConfig?.provider === 'upstage' ? runtimeAiConfig.apiKey : detectedUpstageKey;
-    const effectiveUpstageModel =
-      runtimeAiConfig?.provider === 'upstage'
-        ? runtimeAiConfig.model
-        : pickFirstEnv(env, ['UPSTAGE_MODEL', 'SOLAR_MODEL', 'VITE_UPSTAGE_MODEL']) || 'solar-pro3';
-    const effectiveUpstageBaseUrl =
-      runtimeAiConfig?.provider === 'upstage' && runtimeAiConfig.baseUrl
-        ? runtimeAiConfig.baseUrl
-        : pickFirstEnv(env, [
-            'UPSTAGE_API_BASE_URL',
-            'SOLAR_API_BASE_URL',
-            'VITE_UPSTAGE_API_BASE_URL',
-          ]) || 'https://api.upstage.ai/v1';
-    const effectiveOpenAiApiKey =
-      runtimeAiConfig?.provider === 'openai' ? runtimeAiConfig.apiKey : detectedOpenAiKey;
-    const effectiveOpenAiModel =
-      runtimeAiConfig?.provider === 'openai'
-        ? runtimeAiConfig.model
-        : pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini';
+    const aiProviders = getServerAiProviders(env, runtimeAiConfig);
 
     const safeFallbackBaseIds = ensureParticipantLocalCoverageIds(
       buildFallbackCandidateIds(
@@ -105,7 +76,7 @@ export default async function handler(req: any, res: any) {
         ? reorderCandidateIdsByFairness(safeFallbackBaseIds, insights, thrillLevel, participants)
         : safeFallbackBaseIds;
 
-    if (!effectiveOpenAiApiKey && !effectiveUpstageApiKey) {
+    if (!aiProviders.length) {
       json(res, 200, {
         candidateIds: safeFallbackIds,
         source: 'heuristic',
@@ -114,80 +85,89 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    try {
-      const aiSelection = effectiveUpstageApiKey
-        ? await fetchUpstageCandidateSelection({
-            apiKey: effectiveUpstageApiKey,
-            model: effectiveUpstageModel,
-            baseUrl: effectiveUpstageBaseUrl,
-            participants,
-            insights,
-            selectedCategory,
-            selectionMode,
-            thrillLevel,
-            candidateScope,
-            requestedTargetCount: effectiveCandidateTargetCount,
-          })
-        : await fetchOpenAiCandidateSelection({
-            apiKey: effectiveOpenAiApiKey,
-            model: effectiveOpenAiModel,
-            participants,
-            insights,
-            selectedCategory,
-            selectionMode,
-            thrillLevel,
-            candidateScope,
-            requestedTargetCount: effectiveCandidateTargetCount,
-          });
+    let lastAiError: unknown = null;
 
-      const allowedIds = new Set(
-        insights
-          .map((insight) => insight?.candidate?.id)
-          .filter((candidateId: unknown): candidateId is string => typeof candidateId === 'string'),
-      );
-      const targetCount = pickTargetCount(
-        allowedIds.size,
-        selectionMode,
-        thrillLevel,
-        candidateScope,
-        effectiveCandidateTargetCount,
-      );
-      const candidateIds = aiSelection.candidateIds
-        .filter((candidateId) => allowedIds.has(candidateId))
-        .slice(0, targetCount);
-      const coveredCandidateBaseIds = ensureParticipantLocalCoverageIds(
-        candidateIds.length ? candidateIds : safeFallbackIds,
-        insights,
-        participants,
-        targetCount,
-        selectionMode,
-        thrillLevel,
-      );
-      const coveredCandidateIds =
-        selectionMode === 'balance'
-          ? reorderCandidateIdsByFairness(
-              coveredCandidateBaseIds,
-              insights,
-              thrillLevel,
-              participants,
-            )
-          : coveredCandidateBaseIds;
+    for (const aiProvider of aiProviders) {
+      try {
+        const aiSelection =
+          aiProvider.provider === 'openai'
+            ? await fetchOpenAiCandidateSelection({
+                apiKey: aiProvider.apiKey,
+                model: aiProvider.model,
+                participants,
+                insights,
+                selectedCategory,
+                selectionMode,
+                thrillLevel,
+                candidateScope,
+                requestedTargetCount: effectiveCandidateTargetCount,
+              })
+            : await fetchUpstageCandidateSelection({
+                apiKey: aiProvider.apiKey,
+                model: aiProvider.model,
+                baseUrl: aiProvider.baseUrl,
+                participants,
+                insights,
+                selectedCategory,
+                selectionMode,
+                thrillLevel,
+                candidateScope,
+                requestedTargetCount: effectiveCandidateTargetCount,
+                providerLabel: aiProvider.provider === 'gms' ? 'GMS AI' : 'Upstage',
+              });
 
-      json(res, 200, {
-        candidateIds: coveredCandidateIds.length ? coveredCandidateIds : safeFallbackIds,
-        source: effectiveUpstageApiKey ? 'upstage' : 'openai',
-        message: aiSelection.summary || undefined,
-      });
-    } catch (error) {
-      json(res, 200, {
-        candidateIds: safeFallbackIds,
-        source: 'heuristic',
-        message:
-          error instanceof Error
-            ? error.message
-            : 'AI candidate selection failed, so the app is using the fallback list.',
-      });
+        const allowedIds = new Set(
+          insights
+            .map((insight) => insight?.candidate?.id)
+            .filter((candidateId: unknown): candidateId is string => typeof candidateId === 'string'),
+        );
+        const targetCount = pickTargetCount(
+          allowedIds.size,
+          selectionMode,
+          thrillLevel,
+          candidateScope,
+          effectiveCandidateTargetCount,
+        );
+        const candidateIds = aiSelection.candidateIds
+          .filter((candidateId) => allowedIds.has(candidateId))
+          .slice(0, targetCount);
+        const coveredCandidateBaseIds = ensureParticipantLocalCoverageIds(
+          candidateIds.length ? candidateIds : safeFallbackIds,
+          insights,
+          participants,
+          targetCount,
+          selectionMode,
+          thrillLevel,
+        );
+        const coveredCandidateIds =
+          selectionMode === 'balance'
+            ? reorderCandidateIdsByFairness(
+                coveredCandidateBaseIds,
+                insights,
+                thrillLevel,
+                participants,
+              )
+            : coveredCandidateBaseIds;
+
+        json(res, 200, {
+          candidateIds: coveredCandidateIds.length ? coveredCandidateIds : safeFallbackIds,
+          source: aiProvider.provider,
+          message: aiSelection.summary || undefined,
+        });
+        return;
+      } catch (error) {
+        lastAiError = error;
+      }
     }
+
+    json(res, 200, {
+      candidateIds: safeFallbackIds,
+      source: 'heuristic',
+      message:
+        lastAiError instanceof Error
+          ? lastAiError.message
+          : 'AI candidate selection failed, so the app is using the fallback list.',
+    });
   } catch (error) {
     json(res, 500, {
       candidateIds: [],

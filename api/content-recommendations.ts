@@ -1,7 +1,7 @@
 import {
   getRuntimeAiConfig,
+  getServerAiProviders,
   json,
-  pickFirstEnv,
   readJsonBody,
 } from './_lib/server.js';
 
@@ -782,6 +782,7 @@ async function fetchUpstagePlaceRanking(input: {
   baseUrl: string;
   payload: ReturnType<typeof buildPlaceSelectionPayload>;
   allowedIds: string[];
+  providerLabel?: string;
 }) {
   const apiBase = input.baseUrl.replace(/\/$/, '');
   const response = await fetch(`${apiBase}/chat/completions`, {
@@ -812,7 +813,10 @@ async function fetchUpstagePlaceRanking(input: {
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(data?.error?.message ?? `Upstage place ranking failed with status ${response.status}.`);
+    throw new Error(
+      data?.error?.message ??
+        `${input.providerLabel ?? 'Upstage'} place ranking failed with status ${response.status}.`,
+    );
   }
 
   const rawContent = data?.choices?.[0]?.message?.content;
@@ -900,41 +904,12 @@ export default async function handler(req: any, res: any) {
 	    const env = process.env;
 	    const naverSearchClientId = env.NAVER_SEARCH_CLIENT_ID?.trim() ?? '';
 	    const naverSearchClientSecret = env.NAVER_SEARCH_CLIENT_SECRET?.trim() ?? '';
-	    const rawOpenAiKey = pickFirstEnv(env, ['OPENAI_API_KEY', 'AI_API_KEY', 'VITE_OPENAI_API_KEY']);
-    const rawUpstageKey = pickFirstEnv(env, [
-      'UPSTAGE_API_KEY',
-      'SOLAR_API_KEY',
-      'VITE_UPSTAGE_API_KEY',
-    ]);
-    const detectedUpstageKey =
-      rawUpstageKey || (rawOpenAiKey.startsWith('up_') ? rawOpenAiKey : '');
-    const detectedOpenAiKey =
-      detectedUpstageKey && rawOpenAiKey === detectedUpstageKey ? '' : rawOpenAiKey;
     const runtimeAiConfig = getRuntimeAiConfig(body);
-    const effectiveUpstageApiKey =
-      runtimeAiConfig?.provider === 'upstage' ? runtimeAiConfig.apiKey : detectedUpstageKey;
-    const effectiveUpstageModel =
-      runtimeAiConfig?.provider === 'upstage'
-        ? runtimeAiConfig.model
-        : pickFirstEnv(env, ['UPSTAGE_MODEL', 'SOLAR_MODEL', 'VITE_UPSTAGE_MODEL']) || 'solar-pro3';
-    const effectiveUpstageBaseUrl =
-      runtimeAiConfig?.provider === 'upstage' && runtimeAiConfig.baseUrl
-        ? runtimeAiConfig.baseUrl
-        : pickFirstEnv(env, [
-            'UPSTAGE_API_BASE_URL',
-            'SOLAR_API_BASE_URL',
-            'VITE_UPSTAGE_API_BASE_URL',
-          ]) || 'https://api.upstage.ai/v1';
-    const effectiveOpenAiApiKey =
-      runtimeAiConfig?.provider === 'openai' ? runtimeAiConfig.apiKey : detectedOpenAiKey;
-	    const effectiveOpenAiModel =
-	      runtimeAiConfig?.provider === 'openai'
-	        ? runtimeAiConfig.model
-	        : pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini';
+    const aiProviders = getServerAiProviders(env, runtimeAiConfig);
 	    const candidateName = normalizeText(body?.candidate?.name);
 	    const candidateDistrict = normalizeText(body?.candidate?.district);
 	    const evidenceItems =
-	      effectiveOpenAiApiKey || effectiveUpstageApiKey
+	      aiProviders.length
 	        ? await attachReviewEvidence({
 	            items: rankableItems,
 	            candidateName,
@@ -958,7 +933,7 @@ export default async function handler(req: any, res: any) {
 	      items: evidenceItems,
 	    });
 
-    if (!effectiveOpenAiApiKey && !effectiveUpstageApiKey) {
+    if (!aiProviders.length) {
       json(res, 200, {
         itemIds: fallbackIds,
         source: 'heuristic',
@@ -967,40 +942,49 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    try {
-      const aiRanking = effectiveUpstageApiKey
-        ? await fetchUpstagePlaceRanking({
-            apiKey: effectiveUpstageApiKey,
-            model: effectiveUpstageModel,
-            baseUrl: effectiveUpstageBaseUrl,
-            payload,
-            allowedIds,
-          })
-        : await fetchOpenAiPlaceRanking({
-            apiKey: effectiveOpenAiApiKey,
-            model: effectiveOpenAiModel,
-            payload,
-            allowedIds,
-          });
-      const itemIds = aiRanking.itemIds
-        .filter((id) => allowedIds.includes(id))
-        .slice(0, limit);
+    let lastAiError: unknown = null;
 
-      json(res, 200, {
-        itemIds: itemIds.length ? itemIds : fallbackIds,
-        source: effectiveUpstageApiKey ? 'upstage' : 'openai',
-        message: aiRanking.summary || 'AI가 모임에 어울리는 순서로 장소를 정리했어요.',
-      });
-    } catch (error) {
-      json(res, 200, {
-        itemIds: fallbackIds,
-        source: 'heuristic',
-        message:
-          error instanceof Error
-            ? `AI 추천 정렬 실패: ${error.message}`
-            : 'AI 추천 정렬에 실패해 기본 필터로 장소를 정리했어요.',
-      });
+    for (const aiProvider of aiProviders) {
+      try {
+        const aiRanking =
+          aiProvider.provider === 'openai'
+            ? await fetchOpenAiPlaceRanking({
+                apiKey: aiProvider.apiKey,
+                model: aiProvider.model,
+                payload,
+                allowedIds,
+              })
+            : await fetchUpstagePlaceRanking({
+                apiKey: aiProvider.apiKey,
+                model: aiProvider.model,
+                baseUrl: aiProvider.baseUrl,
+                payload,
+                allowedIds,
+                providerLabel: aiProvider.provider === 'gms' ? 'GMS AI' : 'Upstage',
+              });
+        const itemIds = aiRanking.itemIds
+          .filter((id) => allowedIds.includes(id))
+          .slice(0, limit);
+
+        json(res, 200, {
+          itemIds: itemIds.length ? itemIds : fallbackIds,
+          source: aiProvider.provider,
+          message: aiRanking.summary || 'AI가 모임에 어울리는 순서로 장소를 정리했어요.',
+        });
+        return;
+      } catch (error) {
+        lastAiError = error;
+      }
     }
+
+    json(res, 200, {
+      itemIds: fallbackIds,
+      source: 'heuristic',
+      message:
+        lastAiError instanceof Error
+          ? `AI 추천 정렬 실패: ${lastAiError.message}`
+          : 'AI 추천 정렬에 실패해 기본 필터로 장소를 정리했어요.',
+    });
   } catch (error) {
     json(res, 500, {
       itemIds: [],

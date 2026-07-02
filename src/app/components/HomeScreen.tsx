@@ -74,16 +74,16 @@ function formatRoomUpdatedAt(value: string) {
 
 function KoKBrandMark() {
   return (
-    <div className="kok-brand-float mx-auto mb-6 flex h-32 w-32 items-center justify-center rounded-[2rem] bg-[#17233c] shadow-[0_24px_60px_rgba(23,35,60,0.18)]">
+    <div className="kok-brand-float kok-brand-glow mx-auto mb-6 flex h-28 w-28 items-center justify-center rounded-[1.75rem] bg-[#16241D] shadow-[0_24px_60px_rgba(20,35,29,0.18)]">
       <svg
         viewBox="0 0 160 160"
-        className="h-28 w-28"
+        className="h-24 w-24"
         aria-hidden="true"
       >
         <path
           d="M40 43c16 4 28 14 39 32"
           fill="none"
-          stroke="#5dd9d0"
+          stroke="#0CA178"
           strokeWidth="10"
           strokeLinecap="round"
         />
@@ -101,18 +101,18 @@ function KoKBrandMark() {
           strokeWidth="10"
           strokeLinecap="round"
         />
-        <circle cx="36" cy="42" r="13" fill="#f8fbf7" stroke="#5dd9d0" strokeWidth="4" />
+        <circle cx="36" cy="42" r="13" fill="#f8fbf7" stroke="#0CA178" strokeWidth="4" />
         <circle cx="124" cy="42" r="13" fill="#f8fbf7" stroke="#8d7cff" strokeWidth="4" />
         <circle cx="34" cy="116" r="13" fill="#f8fbf7" stroke="#ffd166" strokeWidth="4" />
         <circle cx="80" cy="80" r="42" fill="#f8fbf7" />
         <path
           d="M80 43c-21 0-36 16-36 36 0 26 36 54 36 54s36-28 36-54c0-20-15-36-36-36Z"
-          fill="#ff6b5f"
+          fill="#12B886"
         />
-        <circle cx="80" cy="77" r="14" fill="#17233c" />
+        <circle cx="80" cy="77" r="14" fill="#16241D" />
         <path
           d="M64 59c6-8 15-13 26-12 10 0 18 5 24 12-7-4-15-6-24-6-11 0-20 2-26 6Z"
-          fill="#ffb1a5"
+          fill="#A8EAD6"
           opacity=".9"
         />
       </svg>
@@ -164,11 +164,11 @@ export function HomeScreen({
   };
 
   return (
-    <div className="kok-screen-enter relative flex min-h-screen flex-col overflow-hidden bg-[#f8fbf7] pb-28">
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,#f8fbf7_0%,#eef7f3_58%,#fbf7f1_100%)]" />
+    <div className="kok-screen-enter relative flex min-h-screen flex-col overflow-hidden bg-[#FAFCFB] pb-[calc(7rem+env(safe-area-inset-bottom))]">
+      <div className="kok-home-ambient pointer-events-none absolute inset-0" />
       <svg
         viewBox="0 0 420 420"
-        className="pointer-events-none absolute left-1/2 top-8 h-[420px] w-[420px] -translate-x-1/2 text-[#17233c]/10"
+        className="kok-route-lines pointer-events-none absolute left-1/2 top-10 h-[420px] w-[420px] -translate-x-1/2 text-[#16241D]/10"
         aria-hidden="true"
       >
         <path
@@ -190,12 +190,12 @@ export function HomeScreen({
       </svg>
 
       {currentUser && (
-        <header className="fixed left-0 top-0 z-30 flex w-full items-center justify-end rounded-b-[2rem] bg-[#f8fbf7]/88 px-6 py-4 shadow-[0_10px_30px_rgba(23,35,60,0.08)] backdrop-blur-md">
+        <header className="fixed left-0 top-0 z-30 flex w-full items-center justify-end rounded-b-[1.75rem] border-b border-white/70 bg-[#FAFCFB]/88 px-6 py-4 shadow-[0_10px_30px_rgba(20,35,29,0.08)] backdrop-blur-md">
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onOpenProfile}
-              className="inline-flex h-10 max-w-[116px] items-center gap-2 rounded-full bg-white px-3 text-sm text-[#17233c] shadow-sm transition-transform active:scale-95"
+              className="inline-flex h-10 max-w-[116px] items-center gap-2 rounded-full bg-white px-3 text-sm text-[#16241D] shadow-sm transition-transform active:scale-95"
             >
               {currentUser.avatarUrl ? (
                 <img
@@ -204,14 +204,14 @@ export function HomeScreen({
                   className="h-5 w-5 shrink-0 rounded-full object-cover"
                 />
               ) : (
-                <UserRound className="h-4 w-4 shrink-0 text-[#76777e]" />
+                <UserRound className="h-4 w-4 shrink-0 text-[#6E7C75]" />
               )}
               <span className="truncate">{currentUser.name}</span>
             </button>
             <button
               type="button"
               onClick={onSignOut}
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#76777e] shadow-sm"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#6E7C75] shadow-sm"
               aria-label="로그아웃"
             >
               <LogOut className="h-4 w-4" />
@@ -222,23 +222,27 @@ export function HomeScreen({
 
       <main
         className={`relative z-10 mx-auto flex w-full max-w-[560px] flex-1 flex-col justify-center px-6 ${
-          currentUser ? 'pt-28' : 'pt-12'
+          currentUser ? 'pt-28' : 'pt-20'
         }`}
       >
-        <div className="mb-9 text-center">
+        <div className="kok-hero-copy mb-9 text-center">
           <KoKBrandMark />
-          <h1 className="text-5xl font-black tracking-normal text-[#17233c]">KoK</h1>
+          <div className="mx-auto mb-4 inline-flex h-9 items-center gap-2 rounded-full border border-[#E4EFE9] bg-white/78 px-3 text-xs font-black text-[#0CA178] shadow-[0_10px_24px_rgba(20,35,29,0.05)] backdrop-blur-md">
+            <span className="h-2 w-2 rounded-full bg-[#12B886]" />
+            온라인 약속방
+          </div>
+          <h1 className="text-5xl font-black tracking-normal text-[#16241D]">KoK</h1>
           <p className="mt-4 text-2xl font-bold leading-tight tracking-normal text-[#667280]">
             어디서 볼지, 같이 가볍게 정해요.
           </p>
         </div>
 
-        <section className="space-y-5">
+        <section className="kok-stagger-list space-y-4">
           {currentUser ? (
             <>
-              <div className="rounded-[1.5rem] border border-white/70 bg-white/92 px-5 py-4 text-left shadow-[0_10px_30px_rgba(26,26,46,0.06)]">
-                <div className="text-sm font-semibold text-[#ff6b5f]">온라인 약속방</div>
-                <div className="mt-1 truncate text-xl font-extrabold tracking-normal text-[#17233c]">
+              <div className="kok-card-pop rounded-[1.5rem] border border-white/70 bg-white/92 px-5 py-4 text-left shadow-[0_10px_30px_rgba(20,35,29,0.06)] backdrop-blur-md">
+                <div className="text-sm font-semibold text-[#12B886]">온라인 약속방</div>
+                <div className="mt-1 truncate text-xl font-extrabold tracking-normal text-[#16241D]">
                   {currentUser.name}님, 바로 시작할까요?
                 </div>
               </div>
@@ -250,7 +254,7 @@ export function HomeScreen({
                     void onCreateRoom();
                   }}
                   disabled={isOpeningRoom || isDeletingRooms}
-                  className="kok-pressable flex h-16 items-center justify-center gap-2 rounded-[1.5rem] bg-[#17233c] px-4 text-lg font-extrabold tracking-normal text-white shadow-[0_12px_32px_rgba(23,35,60,0.16)] transition-transform active:scale-95 disabled:opacity-60"
+                  className="kok-pressable kok-button-shine flex h-16 items-center justify-center gap-2 rounded-[1.5rem] bg-[#16241D] px-4 text-lg font-extrabold tracking-normal text-white shadow-[0_12px_32px_rgba(20,35,29,0.16)] transition-transform active:scale-95 disabled:opacity-60"
                 >
                   {isOpeningRoom ? (
                     <LoaderCircle className="h-5 w-5 animate-spin" />
@@ -275,10 +279,10 @@ export function HomeScreen({
                   }}
                   disabled={isOpeningRoom || isDeletingRooms}
                   aria-pressed={showCreatedRooms}
-                  className={`kok-pressable flex h-16 items-center justify-center gap-2 rounded-[1.5rem] px-4 text-lg font-extrabold tracking-normal shadow-[0_10px_30px_rgba(23,35,60,0.06)] transition-transform active:scale-95 disabled:opacity-60 ${
+                  className={`kok-pressable flex h-16 items-center justify-center gap-2 rounded-[1.5rem] px-4 text-lg font-extrabold tracking-normal shadow-[0_10px_30px_rgba(20,35,29,0.06)] transition-transform active:scale-95 disabled:opacity-60 ${
                     showCreatedRooms
-                      ? 'bg-[#ff6b5f] text-white'
-                      : 'border border-white/70 bg-white/92 text-[#17233c]'
+                      ? 'bg-[#12B886] text-white'
+                      : 'border border-white/70 bg-white/92 text-[#16241D]'
                   }`}
                 >
                   <Clock3 className="h-5 w-5" />
@@ -286,7 +290,7 @@ export function HomeScreen({
                 </button>
               </div>
 
-              <div className="relative rounded-[1.5rem] border border-[#e4e2e4]/70 bg-white p-2 shadow-[0_10px_30px_rgba(26,26,46,0.04)]">
+              <div className="relative rounded-[1.5rem] border border-[#EEF3F0]/70 bg-white/94 p-2 shadow-[0_10px_30px_rgba(20,35,29,0.04)] backdrop-blur-md">
                 <input
                   value={roomCode}
                   onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
@@ -297,7 +301,7 @@ export function HomeScreen({
                     }
                   }}
                   placeholder="초대받은 방 코드"
-                  className="h-14 w-full rounded-[1.15rem] border-0 bg-transparent pl-5 pr-16 text-lg text-[#17233c] outline-none placeholder:text-[#a3a6ad] focus:ring-0"
+                  className="h-14 w-full rounded-[1.15rem] border-0 bg-transparent pl-5 pr-16 text-lg text-[#16241D] outline-none placeholder:text-[#a3a6ad] focus:ring-0"
                 />
                 <button
                   type="button"
@@ -305,7 +309,7 @@ export function HomeScreen({
                     void onJoinRoom(roomCode);
                   }}
                   disabled={isOpeningRoom}
-                  className="absolute bottom-2 right-2 top-2 flex w-14 items-center justify-center rounded-[1.1rem] bg-[#edf6f2] text-[#17233c] shadow-sm transition-transform active:scale-95 disabled:opacity-60"
+                  className="absolute bottom-2 right-2 top-2 flex w-14 items-center justify-center rounded-[1.1rem] bg-[#E6F7F0] text-[#0CA178] shadow-sm transition-transform active:scale-95 disabled:opacity-60"
                   aria-label="방 코드 입장"
                 >
                   <ArrowRight className="h-6 w-6" />
@@ -313,12 +317,12 @@ export function HomeScreen({
               </div>
 
               {showCreatedRooms ? (
-                <div className="rounded-[1.5rem] border border-white/70 bg-white/92 p-4 text-left shadow-[0_10px_30px_rgba(26,26,46,0.05)]">
+                <div className="kok-card-pop rounded-[1.5rem] border border-white/70 bg-white/92 p-4 text-left shadow-[0_10px_30px_rgba(20,35,29,0.05)] backdrop-blur-md">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-bold text-[#17233c]">이어하기</div>
-                      <div className="mt-0.5 text-xs text-[#8a94a2]">
-	                        참여했던 방을 다시 열 수 있어요.
+                      <div className="text-sm font-bold text-[#16241D]">이어하기</div>
+                      <div className="mt-0.5 text-xs text-[#9AA8A1]">
+                        참여했던 방을 다시 열 수 있어요.
                       </div>
                     </div>
 
@@ -331,7 +335,7 @@ export function HomeScreen({
                             setSelectedRoomIds([]);
                           }}
                           disabled={isDeletingRooms}
-                          className="rounded-full bg-[#eef7f3] px-3 py-2 text-xs font-bold text-[#17233c] shadow-sm transition-transform active:scale-95 disabled:opacity-50"
+                          className="rounded-full bg-[#eef7f3] px-3 py-2 text-xs font-bold text-[#16241D] shadow-sm transition-transform active:scale-95 disabled:opacity-50"
                         >
                           {isEditingRooms ? '완료' : '편집'}
                         </button>
@@ -344,7 +348,7 @@ export function HomeScreen({
                             void onRefreshRooms();
                           }}
                           disabled={isLoadingCreatedRooms || isDeletingRooms}
-                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#eef7f3] text-[#17233c] shadow-sm transition-transform active:scale-95 disabled:opacity-50"
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#eef7f3] text-[#16241D] shadow-sm transition-transform active:scale-95 disabled:opacity-50"
                           aria-label="기존 방 새로고침"
                         >
                           <RefreshCw
@@ -356,12 +360,12 @@ export function HomeScreen({
                   </div>
 
                   {isEditingRooms && createdRooms.length ? (
-                    <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl bg-[#f8fbfd] px-3 py-2">
+                    <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl bg-[#F5F9F7] px-3 py-2">
                       <button
                         type="button"
                         onClick={toggleAllRooms}
                         disabled={isDeletingRooms}
-                        className="text-xs font-bold text-[#17233c] disabled:opacity-50"
+                        className="text-xs font-bold text-[#16241D] disabled:opacity-50"
                       >
                         {allRoomsSelected ? '전체 해제' : '전체 선택'}
                       </button>
@@ -371,25 +375,25 @@ export function HomeScreen({
                           void onDeleteExistingRooms?.(selectedRooms);
                         }}
                         disabled={!selectedRooms.length || isDeletingRooms}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#fff7ed] px-3 text-xs font-bold text-[#b45309] shadow-sm transition-transform active:scale-95 disabled:opacity-40"
+                        className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#E6F7F0] px-3 text-xs font-bold text-[#0CA178] shadow-sm transition-transform active:scale-95 disabled:opacity-40"
                       >
                         {isDeletingRooms ? (
                           <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
                         ) : (
                           <Trash2 className="h-3.5 w-3.5" />
                         )}
-	                        선택 정리 {selectedRooms.length ? selectedRooms.length : ''}
+                        선택 정리 {selectedRooms.length ? selectedRooms.length : ''}
                       </button>
                     </div>
                   ) : null}
 
                   {isLoadingCreatedRooms && !createdRooms.length ? (
-                    <div className="kok-loading-card flex items-center gap-3 rounded-2xl bg-[#f8fbfd] px-3 py-3 text-sm text-[#6b7280]">
+                    <div className="kok-loading-card flex items-center gap-3 rounded-2xl bg-[#F5F9F7] px-3 py-3 text-sm text-[#6E7C75]">
                       <div className="kok-route-loader scale-75">
                         <span />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-[#17233c]">방 목록 정리 중</div>
+                        <div className="font-semibold text-[#16241D]">방 목록 정리 중</div>
                         <div className="mt-1 kok-loading-progress" />
                       </div>
                     </div>
@@ -417,15 +421,15 @@ export function HomeScreen({
                             }}
                             disabled={isOpeningRoom || isDeletingRoom}
                             className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-transform active:scale-[0.99] disabled:opacity-60 ${
-                              isSelected ? 'bg-[#fff0ed] ring-2 ring-[#ff6b5f]' : 'bg-[#fbfdfb]'
+                              isSelected ? 'bg-[#E6F7F0] ring-2 ring-[#12B886]' : 'bg-[#fbfdfb]'
                             }`}
                           >
                             {isEditingRooms ? (
                               <span
                                 className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 ${
                                   isSelected
-                                    ? 'border-[#ff6b5f] bg-[#ff6b5f] text-white'
-                                    : 'border-[#d9dde4] bg-white text-transparent'
+                                    ? 'border-[#12B886] bg-[#12B886] text-white'
+                                    : 'border-[#E4EFE9] bg-white text-transparent'
                                 }`}
                               >
                                 <Check className="h-4 w-4" />
@@ -434,34 +438,34 @@ export function HomeScreen({
 
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
-                                <span className="font-mono text-sm font-black tracking-normal text-[#17233c]">
+                                <span className="font-mono text-sm font-black tracking-normal text-[#16241D]">
                                   {room.code}
                                 </span>
-                                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-[#76777e]">
+                                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-[#6E7C75]">
                                   {room.status === 'decided' ? '결과 있음' : '진행 중'}
                                 </span>
                               </div>
-                              <div className="mt-1 flex items-center gap-1.5 text-xs text-[#8a94a2]">
+                              <div className="mt-1 flex items-center gap-1.5 text-xs text-[#9AA8A1]">
                                 <Clock3 className="h-3.5 w-3.5" />
                                 {formatRoomUpdatedAt(room.updatedAt)}
                                 <span>·</span>
                                 {categoryLabels[room.selectedCategory]}
                               </div>
                               <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-                                <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-[11px] font-bold text-[#76777e]">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-[11px] font-bold text-[#6E7C75]">
                                   <UsersRound className="h-3.5 w-3.5" />
                                   {memberCount ? `${memberCount}명` : '멤버 없음'}
                                 </span>
                                 {visibleMembers.map((member) => (
                                   <span
                                     key={member.id}
-                                    className="max-w-[92px] truncate rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-[#17233c]"
+                                    className="max-w-[92px] truncate rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-[#16241D]"
                                   >
                                     {member.name}
                                   </span>
                                 ))}
                                 {hiddenMemberCount > 0 ? (
-                                  <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-[#8a94a2]">
+                                  <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-[#9AA8A1]">
                                     +{hiddenMemberCount}
                                   </span>
                                 ) : null}
@@ -469,22 +473,22 @@ export function HomeScreen({
                             </div>
 
                             {isDeletingRoom ? (
-                              <LoaderCircle className="h-5 w-5 shrink-0 animate-spin text-[#8a94a2]" />
+                              <LoaderCircle className="h-5 w-5 shrink-0 animate-spin text-[#9AA8A1]" />
                             ) : isEditingRooms ? null : (
-                              <ArrowRight className="h-5 w-5 shrink-0 text-[#17233c]" />
+                              <ArrowRight className="h-5 w-5 shrink-0 text-[#16241D]" />
                             )}
                           </button>
                         );
                       })}
                     </div>
                   ) : (
-                    <div className="rounded-2xl bg-[#f8fbfd] px-3 py-3 text-sm text-[#8a94a2]">
+                    <div className="rounded-2xl bg-[#F5F9F7] px-3 py-3 text-sm text-[#9AA8A1]">
                       아직 이어갈 방이 없어요.
                     </div>
                   )}
 
                   {createdRoomsError ? (
-                    <div className="mt-2 rounded-2xl bg-[#fff7ed] px-3 py-2 text-xs text-[#b45309]">
+                    <div className="mt-2 rounded-2xl bg-[#E6F7F0] px-3 py-2 text-xs text-[#0CA178]">
                       {createdRoomsError}
                     </div>
                   ) : null}
@@ -496,7 +500,7 @@ export function HomeScreen({
               <button
                 type="button"
                 onClick={() => onOpenAuth('signup')}
-                className="kok-pressable flex h-[72px] w-full items-center justify-center gap-4 rounded-[1.5rem] bg-[#17233c] px-5 text-xl font-extrabold tracking-normal text-white shadow-[0_14px_34px_rgba(23,35,60,0.16)] transition-transform active:scale-95"
+                className="kok-pressable kok-button-shine flex h-[72px] w-full items-center justify-center gap-4 rounded-[1.5rem] bg-[#16241D] px-5 text-xl font-extrabold tracking-normal text-white shadow-[0_14px_34px_rgba(20,35,29,0.16)] transition-transform active:scale-95"
               >
                 <UserPlus className="h-7 w-7" />
                 회원가입하고 시작
@@ -505,39 +509,39 @@ export function HomeScreen({
               <button
                 type="button"
                 onClick={() => onOpenAuth('login')}
-                className="flex h-14 w-full items-center justify-center gap-2 rounded-[1.35rem] border border-[#dfe5eb] bg-white/85 px-5 text-base font-semibold text-[#17233c] shadow-[0_10px_30px_rgba(23,35,60,0.04)] transition-transform active:scale-95"
+                className="kok-pressable flex h-14 w-full items-center justify-center gap-2 rounded-[1.35rem] border border-[#E4EFE9] bg-white/88 px-5 text-base font-semibold text-[#16241D] shadow-[0_10px_30px_rgba(20,35,29,0.04)] backdrop-blur-md transition-transform active:scale-95"
               >
-                <UserRound className="h-5 w-5 text-[#76777e]" />
+                <UserRound className="h-5 w-5 text-[#6E7C75]" />
                 로그인
               </button>
             </>
           )}
 
           {roomError && (
-            <div className="rounded-[1.25rem] border border-[#ffdad6] bg-[#fff5f2] px-4 py-3 text-sm text-[#a6392e]">
+            <div className="rounded-[1.25rem] border border-[#CFEBDF] bg-[#E6F7F0] px-4 py-3 text-sm text-[#0CA178]">
               {roomError}
             </div>
           )}
         </section>
 
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs font-semibold text-[#8a94a2]">
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs font-semibold text-[#9AA8A1]">
           <a
             href="/landing"
-            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-white/60 hover:text-[#17233c]"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-white/60 hover:text-[#16241D]"
           >
             KoK 소개
             <ExternalLink className="h-3 w-3" />
           </a>
           <a
             href="/privacy.html"
-            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-white/60 hover:text-[#17233c]"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-white/60 hover:text-[#16241D]"
           >
             개인정보처리방침
             <ExternalLink className="h-3 w-3" />
           </a>
           <a
             href="/support.html"
-            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-white/60 hover:text-[#17233c]"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-white/60 hover:text-[#16241D]"
           >
             지원
             <ExternalLink className="h-3 w-3" />

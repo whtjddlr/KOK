@@ -1,4 +1,4 @@
-import { json, pickFirstEnv } from './_lib/server.js';
+import { getServerAiProviders, json, pickFirstEnv } from './_lib/server.js';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'GET') {
@@ -7,28 +7,13 @@ export default async function handler(req: any, res: any) {
   }
 
   const env = process.env;
-  const rawOpenAiKey = pickFirstEnv(env, ['OPENAI_API_KEY', 'AI_API_KEY', 'VITE_OPENAI_API_KEY']);
-  const rawUpstageKey = pickFirstEnv(env, [
-    'UPSTAGE_API_KEY',
-    'SOLAR_API_KEY',
-    'VITE_UPSTAGE_API_KEY',
-  ]);
-  const detectedUpstageKey =
-    rawUpstageKey || (rawOpenAiKey.startsWith('up_') ? rawOpenAiKey : '');
-  const detectedOpenAiKey =
-    detectedUpstageKey && rawOpenAiKey === detectedUpstageKey ? '' : rawOpenAiKey;
-  const aiProvider = detectedUpstageKey ? 'upstage' : detectedOpenAiKey ? 'openai' : null;
-  const aiModel = detectedUpstageKey
-    ? pickFirstEnv(env, ['UPSTAGE_MODEL', 'SOLAR_MODEL', 'VITE_UPSTAGE_MODEL']) || 'solar-pro3'
-    : detectedOpenAiKey
-      ? pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini'
-      : null;
+  const [serverAiProvider] = getServerAiProviders(env, null);
 
   json(res, 200, {
     ai: {
-      connected: Boolean(aiProvider),
-      provider: aiProvider,
-      model: aiModel,
+      connected: Boolean(serverAiProvider),
+      provider: serverAiProvider?.provider ?? null,
+      model: serverAiProvider?.model ?? null,
     },
     naverSearch: {
       connected: Boolean(env.NAVER_SEARCH_CLIENT_ID && env.NAVER_SEARCH_CLIENT_SECRET),

@@ -118,7 +118,7 @@ function InstallAppButton() {
         onClick={() => {
           void handleInstallClick();
         }}
-        className="fixed left-4 top-4 z-50 inline-flex h-11 items-center gap-2 rounded-full border border-white/80 bg-white/92 px-4 text-sm font-extrabold tracking-normal text-[#17233c] shadow-[0_12px_30px_rgba(23,35,60,0.14)] backdrop-blur-md transition-transform active:scale-95"
+        className="kok-pressable fixed left-4 top-4 z-50 inline-flex h-11 items-center gap-2 rounded-full border border-white/80 bg-white/92 px-4 text-sm font-extrabold tracking-normal text-[#16241D] shadow-[0_12px_30px_rgba(20,35,29,0.14)] backdrop-blur-md transition-transform active:scale-95"
         aria-label="KoK 앱 설치"
       >
         <Download className="h-4 w-4" />
@@ -126,24 +126,24 @@ function InstallAppButton() {
       </button>
 
       {guideOpen && (
-        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-[#17233c]/30 px-4 pb-4 backdrop-blur-sm sm:items-center sm:pb-0">
-          <section className="w-full max-w-[420px] rounded-[1.75rem] bg-white p-6 text-[#17233c] shadow-[0_30px_80px_rgba(23,35,60,0.24)]">
+        <div className="kok-auth-overlay fixed inset-0 z-[80] flex items-end justify-center bg-[#16241D]/30 px-4 pb-4 backdrop-blur-sm sm:items-center sm:pb-0">
+          <section className="kok-auth-sheet w-full max-w-[420px] rounded-[1.75rem] bg-white p-6 text-[#16241D] shadow-[0_30px_80px_rgba(20,35,29,0.24)]">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm font-bold text-[#ff7468]">KoK 설치</p>
+                <p className="text-sm font-bold text-[#12B886]">KoK 설치</p>
                 <h2 className="mt-1 text-2xl font-black tracking-[-0.06em]">앱처럼 열기</h2>
               </div>
               <button
                 type="button"
                 onClick={() => setGuideOpen(false)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#eef7f3] text-[#17233c]"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#F5F9F7] text-[#16241D]"
                 aria-label="설치 안내 닫기"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="mt-5 space-y-3 text-base font-semibold leading-relaxed tracking-[-0.04em] text-[#666b78]">
+            <div className="mt-5 space-y-3 text-base font-semibold leading-relaxed tracking-[-0.04em] text-[#6E7C75]">
               <p>Chrome/Edge에서는 주소창의 설치 아이콘이나 브라우저 메뉴의 “앱 설치”를 누르면 돼요.</p>
               <p>iPhone은 Safari 공유 버튼에서 “홈 화면에 추가”를 선택하면 됩니다.</p>
             </div>
@@ -930,7 +930,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#f8fbf7] text-[#17233c]">
+    <div className="min-h-screen w-full bg-[#FAFCFB] text-[#16241D]">
       {currentScreen === 'home' && <InstallAppButton />}
 
       {currentScreen === 'home' && (

@@ -340,19 +340,19 @@ export function ProfileSheet({
   };
 
   return (
-    <div className="fixed inset-0 z-[120] isolate flex items-end justify-center bg-[#f5f1eb] px-4 pb-4 pt-10">
+    <div className="fixed inset-0 z-[120] isolate flex items-end justify-center bg-[#FFFFFF] px-4 pb-4 pt-10">
       <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-[32px] bg-white p-6 shadow-2xl">
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
-            <div className="text-2xl text-[#1a1a2e]">내 프로필</div>
-            <div className="mt-1 text-sm text-[#6b7280]">
+            <div className="text-2xl text-[#16241D]">내 프로필</div>
+            <div className="mt-1 text-sm text-[#6E7C75]">
               내 출발지와 취향을 저장해 다음 약속에 바로 써요.
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f5f1eb] text-[#44505b]"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#FFFFFF] text-[#44505b]"
             aria-label="프로필 닫기"
           >
             <X className="h-4 w-4" />
@@ -360,12 +360,12 @@ export function ProfileSheet({
         </div>
 
         <div className="space-y-3">
-          <div className="rounded-[24px] bg-[#f9f7f4] p-4">
+          <div className="rounded-[24px] bg-[#F5F9F7] p-4">
             <div className="flex items-center gap-4">
               <button
                 type="button"
                 onClick={() => avatarInputRef.current?.click()}
-                className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#1f2a44] text-2xl font-black text-white shadow-[0_12px_30px_rgba(26,26,46,0.14)] transition-transform active:scale-95"
+                className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#16241D] text-2xl font-black text-white shadow-[0_12px_30px_rgba(20,35,29,0.14)] transition-transform active:scale-95"
                 aria-label="프로필 사진 선택"
               >
                 {avatarUrl ? (
@@ -377,7 +377,7 @@ export function ProfileSheet({
                 ) : (
                   <span>{name.trim().charAt(0) || currentUser.name.charAt(0)}</span>
                 )}
-                <span className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#ff7b6b] text-white">
+                <span className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#12B886] text-white">
                   {isAvatarProcessing ? (
                     <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
                   ) : (
@@ -387,8 +387,8 @@ export function ProfileSheet({
               </button>
 
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-[#1a1a2e]">프로필 사진</div>
-                <div className="mt-1 text-xs leading-relaxed text-[#8a94a2]">
+                <div className="text-sm font-semibold text-[#16241D]">프로필 사진</div>
+                <div className="mt-1 text-xs leading-relaxed text-[#9AA8A1]">
                   정사각형으로 작게 줄여 저장해요.
                 </div>
                 <div className="mt-3 flex gap-2">
@@ -396,7 +396,7 @@ export function ProfileSheet({
                     type="button"
                     onClick={() => avatarInputRef.current?.click()}
                     disabled={isAvatarProcessing}
-                    className="h-9 rounded-full bg-white px-3 text-xs font-semibold text-[#1f2a44] shadow-sm transition-transform active:scale-95 disabled:opacity-60"
+                    className="h-9 rounded-full bg-white px-3 text-xs font-semibold text-[#16241D] shadow-sm transition-transform active:scale-95 disabled:opacity-60"
                   >
                     사진 선택
                   </button>
@@ -407,7 +407,7 @@ export function ProfileSheet({
                         setAvatarUrl(null);
                         setSuccess(null);
                       }}
-                      className="h-9 rounded-full bg-white px-3 text-xs font-semibold text-[#8a94a2] shadow-sm transition-transform active:scale-95"
+                      className="h-9 rounded-full bg-white px-3 text-xs font-semibold text-[#9AA8A1] shadow-sm transition-transform active:scale-95"
                     >
                       삭제
                     </button>
@@ -431,11 +431,11 @@ export function ProfileSheet({
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="닉네임"
-            className="h-12 w-full rounded-2xl bg-[#f9f7f4] px-4 text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:ring-2 focus:ring-[#2d3561]/20"
+            className="h-12 w-full rounded-2xl bg-[#F5F9F7] px-4 text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:ring-2 focus:ring-[#16241D]/20"
           />
 
-          <div className="rounded-2xl bg-[#f9f7f4] px-4 py-3">
-            <div className="mb-2 text-xs text-[#8a94a2]">성별</div>
+          <div className="rounded-2xl bg-[#F5F9F7] px-4 py-3">
+            <div className="mb-2 text-xs text-[#9AA8A1]">성별</div>
             <div className="flex flex-wrap gap-2">
               {participantGenderOptions.map((option) => {
                 const active = gender === option.value;
@@ -446,7 +446,7 @@ export function ProfileSheet({
                     type="button"
                     onClick={() => setGender(option.value)}
                     className={`rounded-full px-3 py-1.5 text-xs transition-all ${
-                      active ? 'bg-[#1f2a44] text-white shadow-sm' : 'bg-white text-[#44505b]'
+                      active ? 'bg-[#16241D] text-white shadow-sm' : 'bg-white text-[#44505b]'
                     }`}
                   >
                     {option.label}
@@ -456,21 +456,21 @@ export function ProfileSheet({
             </div>
           </div>
 
-          <div className="rounded-2xl bg-[#f9f7f4] px-4 py-3">
-            <div className="text-xs text-[#8a94a2]">계정 아이디</div>
-            <div className="mt-1 text-sm text-[#1a1a2e]">
+          <div className="rounded-2xl bg-[#F5F9F7] px-4 py-3">
+            <div className="text-xs text-[#9AA8A1]">계정 아이디</div>
+            <div className="mt-1 text-sm text-[#16241D]">
               {currentUser.loginId || currentUser.email}
             </div>
           </div>
 
-          <div className="rounded-[24px] border border-[#e8edf3] bg-[#f8fbfd] p-4">
+          <div className="rounded-[24px] border border-[#E4EFE9] bg-[#F5F9F7] p-4">
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
-                <div className="flex items-center gap-2 text-sm text-[#1a1a2e]">
-                  <MapPin className="h-4 w-4 text-[#ff7b6b]" />
+                <div className="flex items-center gap-2 text-sm text-[#16241D]">
+                  <MapPin className="h-4 w-4 text-[#12B886]" />
                   기본 출발지
                 </div>
-                <div className="mt-1 text-xs text-[#8a94a2]">
+                <div className="mt-1 text-xs text-[#9AA8A1]">
                   약속방에서 내 위치를 한 번에 추가할 때 사용해요.
                 </div>
               </div>
@@ -483,7 +483,7 @@ export function ProfileSheet({
                     setLocationResults([]);
                     setSuccess(null);
                   }}
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-[#8a94a2] transition-colors hover:text-[#d95f4d]"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-[#9AA8A1] transition-colors hover:text-[#d95f4d]"
                   aria-label="기본 출발지 삭제"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -493,7 +493,7 @@ export function ProfileSheet({
 
             {homeLocation && (
               <div className="mb-3 rounded-2xl bg-white px-4 py-3">
-                <div className="text-sm text-[#1a1a2e]">
+                <div className="text-sm text-[#16241D]">
                   {getSafeLocationLabel(homeLocation.location)}
                 </div>
               </div>
@@ -514,7 +514,7 @@ export function ProfileSheet({
                   }
                 }}
                 placeholder="내 출발지 검색"
-                className="h-11 flex-1 rounded-2xl border border-[#edf1f4] bg-white px-4 text-sm text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:border-[#d8e0ea] focus:ring-2 focus:ring-[#2d3561]/10"
+                className="h-11 flex-1 rounded-2xl border border-[#E4EFE9] bg-white px-4 text-sm text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:border-[#E4EFE9] focus:ring-2 focus:ring-[#16241D]/10"
               />
               <button
                 type="button"
@@ -522,7 +522,7 @@ export function ProfileSheet({
                   void handleLocationSearch();
                 }}
                 disabled={isSearchingLocation}
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[#eef4ff] px-4 text-sm text-[#2d5aa7] transition-transform active:scale-95 disabled:opacity-60"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[#E6F7F0] px-4 text-sm text-[#0CA178] transition-transform active:scale-95 disabled:opacity-60"
               >
                 {isSearchingLocation ? (
                   <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -540,13 +540,13 @@ export function ProfileSheet({
                     key={`${result.title}-${result.coordinates.lat}-${result.coordinates.lng}`}
                     type="button"
                     onClick={() => handleSelectLocation(result)}
-                    className="w-full rounded-2xl border border-[#e8edf3] bg-white px-4 py-3 text-left transition-all hover:border-[#2d3561]"
+                    className="w-full rounded-2xl border border-[#E4EFE9] bg-white px-4 py-3 text-left transition-all hover:border-[#16241D]"
                   >
-                    <div className="text-sm text-[#1a1a2e]">
+                    <div className="text-sm text-[#16241D]">
                       {getAddressResultLocationLabel(result)}
                     </div>
                     {(result.roadAddress || result.jibunAddress) && (
-                      <div className="mt-1 text-xs text-[#6b7280]">
+                      <div className="mt-1 text-xs text-[#6E7C75]">
                         {result.roadAddress || result.jibunAddress}
                       </div>
                     )}
@@ -557,11 +557,11 @@ export function ProfileSheet({
           </div>
         </div>
 
-        <div className="mt-5 space-y-4 rounded-[24px] bg-[#faf7f2] p-4">
+        <div className="mt-5 space-y-4 rounded-[24px] bg-[#E6F7F0] p-4">
           <div>
-            <div className="flex items-center justify-between text-sm text-[#1a1a2e]">
+            <div className="flex items-center justify-between text-sm text-[#16241D]">
               <span>자주 찾는 카테고리</span>
-              <span className="text-xs text-[#8a94a2]">최대 {MAX_FAVORITE_CATEGORIES}개</span>
+              <span className="text-xs text-[#9AA8A1]">최대 {MAX_FAVORITE_CATEGORIES}개</span>
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               {preferenceCategoryOptions.map((option) => {
@@ -573,7 +573,7 @@ export function ProfileSheet({
                     type="button"
                     onClick={() => toggleCategory(option.value)}
                     className={`rounded-full px-4 py-2 text-sm transition-all ${
-                      active ? 'bg-[#1f2a44] text-white shadow-sm' : 'bg-white text-[#44505b]'
+                      active ? 'bg-[#16241D] text-white shadow-sm' : 'bg-white text-[#44505b]'
                     }`}
                   >
                     {option.label}
@@ -584,7 +584,7 @@ export function ProfileSheet({
           </div>
 
           <div>
-            <div className="text-sm text-[#1a1a2e]">좋아하는 분위기</div>
+            <div className="text-sm text-[#16241D]">좋아하는 분위기</div>
             <div className="mt-2 flex flex-wrap gap-2">
               {preferenceVibeOptions.map((option) => {
                 const active = vibe === option.value;
@@ -595,7 +595,7 @@ export function ProfileSheet({
                     type="button"
                     onClick={() => setVibe(option.value)}
                     className={`rounded-full px-4 py-2 text-sm transition-all ${
-                      active ? 'bg-[#ff7b6b] text-white shadow-sm' : 'bg-white text-[#44505b]'
+                      active ? 'bg-[#12B886] text-white shadow-sm' : 'bg-white text-[#44505b]'
                     }`}
                   >
                     {option.label}
@@ -606,9 +606,9 @@ export function ProfileSheet({
           </div>
 
           <div>
-            <div className="flex items-center justify-between text-sm text-[#1a1a2e]">
+            <div className="flex items-center justify-between text-sm text-[#16241D]">
               <span>관심 키워드</span>
-              <span className="text-xs text-[#8a94a2]">최대 {MAX_FAVORITE_KEYWORDS}개</span>
+              <span className="text-xs text-[#9AA8A1]">최대 {MAX_FAVORITE_KEYWORDS}개</span>
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               {preferenceKeywordOptions.map((keyword) => {
@@ -620,7 +620,7 @@ export function ProfileSheet({
                     type="button"
                     onClick={() => toggleKeyword(keyword)}
                     className={`rounded-full px-4 py-2 text-sm transition-all ${
-                      active ? 'bg-[#2d3561] text-white shadow-sm' : 'bg-white text-[#44505b]'
+                      active ? 'bg-[#16241D] text-white shadow-sm' : 'bg-white text-[#44505b]'
                     }`}
                   >
                     {keyword}
@@ -632,7 +632,7 @@ export function ProfileSheet({
         </div>
 
         {error && (
-          <div className="mt-4 rounded-2xl border border-[#ffd9cf] bg-[#fff5f2] px-4 py-3 text-sm text-[#c15b3d]">
+          <div className="mt-4 rounded-2xl border border-[#ffd9cf] bg-[#E6F7F0] px-4 py-3 text-sm text-[#c15b3d]">
             {error}
           </div>
         )}
@@ -648,7 +648,7 @@ export function ProfileSheet({
           type="button"
           onClick={handleSave}
           disabled={isSaving || isDeletingAccount}
-          className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#1f2a44] text-white transition-transform active:scale-95 disabled:opacity-60"
+          className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#16241D] text-white transition-transform active:scale-95 disabled:opacity-60"
         >
           {isSaving && <LoaderCircle className="h-4 w-4 animate-spin" />}
           프로필 저장
@@ -698,17 +698,17 @@ export function ProfileSheet({
           )}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs font-semibold text-[#8a94a2]">
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs font-semibold text-[#9AA8A1]">
           <a
             href="/privacy.html"
-            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-[#f5f1eb] hover:text-[#1f2a44]"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-[#FFFFFF] hover:text-[#16241D]"
           >
             개인정보처리방침
             <ExternalLink className="h-3 w-3" />
           </a>
           <a
             href="/support.html"
-            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-[#f5f1eb] hover:text-[#1f2a44]"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-[#FFFFFF] hover:text-[#16241D]"
           >
             지원
             <ExternalLink className="h-3 w-3" />

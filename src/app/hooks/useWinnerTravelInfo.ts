@@ -89,19 +89,15 @@ function getTransitFallbackMessage(message: string | null, partial: boolean) {
 
   if (hasOdsayNoRoute) {
     return partial
-      ? '일부 대중교통 경로는 예상 이동시간 기준으로 안내합니다.'
-      : '대중교통 예상 이동시간 기준으로 안내합니다.';
+      ? '일부 경로는 예상이에요.'
+      : '대중교통은 예상이에요.';
   }
 
   if (message) {
-    return partial
-      ? '일부 대중교통 경로는 예상 이동시간 기준으로 안내합니다.'
-      : '대중교통 예상 이동시간 기준으로 안내합니다.';
+    return partial ? '일부 경로는 예상이에요.' : '대중교통은 예상이에요.';
   }
 
-  return partial
-    ? '일부 대중교통 경로는 예상 이동시간 기준으로 안내합니다.'
-    : '대중교통 예상 이동시간 기준으로 안내합니다.';
+  return partial ? '일부 경로는 예상이에요.' : '대중교통은 예상이에요.';
 }
 
 export function useWinnerTravelInfo(
@@ -216,7 +212,7 @@ export function useWinnerTravelInfo(
 
         setLiveTransitTravelInfo(transitTravelInfo);
         setTransitStatus('error');
-        setTransitError('대중교통 예상 이동시간 기준으로 안내합니다.');
+        setTransitError('대중교통은 예상이에요.');
       });
 
     return () => {
@@ -273,7 +269,7 @@ export function useWinnerTravelInfo(
         if (!liveCount) {
           setTravelInfo(fallbackCarTravelInfo);
           setStatus('error');
-          setError('자동차 예상 이동시간 기준으로 안내합니다.');
+          setError('자동차는 예상이에요.');
           return;
         }
 
@@ -283,7 +279,7 @@ export function useWinnerTravelInfo(
         setError(
           liveCount === merged.length
             ? null
-            : '일부 자동차 경로는 예상 이동시간 기준으로 안내합니다.',
+            : '일부 경로는 예상이에요.',
         );
       })
       .catch((error) => {
@@ -293,7 +289,7 @@ export function useWinnerTravelInfo(
 
         setTravelInfo(fallbackCarTravelInfo);
         setStatus('error');
-        setError('자동차 예상 이동시간 기준으로 안내합니다.');
+        setError('자동차는 예상이에요.');
       });
 
     return () => {

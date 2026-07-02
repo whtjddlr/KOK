@@ -19,6 +19,7 @@ import {
   Users,
   UserRound,
   Wifi,
+  type LucideIcon,
 } from 'lucide-react';
 import {
   Candidate,
@@ -144,6 +145,7 @@ interface PlannerScreenProps {
 }
 
 type LocationMode = 'current' | 'address' | 'map';
+type PlannerPageKey = 'map' | 'people' | 'candidates';
 
 interface DrawSessionSnapshot {
   candidateInsights: CandidateInsight[];
@@ -179,7 +181,7 @@ type DrawChoiceChannel = {
   }) => Promise<unknown>;
 };
 
-const PARTICIPANT_COLORS = ['#ff7b6b', '#4ecdc4', '#ffd166', '#a78bfa', '#f59e0b', '#ec4899'];
+const PARTICIPANT_COLORS = ['#12B886', '#0CA178', '#38C7A6', '#7BD3B0', '#2FB48A', '#16C79A'];
 
 const travelModeOptions: Array<{
   key: TravelMode;
@@ -509,7 +511,7 @@ function getRouteStepTypeLabel(type: TravelRouteStep['type']) {
 
 function getRouteStepBadgeClass(type: TravelRouteStep['type']) {
   if (type === 'subway') {
-    return 'bg-[#eef5ff] text-[#2563eb]';
+    return 'bg-[#E6F7F0] text-[#0CA178]';
   }
 
   if (type === 'bus') {
@@ -517,10 +519,10 @@ function getRouteStepBadgeClass(type: TravelRouteStep['type']) {
   }
 
   if (type === 'car') {
-    return 'bg-[#fff7ed] text-[#ea580c]';
+    return 'bg-[#E6F7F0] text-[#ea580c]';
   }
 
-  return 'bg-[#f5f1eb] text-[#6b7280]';
+  return 'bg-[#FFFFFF] text-[#6E7C75]';
 }
 
 function getRouteDetailMeta(route: TravelInfo) {
@@ -540,20 +542,20 @@ function getRouteDetailMeta(route: TravelInfo) {
 
 function getLocationErrorMessage(error: GeolocationPositionError) {
   if (error.code === error.PERMISSION_DENIED) {
-    return '브라우저 위치 권한이 꺼져 있어요. 권한을 허용해 주세요.';
+    return '위치 권한 필요';
   }
 
   if (error.code === error.POSITION_UNAVAILABLE) {
-    return '현재 위치를 찾지 못했어요. 잠시 후 다시 시도해 주세요.';
+    return '위치 찾기 실패';
   }
 
-  return '위치를 가져오는 데 시간이 걸렸어요. 다시 눌러 주세요.';
+  return '위치 시간 초과';
 }
 
 function getBrowserCurrentCoordinates() {
   return new Promise<Coordinates>((resolve, reject) => {
     if (!navigator.geolocation) {
-      reject(new Error('이 브라우저에서는 현재 위치 기능을 지원하지 않아요.'));
+      reject(new Error('현재 위치를 쓸 수 없어요.'));
       return;
     }
 
@@ -590,7 +592,7 @@ function getFriendlyRoomMessage(message: string | null) {
     lowerMessage.includes('meeting_room_participants.') ||
     lowerMessage.includes('meeting_rooms.')
   ) {
-    return '방 정보를 다시 맞추는 중이에요. 잠시 후 다시 시도해 주세요.';
+    return '방을 맞추는 중이에요.';
   }
 
   return message;
@@ -727,7 +729,7 @@ export function PlannerScreen({
   const [runtimeAiConfig, setRuntimeAiConfig] = useState<RuntimeAiConfig | null>(null);
   const [isAiConfigOpen, setIsAiConfigOpen] = useState(false);
   const [showOptionsPage, setShowOptionsPage] = useState(false);
-  const [showCandidateList, setShowCandidateList] = useState(false);
+  const [activePlannerPage, setActivePlannerPage] = useState<PlannerPageKey>('map');
   const [showAddForm, setShowAddForm] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
   const [drawSessionSnapshot, setDrawSessionSnapshot] = useState<DrawSessionSnapshot | null>(null);
@@ -745,6 +747,7 @@ export function PlannerScreen({
   const newTravelTime = DEFAULT_MAX_TRAVEL_TIME;
   const [editingSelfParticipantId, setEditingSelfParticipantId] = useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
   const [expandedRouteKey, setExpandedRouteKey] = useState<string | null>(null);
   const [excludedCandidateIds, setExcludedCandidateIds] = useState<string[]>([]);
   const [activeNearbyCategory, setActiveNearbyCategory] = useState<NearbyPlaceCategory>(
@@ -1166,8 +1169,8 @@ export function PlannerScreen({
   const activeModeDetailLabel = isFairnessMode
     ? `${activeThrill.shortLabel} · ${activeSpreadLimit}분 이하`
     : selectionMode === 'hotplace'
-      ? '핫플 후보 다양화'
-      : '집앞 후보 다양화';
+      ? '핫플 후보 넓게'
+      : '집앞 후보 넓게';
   const candidateScope = DEFAULT_CANDIDATE_SCOPE;
   const activeCandidateTargetCount = DEFAULT_CANDIDATE_TARGET_COUNT;
   const roomActorIds = useMemo(
@@ -1300,7 +1303,7 @@ export function PlannerScreen({
   const sharedCandidateIds = useSharedOnlineCandidatePool ? fallbackCandidateIds : aiCandidateIds;
   const sharedCandidateStatus = useSharedOnlineCandidatePool ? 'ready' : aiCandidateStatus;
   const sharedCandidateMessage = useSharedOnlineCandidatePool
-    ? '온라인 방에서는 모두 같은 후보판으로 동기화해요.'
+    ? '후보를 맞췄어요.'
     : aiCandidateMessage;
   const sharedCandidateError = useSharedOnlineCandidatePool ? null : aiCandidateError;
 
@@ -1421,53 +1424,81 @@ export function PlannerScreen({
       fairnessVerificationStatus === 'loading',
   );
   const drawBlockedReason = participants.length < 2
-    ? '먼저 참여자를 2명 이상 입력해 주세요.'
+    ? '참여자가 필요해요'
     : sharedCandidateStatus === 'loading'
-      ? 'AI가 후보를 정리하는 중이에요.'
+      ? '후보 찾는 중이에요'
       : fairnessVerificationPending
-        ? '실제 이동시간으로 공정도를 다시 확인 중이에요.'
+        ? '시간 확인 중이에요'
         : !drawPool.length
-          ? fallbackNotice ?? '추첨 가능한 후보가 아직 없어요.'
+          ? fallbackNotice ?? '후보가 없어요'
           : null;
   const onlineReadyBlockedReason =
     onlineRoom && !currentReadyActorId
-      ? '레디 전에 내 위치를 먼저 저장해 주세요.'
+      ? '위치가 필요해요'
       : drawBlockedReason;
   const drawDisabledReason = onlineRoom ? onlineReadyBlockedReason : drawBlockedReason;
   const readyButtonDisabled = Boolean(
     isSettingReady || (onlineReadyBlockedReason && !isCurrentActorReady),
   );
-  const readyStatusText = onlineRoom
-    ? onlineReadyBlockedReason
-      ? onlineReadyBlockedReason
-      : isOnlineReadyComplete
-        ? '모두 레디 완료. 진행자가 게임을 시작해요.'
-        : isCurrentActorReady
-          ? `레디 완료 ${readyCount}/${readyRequiredCount}. 다른 참여자를 기다리는 중이에요.`
-          : `${readyRequiredCount}명 모두 레디하면 추첨 게임이 열려요.`
-    : drawBlockedReason ??
-      (isFairnessMode
-        ? `이동시간 차이 ${activeSpreadLimit}분 이하 기준으로 고른 ${drawPool.length}개의 후보 안에서 마지막 랜덤을 돌립니다.`
-        : `${activeMode.shortLabel} 후보 ${drawPool.length}개 안에서 마지막 랜덤을 돌립니다.`);
   const onlineReadyButtonLabel = onlineRoom
     ? isSettingReady
-      ? '레디 반영 중'
+      ? '저장 중이에요'
       : !currentReadyActorId
-        ? '내 위치 저장 필요'
+        ? '위치가 필요해요'
         : participants.length < 2
-          ? '참여자 2명 필요'
-          : sharedCandidateStatus === 'loading'
-            ? 'AI 후보 정리 중'
+          ? '참여자가 필요해요'
+        : sharedCandidateStatus === 'loading'
+            ? '후보 찾는 중이에요'
             : fairnessVerificationPending
-              ? '실제 이동시간 확인 중'
+              ? '시간 확인 중이에요'
               : !drawPool.length
-                ? '기준 후보 없음'
+                ? '후보가 없어요'
                 : isOnlineReadyComplete
                   ? `모두 레디 ${readyCount}/${readyRequiredCount}`
                   : isCurrentActorReady
                     ? `레디 완료 ${readyCount}/${readyRequiredCount}`
-                    : `레디 ${readyCount}/${readyRequiredCount}`
+                      : `레디 ${readyCount}/${readyRequiredCount}`
     : null;
+  const plannerStageTitle = onlineRoom
+    ? onlineReadyBlockedReason
+      ? onlineReadyBlockedReason
+      : isOnlineReadyComplete
+        ? '준비됐어요'
+        : isCurrentActorReady
+          ? '레디했어요'
+          : '레디해 주세요'
+    : drawBlockedReason
+      ? '준비가 필요해요'
+      : '추첨할 수 있어요';
+  const plannerPages: Array<{
+    key: PlannerPageKey;
+    label: string;
+    value: string;
+    icon: LucideIcon;
+    ariaLabel: string;
+  }> = [
+    {
+      key: 'map',
+      label: '후보',
+      value: `${visibleCandidateInsights.length}곳`,
+      icon: Sparkles,
+      ariaLabel: '후보 보기',
+    },
+    {
+      key: 'people',
+      label: '참여자',
+      value: `${participants.length}명`,
+      icon: Users,
+      ariaLabel: '참여자 보기',
+    },
+    {
+      key: 'candidates',
+      label: '후보 상세',
+      value: `${drawPool.length}곳`,
+      icon: Search,
+      ariaLabel: '후보 상세보기',
+    },
+  ];
   const readyDrawSessionSeed = useMemo(
     () =>
       onlineRoom && !isSettingReady && isOnlineReadyComplete && drawPool.length
@@ -1552,7 +1583,7 @@ export function PlannerScreen({
       });
       setShowDrawer(true);
     } catch (error) {
-      setRoomMessage(error instanceof Error ? error.message : '추첨 준비 중 방 상태를 다시 확인하지 못했어요.');
+      setRoomMessage(error instanceof Error ? error.message : '방 상태를 못 봤어요.');
       openedReadyDrawSessionRef.current = null;
     } finally {
       isOpeningDrawSessionRef.current = false;
@@ -1729,6 +1760,7 @@ export function PlannerScreen({
       return;
     }
 
+    setActivePlannerPage('people');
     setExpandedRouteKey(getRouteSelectionKey(selectedInsight.candidate.id, participantId));
     window.setTimeout(() => {
       routePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1773,6 +1805,7 @@ export function PlannerScreen({
   useEffect(() => {
     if (!visibleCandidateInsights.length) {
       setSelectedCandidateId(null);
+      setExpandedCandidateId(null);
       return;
     }
 
@@ -1785,8 +1818,21 @@ export function PlannerScreen({
   }, [selectedCandidateId, visibleCandidateInsights]);
 
   useEffect(() => {
+    if (
+      expandedCandidateId &&
+      !visibleCandidateInsights.some((insight) => insight.candidate.id === expandedCandidateId)
+    ) {
+      setExpandedCandidateId(null);
+    }
+  }, [expandedCandidateId, visibleCandidateInsights]);
+
+  useEffect(() => {
     setActiveNearbyCategory(getDefaultNearbyCategory(selectedCategory));
   }, [selectedCategory, selectedCandidateId]);
+
+  useEffect(() => {
+    setExpandedCandidateId(null);
+  }, [selectedCategory]);
 
   useEffect(() => {
     if (!nearbySections.length) {
@@ -1810,6 +1856,7 @@ export function PlannerScreen({
         : null,
     [participants, selfProfileParticipantKey],
   );
+  const isSelfProfileAdded = Boolean(selfProfileParticipant);
   const selfProfileMatchesHomeLocation = Boolean(
     currentUserHomeLocation &&
       selfProfileParticipant &&
@@ -1932,7 +1979,7 @@ export function PlannerScreen({
     }
 
     const shareUrl = getRoomShareUrl(onlineRoom.code);
-    const shareText = `KoK 약속방 ${onlineRoom.code}\n친구들과 출발지를 모으고 약속 장소를 정해보세요.`;
+    const shareText = `KoK 약속방 ${onlineRoom.code}\n출발지를 모아 장소를 정해요.`;
 
     try {
       if (navigator.share) {
@@ -1980,13 +2027,17 @@ export function PlannerScreen({
   const handleLocationModeChange = (mode: LocationMode) => {
     setLocationMode(mode);
     resetLocationDraft();
+
+    if (mode === 'map') {
+      setActivePlannerPage('map');
+    }
   };
 
   const handleAddressSearch = async () => {
     const query = addressQuery.trim();
 
     if (!query) {
-      setLocationError('검색할 주소를 먼저 입력해 주세요.');
+      setLocationError('주소가 필요해요.');
       return;
     }
 
@@ -2009,7 +2060,7 @@ export function PlannerScreen({
         setLocationError(
           rawResults.length
             ? SERVICE_AREA_UNSUPPORTED_MESSAGE
-            : '검색 결과가 없어요. 도로명이나 건물명으로 다시 검색해 주세요.',
+            : '검색 결과가 없어요.',
         );
         return;
       }
@@ -2026,7 +2077,7 @@ export function PlannerScreen({
         setNewCoordinates(firstResult.coordinates);
       }
     } catch (error) {
-      setLocationError(error instanceof Error ? error.message : '주소 검색 중 오류가 발생했어요.');
+      setLocationError(error instanceof Error ? error.message : '주소를 못 찾았어요.');
     } finally {
       setIsSearchingAddress(false);
     }
@@ -2043,7 +2094,7 @@ export function PlannerScreen({
 
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
-      setLocationError('이 브라우저에서는 현재 위치 기능을 지원하지 않아요.');
+      setLocationError('현재 위치를 쓸 수 없어요.');
       return;
     }
 
@@ -2084,6 +2135,7 @@ export function PlannerScreen({
 
   const handleMapLocationPick = async (coordinates: Coordinates) => {
     setShowAddForm(true);
+    setActivePlannerPage('people');
     setLocationMode('map');
     setNewCoordinates(coordinates);
     setAddressResults([]);
@@ -2120,7 +2172,7 @@ export function PlannerScreen({
 
       setNewLocation('지도에서 선택한 위치');
       setAddressQuery('');
-      setLocationError(error instanceof Error ? error.message : '선택한 위치 주소를 찾지 못했어요.');
+	      setLocationError(error instanceof Error ? error.message : '주소를 못 봤어요.');
     }
   };
 
@@ -2251,11 +2303,10 @@ export function PlannerScreen({
     }
 
     autoAddedSelfProfileKeyRef.current = autoAddKey;
-    handleQuickAddSelfProfile();
+    upsertSelfProfileParticipant(currentUserHomeLocation);
   }, [
     currentUserHomeLocation,
     currentUserId,
-    handleQuickAddSelfProfile,
     isSelfProfileAdded,
     onlineRoom?.id,
   ]);
@@ -2267,7 +2318,7 @@ export function PlannerScreen({
     }
 
     if (!onUpdateHomeLocation) {
-      setRoomMessage('프로필 저장을 먼저 사용할 수 없어요. 내 정보에서 출발지를 확인해 주세요.');
+      setRoomMessage('내 정보가 필요해요.');
       onOpenProfile?.();
       return;
     }
@@ -2310,9 +2361,9 @@ export function PlannerScreen({
       }
 
       upsertSelfProfileParticipant(nextHomeLocation);
-      setRoomMessage('내 위치를 현재 위치로 변경했어요.');
+      setRoomMessage('위치를 바꿨어요.');
     } catch (error) {
-      const message = error instanceof Error ? error.message : '현재 위치를 저장하지 못했어요.';
+      const message = error instanceof Error ? error.message : '위치를 못 저장했어요.';
       setRoomMessage(message);
       setLocationError(message);
     } finally {
@@ -2382,7 +2433,7 @@ export function PlannerScreen({
     }
 
     if (!newCoordinates) {
-      setLocationError('위치를 먼저 선택해 주세요.');
+      setLocationError('위치를 골라주세요.');
       return;
     }
 
@@ -2570,10 +2621,19 @@ export function PlannerScreen({
     resetOnlineReadyStateAfterOptionChange({ thrillLevel: level });
   };
 
+  const handleCandidateCardSelect = (candidateId: string) => {
+    setSelectedCandidateId(candidateId);
+    setExpandedCandidateId((current) => (current === candidateId ? null : candidateId));
+  };
+
   const handleExcludeCandidate = (candidateId: string) => {
     setExcludedCandidateIds((current) =>
       current.includes(candidateId) ? current : [...current, candidateId],
     );
+
+    if (expandedCandidateId === candidateId) {
+      setExpandedCandidateId(null);
+    }
 
     if (selectedCandidateId === candidateId) {
       const nextInsight = visibleCandidateInsights.find(
@@ -2589,7 +2649,7 @@ export function PlannerScreen({
     }
 
     if (!currentReadyActorId) {
-      setRoomMessage('레디 전에 내 위치를 먼저 저장해 주세요.');
+      setRoomMessage('위치가 필요해요.');
       return;
     }
 
@@ -2616,7 +2676,7 @@ export function PlannerScreen({
       setSyncedRoom(nextRoom);
     } catch (error) {
       setSyncedRoom(previousRoom);
-      setRoomMessage(error instanceof Error ? error.message : '레디 상태를 반영하지 못했어요.');
+      setRoomMessage(error instanceof Error ? error.message : '레디를 못 했어요.');
     } finally {
       setIsSettingReady(false);
     }
@@ -2663,7 +2723,7 @@ export function PlannerScreen({
             room.selectedRouteSnapshot ?? selectedRouteSnapshot,
           );
         } catch (error) {
-          setRoomMessage(error instanceof Error ? error.message : '결과를 방에 저장하지 못했어요.');
+          setRoomMessage(error instanceof Error ? error.message : '결과를 못 저장했어요.');
         }
       })();
 
@@ -2688,14 +2748,14 @@ export function PlannerScreen({
 
   const resolvedCandidateGuideText =
     sharedCandidateStatus === 'loading'
-      ? 'AI가 후보 지역을 정리 중이에요.'
+      ? '후보 찾는 중이에요.'
       : sharedCandidateError
         ? sharedCandidateError
         : fairnessVerificationMessage
           ? fairnessVerificationMessage
         : sharedCandidateMessage
           ? sharedCandidateMessage
-          : fallbackNotice ?? `공통 범위 안에서 바로 추첨 가능한 후보 ${drawPool.length}곳을 골라뒀어요.`;
+	          : fallbackNotice ?? `후보 ${drawPool.length}곳이 있어요.`;
   const displayRoomMessage = getFriendlyRoomMessage(roomMessage);
   const activeDrawSession = drawSessionSnapshot ?? {
     candidateInsights: drawPool,
@@ -2751,7 +2811,7 @@ export function PlannerScreen({
         payload: nextBars,
       })
       .catch(() => {
-        setRoomMessage('사다리 추가 동기화가 잠시 지연되고 있어요. 선택 시 최종 사다리는 다시 공유됩니다.');
+        setRoomMessage('사다리가 늦어요.');
       });
   };
   const handleDrawChoice = (
@@ -2788,48 +2848,45 @@ export function PlannerScreen({
         payload: nextChoice,
       })
       .catch(() => {
-        setRoomMessage('게임 진행 동기화가 잠시 지연되고 있어요. 결과는 방에 저장됩니다.');
+        setRoomMessage('게임이 늦어요.');
       });
   };
   const plannerLoadingState =
-    aiCandidateStatus === 'loading'
-      ? {
-          title: '후보 지도를 넓혀보는 중이에요',
-          detail: '모임 종류와 현재 참여자 위치를 맞춰서 갈 만한 동네를 추리고 있어요.',
-          steps: ['중간 지점 계산', '분위기 맞춤', '후보 정렬'],
-        }
-      : fairnessVerificationPending
-        ? {
-            title: '실제 이동시간을 맞춰보는 중이에요',
-            detail: `${participants.length}명의 이동시간 차이가 너무 벌어지지 않게 다시 확인하고 있어요.`,
-            steps: ['경로 확인', '시간차 비교', '공정도 정리'],
-          }
-        : selectedRouteStatus === 'loading' && selectedInsight
-          ? {
-              title: `${selectedInsight.candidate.name}까지 가는 길 확인 중`,
-              detail: '참여자별 이동수단 기준으로 길찾기 정보를 업데이트하고 있어요.',
-              steps: ['출발지 연결', '이동시간 확인', '경로 요약'],
-            }
+	    aiCandidateStatus === 'loading'
+	      ? {
+		          title: '후보 찾는 중이에요',
+		          steps: ['중간', '분위기', '정렬'],
+	        }
+	      : fairnessVerificationPending
+	        ? {
+		            title: '시간 맞추는 중이에요',
+		            steps: ['경로', '시간차', '정리'],
+	          }
+	        : selectedRouteStatus === 'loading' && selectedInsight
+	          ? {
+		              title: `${selectedInsight.candidate.name} 길 확인 중`,
+		              steps: ['출발지', '시간', '경로'],
+	            }
           : null;
 
   return (
-    <div className="kok-screen-enter min-h-screen bg-[#f5f1eb] pb-32 text-[#1f2a44]">
-      <div className="sticky top-0 z-20 flex items-center justify-between rounded-b-[2rem] bg-[#f5f1eb]/88 px-5 py-4 shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-md">
+    <div className="kok-screen-enter min-h-screen bg-[#FFFFFF] pb-56 text-[#16241D] sm:pb-52">
+      <div className="sticky top-0 z-20 flex items-center justify-between rounded-b-[2rem] bg-[#FFFFFF]/88 px-5 py-4 shadow-[0_10px_30px_rgba(20,35,29,0.08)] backdrop-blur-md">
         <button
           type="button"
           onClick={onBack}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-[#1f2a44] shadow-sm transition-transform active:scale-95"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-[#16241D] shadow-sm transition-transform active:scale-95"
         >
           <ChevronLeft className="h-6 w-6" />
         </button>
-        <h2 className="absolute left-1/2 -translate-x-1/2 text-xl font-black tracking-[-0.05em] text-[#1f2a44]">
+        <h2 className="absolute left-1/2 -translate-x-1/2 text-xl font-black tracking-[-0.05em] text-[#16241D]">
           KoK
         </h2>
         {onOpenProfile ? (
           <button
             type="button"
             onClick={onOpenProfile}
-            className="inline-flex h-10 max-w-[132px] items-center gap-1.5 rounded-full bg-white px-3 text-sm text-[#1f2a44] shadow-sm transition-transform active:scale-95"
+            className="inline-flex h-10 max-w-[132px] items-center gap-1.5 rounded-full bg-white px-3 text-sm text-[#16241D] shadow-sm transition-transform active:scale-95"
             aria-label="프로필 설정"
           >
             {currentUserAvatarUrl ? (
@@ -2839,7 +2896,7 @@ export function PlannerScreen({
                 className="h-5 w-5 shrink-0 rounded-full object-cover"
               />
             ) : (
-              <UserRound className="h-4 w-4 shrink-0 text-[#6b7280]" />
+              <UserRound className="h-4 w-4 shrink-0 text-[#6E7C75]" />
             )}
             <span className="truncate">{currentUserName}</span>
           </button>
@@ -2850,43 +2907,95 @@ export function PlannerScreen({
 
       <div className="mx-auto flex max-w-[1040px] flex-col gap-4 px-4 py-5 sm:gap-5 sm:py-6">
         {onlineRoom && (
-          <section className="rounded-[1.75rem] border border-white/70 bg-white/92 px-4 py-3 shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-sm">
-            <div className="flex items-center justify-between gap-3">
+          <section className="kok-card-pop rounded-[1.35rem] border border-white/80 bg-white/95 p-3 shadow-[0_10px_28px_rgba(20,35,29,0.07)] backdrop-blur-xl">
+            <div className="flex items-start">
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-semibold text-[#1f2a44]">
-                  <Wifi className="h-4 w-4 shrink-0 text-[#22c55e]" />
-                  <span className="shrink-0">방 코드</span>
-                  <span className="rounded-full bg-[#f5f1eb] px-2.5 py-1 text-xs text-[#45464d]">
-                    {onlineRoom.code}
-                  </span>
-                </div>
-                <div className="mt-1 text-xs text-[#8a94a2]">
-                  {participants.length}명 참여 · 레디 {readyCount}/{Math.max(readyRequiredCount, 0)}
-                  {isOnlineReadyComplete && activeDrawControllerId
-                    ? ` · 진행자 ${activeDrawControllerName}`
-                    : ''}
+                <button
+                  type="button"
+                  onClick={handleCopyRoomLink}
+                  className="kok-pressable inline-flex h-8 max-w-full items-center gap-1.5 rounded-full bg-[#E6F7F0] px-3 text-xs font-extrabold text-[#0CA178] shadow-[0_8px_20px_rgba(12,161,120,0.1)]"
+                  aria-label={`약속방 ${onlineRoom.code} 링크 공유`}
+                >
+                  <Wifi className="h-3.5 w-3.5 shrink-0" />
+                  방 {onlineRoom.code}
+                  <span className="h-4 w-px bg-[#0CA178]/20" aria-hidden="true" />
+                  <Copy className="h-3 w-3 shrink-0" />
+                  <span>{copiedRoomLink ? '복사됨' : '공유'}</span>
+                </button>
+                <h3 className="mt-2 text-[1.15rem] font-black leading-tight tracking-normal text-[#16241D]">
+                  {plannerStageTitle}
+                </h3>
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-3 gap-1.5">
+              <div className="rounded-[1rem] bg-[#F5F9F7] px-2.5 py-2">
+                <div className="text-[10px] font-bold text-[#8B9992]">참여</div>
+                <div className="mt-0.5 text-base font-black text-[#16241D]">{participants.length}명</div>
+              </div>
+              <div className="rounded-[1rem] bg-[#F5F9F7] px-2.5 py-2">
+                <div className="text-[10px] font-bold text-[#8B9992]">레디</div>
+                <div className="mt-0.5 text-base font-black text-[#16241D]">
+                  {readyCount}/{Math.max(readyRequiredCount, 0)}
                 </div>
               </div>
-
-              <button
-                type="button"
-                onClick={handleCopyRoomLink}
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-4 text-sm text-white shadow-sm transition-transform active:scale-95"
-              >
-                <Copy className="h-4 w-4" />
-                {copiedRoomLink ? '복사됨' : '공유'}
-              </button>
+              <div className="rounded-[1rem] bg-[#F5F9F7] px-2.5 py-2">
+                <div className="text-[10px] font-bold text-[#8B9992]">후보</div>
+                <div className="mt-0.5 text-base font-black text-[#16241D]">{drawPool.length}곳</div>
+              </div>
             </div>
 
             {(displayRoomMessage || roomSyncStatus === 'error') && (
-              <div className="mt-3 rounded-xl bg-[#fff8e8] px-3 py-2 text-xs text-[#8a621c]">
-                {displayRoomMessage || '방 동기화를 확인해 주세요.'}
+              <div className="mt-2 rounded-2xl bg-[#fff8e8] px-3 py-2 text-xs font-semibold text-[#8a621c]">
+	                {displayRoomMessage || '방 연결을 봐주세요.'}
               </div>
             )}
           </section>
-        )}
+	        )}
 
-        <section className="order-1 space-y-3">
+	        <nav className="grid grid-cols-3 gap-1.5 rounded-[1.15rem] bg-[#F5F9F7] p-1">
+	          {plannerPages.map((page) => {
+	            const active = page.key === activePlannerPage;
+	            const PageIcon = page.icon;
+
+	            return (
+	              <button
+	                key={page.key}
+	                type="button"
+	                onClick={() => setActivePlannerPage(page.key)}
+	                aria-label={`${page.ariaLabel} ${page.value}`}
+	                className={`kok-pressable flex min-h-11 flex-col items-center justify-center rounded-[0.9rem] px-2 text-center transition-all ${
+	                  active
+	                    ? 'bg-white text-[#16241D] shadow-sm'
+	                    : 'text-[#6E7C75]'
+	                }`}
+	              >
+	                <span className="flex items-center justify-center gap-1">
+	                  <span
+	                    className={`flex h-5 w-5 items-center justify-center rounded-full transition-all ${
+	                      active ? 'bg-[#E6F7F0] text-[#0CA178]' : 'bg-white/70 text-[#9AA8A1]'
+	                    }`}
+	                  >
+	                    <PageIcon className="h-3.5 w-3.5" />
+	                  </span>
+	                  <span className="text-xs font-black">{page.label}</span>
+	                </span>
+	                <span className="mt-0.5 text-[11px] font-bold">{page.value}</span>
+	              </button>
+	            );
+	          })}
+	        </nav>
+
+	        {activePlannerPage === 'map' && (
+	        <section className="order-1 space-y-3">
+		          <div className="flex items-end justify-between gap-3 px-1">
+		            <div>
+		              <h3 className="text-lg font-black tracking-normal text-[#16241D]">지도에서 보기</h3>
+	            </div>
+            <span className="shrink-0 rounded-full bg-[#F5F9F7] px-3 py-1.5 text-xs font-bold text-[#6E7C75]">
+              {visibleCandidateInsights.length}곳
+            </span>
+          </div>
           <MapView
             participants={participants}
             candidates={visibleCandidateInsights.map((insight) => insight.candidate)}
@@ -2900,20 +3009,21 @@ export function PlannerScreen({
             locationPickerHintVisible={showAddForm && locationMode === 'map'}
             pickedLocationPreview={showAddForm ? newCoordinates : null}
             onLocationPick={handleMapLocationPick}
-            colors={PARTICIPANT_COLORS}
-          />
-        </section>
+	            colors={PARTICIPANT_COLORS}
+	          />
+	        </section>
+	        )}
 
-        <div className="order-3 flex flex-col gap-3 rounded-[1.75rem] border border-white/70 bg-white/92 px-4 py-3 shadow-[0_10px_30px_rgba(26,26,46,0.06)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <Sparkles className="h-4 w-4 text-[#ff7b6b]" />
-            <span className="rounded-full bg-[#fff2ee] px-3 py-1 text-xs font-semibold text-[#ff7b6b]">
+        <div className="order-3 flex flex-col gap-2 rounded-[1.25rem] border border-white/80 bg-white/95 p-3 shadow-[0_8px_24px_rgba(20,35,29,0.05)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <Sparkles className="h-4 w-4 text-[#12B886]" />
+            <span className="rounded-full bg-[#E6F7F0] px-3 py-1 text-xs font-semibold text-[#12B886]">
               {activeCategory.label}
             </span>
-            <span className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs font-semibold text-[#1f2a44]">
+            <span className="rounded-full bg-[#FFFFFF] px-3 py-1 text-xs font-semibold text-[#16241D]">
               {activeMode.shortLabel}
             </span>
-            <span className="rounded-full bg-white px-3 py-1 text-xs text-[#1a1a2e] shadow-sm">
+            <span className="rounded-full bg-white px-3 py-1 text-xs text-[#16241D] shadow-sm">
               {activeModeDetailLabel}
             </span>
           </div>
@@ -2921,7 +3031,7 @@ export function PlannerScreen({
           <button
             type="button"
             onClick={() => setShowOptionsPage(true)}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-white px-4 text-sm text-[#1a1a2e] shadow-sm transition-transform active:scale-95 sm:self-auto"
+            className="kok-pressable inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#F5F9F7] px-4 text-sm font-extrabold text-[#16241D] shadow-sm sm:self-auto"
           >
             <Settings2 className="h-4 w-4" />
             옵션 변경
@@ -2929,19 +3039,16 @@ export function PlannerScreen({
         </div>
 
         {plannerLoadingState && (
-          <section className="kok-loading-card order-3 rounded-[1.75rem] border border-white/80 bg-white/94 p-4 shadow-[0_12px_34px_rgba(23,35,60,0.08)] backdrop-blur-xl">
+          <section className="kok-loading-card order-3 rounded-[1.75rem] border border-white/80 bg-white/94 p-4 shadow-[0_12px_34px_rgba(20,35,29,0.08)] backdrop-blur-xl">
             <div className="flex items-center gap-3">
               <div className="kok-route-loader">
                 <span />
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-bold text-[#17233c]">
-                  {plannerLoadingState.title}
-                </div>
-                <div className="mt-1 text-xs leading-relaxed text-[#6f7b79]">
-                  {plannerLoadingState.detail}
-                </div>
-              </div>
+	              <div className="min-w-0 flex-1">
+	                <div className="text-sm font-bold text-[#16241D]">
+	                  {plannerLoadingState.title}
+	                </div>
+	              </div>
             </div>
             <div className="mt-4 kok-loading-progress" />
             <div className="kok-stagger-list mt-3 grid gap-2 sm:grid-cols-3">
@@ -2957,7 +3064,9 @@ export function PlannerScreen({
           </section>
         )}
 
-        <section ref={participantSectionRef} className="order-2">
+	        {activePlannerPage === 'people' && (
+	        <>
+	        <section ref={participantSectionRef} className="order-2">
           {(showAddForm || participants.length > 0) && (
             <div className="mb-3 flex justify-end">
               <button
@@ -2970,22 +3079,22 @@ export function PlannerScreen({
 
                   setShowAddForm(true);
                 }}
-                className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-full border px-4 text-sm font-medium shadow-sm transition-all active:scale-95 ${
-                  showAddForm
-                    ? 'border-[#1f2a44] bg-[#1f2a44] text-white'
-                    : 'border-[#dfe5eb] bg-white text-[#2d3561] hover:bg-[#f8fbfd]'
+	                className={`kok-pressable inline-flex h-11 items-center justify-center gap-1.5 rounded-full border px-4 text-sm font-extrabold shadow-sm transition-all ${
+	                  showAddForm
+	                    ? 'border-[#16241D] bg-[#16241D] text-white'
+	                    : 'border-[#E4EFE9] bg-white text-[#16241D] hover:bg-[#F5F9F7]'
                 }`}
-              >
-                <Plus className={`h-4 w-4 transition-transform ${showAddForm ? 'rotate-45' : ''}`} />
-                {showAddForm ? '닫기' : '수동 추가'}
-              </button>
+	              >
+	                <Plus className={`h-4 w-4 transition-transform ${showAddForm ? 'rotate-45' : ''}`} />
+	                {showAddForm ? '닫기' : '친구 추가'}
+	              </button>
             </div>
           )}
 
           {currentUserId && (
-            <div className="mb-3 flex flex-col gap-3 rounded-[1.75rem] border border-white/70 bg-white/95 p-4 shadow-[0_10px_30px_rgba(26,26,46,0.06)] sm:flex-row sm:items-center sm:justify-between">
+            <div className="mb-3 flex flex-col gap-3 rounded-[1.75rem] border border-white/80 bg-white/95 p-4 shadow-[0_12px_34px_rgba(20,35,29,0.07)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f5f1eb] text-[#2d3561]">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#F5F9F7] text-[#16241D]">
                   {currentUserAvatarUrl ? (
                     <img
                       src={currentUserAvatarUrl}
@@ -2997,8 +3106,13 @@ export function PlannerScreen({
                   )}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-[#1a1a2e]">내 정보</div>
-                  <div className="mt-1 truncate text-sm text-[#6b7280]">
+                  <div className="flex items-center gap-2">
+                    <div className="text-base font-black text-[#16241D]">내 위치</div>
+                    <span className="rounded-full bg-[#E6F7F0] px-2.5 py-1 text-[11px] font-extrabold text-[#0CA178]">
+	                      {selfProfileParticipant ? '참여됐어요' : '위치 필요'}
+                    </span>
+                  </div>
+                  <div className="mt-1 truncate text-sm font-semibold text-[#6E7C75]">
                     {currentUserHomeLocation
                       ? [
                           currentUserName,
@@ -3009,7 +3123,7 @@ export function PlannerScreen({
                         ]
                           .filter(Boolean)
                           .join(' · ')
-                      : '현재 위치를 저장하면 자동으로 참여자에 들어가요.'}
+	                      : '위치가 없어요.'}
                   </div>
                 </div>
               </div>
@@ -3020,7 +3134,7 @@ export function PlannerScreen({
                   void handleUpdateHomeLocationFromCurrentPosition();
                 }}
                 disabled={isUpdatingHomeLocation}
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-4 text-sm text-white shadow-sm transition-transform active:scale-95 disabled:opacity-60"
+                className="kok-pressable inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-[1.25rem] bg-[#16241D] px-5 text-sm font-extrabold text-white shadow-[0_12px_30px_rgba(20,35,29,0.14)] disabled:opacity-60"
               >
                 {isUpdatingHomeLocation ? (
                   <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -3033,13 +3147,13 @@ export function PlannerScreen({
           )}
 
           {!isGuestMode && savedFriends.length > 0 && (
-            <div className="mb-3 rounded-[1.75rem] border border-white/70 bg-white/95 p-3 shadow-[0_10px_30px_rgba(26,26,46,0.06)]">
-              <div className="mb-2 flex items-center justify-between gap-2 text-[#1a1a2e]">
+            <div className="mb-3 rounded-[1.75rem] border border-white/70 bg-white/95 p-3 shadow-[0_10px_30px_rgba(20,35,29,0.06)]">
+              <div className="mb-2 flex items-center justify-between gap-2 text-[#16241D]">
                 <div className="flex items-center gap-2">
-                  <Users className="h-4 w-4 text-[#2d3561]" />
+                  <Users className="h-4 w-4 text-[#16241D]" />
                   <span className="text-sm">저장된 친구</span>
                 </div>
-                <span className="text-xs text-[#8a94a2]">눌러서 추가</span>
+	                <span className="text-xs text-[#9AA8A1]">탭해서 추가</span>
               </div>
 
               <div className="flex max-h-28 flex-wrap gap-2 overflow-y-auto pr-1">
@@ -3052,8 +3166,8 @@ export function PlannerScreen({
                       key={friend.id}
                       className={`inline-flex max-w-full items-center rounded-full border text-sm transition-all ${
                         alreadyAdded
-                          ? 'border-[#e8edf3] bg-[#f5f1eb] text-[#9ca3af]'
-                          : 'border-[#dfe7ef] bg-[#f8fbfd] text-[#1a1a2e] hover:border-[#2d3561]/30 hover:bg-white'
+                          ? 'border-[#E4EFE9] bg-[#FFFFFF] text-[#9AA8A1]'
+                          : 'border-[#E4EFE9] bg-[#F5F9F7] text-[#16241D] hover:border-[#16241D]/30 hover:bg-white'
                       }`}
                     >
                       <button
@@ -3068,21 +3182,21 @@ export function PlannerScreen({
                       >
                         <span
                           className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] ${
-                            alreadyAdded ? 'bg-white text-[#9ca3af]' : 'bg-[#1f2a44] text-white'
+                            alreadyAdded ? 'bg-white text-[#9AA8A1]' : 'bg-[#16241D] text-white'
                           }`}
                         >
                           {alreadyAdded ? '✓' : '+'}
                         </span>
                         <span className="min-w-0 truncate">{friend.name}</span>
-                        <span className="hidden max-w-28 truncate text-xs text-[#8a94a2] sm:inline">
+                        <span className="hidden max-w-28 truncate text-xs text-[#9AA8A1] sm:inline">
                           {getSafeLocationLabel(friend.location)}
                         </span>
                         {friend.gender && friend.gender !== 'unspecified' && (
-                          <span className="inline-flex shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-[11px] text-[#6b7280]">
+                          <span className="inline-flex shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-[11px] text-[#6E7C75]">
                             {getParticipantGenderLabel(friend.gender)}
                           </span>
                         )}
-                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-[11px] text-[#6b7280]">
+                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-[11px] text-[#6E7C75]">
                           <TravelIcon className="h-3 w-3" />
                           {getTravelModeLabel(friend.travelMode)}
                         </span>
@@ -3091,7 +3205,7 @@ export function PlannerScreen({
                       <button
                         type="button"
                         onClick={() => handleDeleteSavedFriend(friend.id)}
-                        className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#9ca3af] transition-colors hover:bg-[#ffdad6] hover:text-[#ba1a1a]"
+                        className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#9AA8A1] transition-colors hover:bg-[#CFEBDF] hover:text-[#0CA178]"
                         aria-label={`${friend.name} 저장된 친구 삭제`}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -3104,35 +3218,32 @@ export function PlannerScreen({
           )}
 
           {!showAddForm && participants.length === 0 && (
-            <div className="mb-3 flex flex-col gap-4 rounded-[1.75rem] border border-dashed border-[#dfe7ef] bg-white/78 p-5 text-center shadow-[0_10px_30px_rgba(26,26,46,0.04)] sm:flex-row sm:items-center sm:justify-between sm:text-left">
+            <div className="mb-3 flex flex-col gap-4 rounded-[1.75rem] border border-dashed border-[#E4EFE9] bg-white/78 p-5 text-center shadow-[0_10px_30px_rgba(20,35,29,0.04)] sm:flex-row sm:items-center sm:justify-between sm:text-left">
               <div className="flex min-w-0 flex-col items-center gap-3 sm:flex-row">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f5f1eb] text-[#2d3561]">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#FFFFFF] text-[#16241D]">
                   {onlineRoom ? <Wifi className="h-5 w-5" /> : <Users className="h-5 w-5" />}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-[#1a1a2e]">
-                    {onlineRoom ? '온라인 참여를 기다리는 중' : '참여자가 아직 없어요'}
-                  </div>
-                  <div className="mt-1 text-sm leading-relaxed text-[#6b7280]">
-                    직접 입력이 필요하면 수동 추가를 열어 주세요.
-                  </div>
-                </div>
+                  <div className="text-sm font-semibold text-[#16241D]">
+	                    {onlineRoom ? '참여를 기다려요' : '참여자가 없어요'}
+	                  </div>
+	                </div>
               </div>
 
               <button
                 type="button"
                 onClick={() => setShowAddForm(true)}
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#1f2a44] px-4 text-sm font-medium text-white shadow-sm transition-transform active:scale-95"
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#16241D] px-4 text-sm font-medium text-white shadow-sm transition-transform active:scale-95"
               >
                 <Plus className="h-4 w-4" />
-                수동 추가
+	                친구 추가
               </button>
             </div>
           )}
 
           {showAddForm && (
-            <div className="mb-3 rounded-[2rem] border border-white/70 bg-white/95 p-5 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
-              <BookmarkPlus className="mb-4 h-4 w-4 text-[#2d3561]" />
+            <div className="mb-3 rounded-[2rem] border border-white/70 bg-white/95 p-5 shadow-[0_10px_30px_rgba(20,35,29,0.08)]">
+              <BookmarkPlus className="mb-4 h-4 w-4 text-[#16241D]" />
 
               <div className="space-y-4">
                 <input
@@ -3140,11 +3251,11 @@ export function PlannerScreen({
                   placeholder="이름"
                   value={newName}
                   onChange={(event) => setNewName(event.target.value)}
-                  className="h-12 w-full rounded-2xl border border-[#edf1f4] bg-[#fbfaf8] px-4 text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:border-[#d8e0ea] focus:ring-2 focus:ring-[#2d3561]/10"
+                  className="h-12 w-full rounded-2xl border border-[#E4EFE9] bg-[#F5F9F7] px-4 text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:border-[#E4EFE9] focus:ring-2 focus:ring-[#16241D]/10"
                 />
 
-                <div className="rounded-2xl border border-[#e8edf3] bg-[#f8fbfd] p-3">
-                  <div className="mb-2 text-xs text-[#6b7280]">성별</div>
+                <div className="rounded-2xl border border-[#E4EFE9] bg-[#F5F9F7] p-3">
+                  <div className="mb-2 text-xs text-[#6E7C75]">성별</div>
                   <div className="flex flex-wrap gap-2">
                     {participantGenderOptions.map((option) => {
                       const active = newGender === option.value;
@@ -3155,7 +3266,7 @@ export function PlannerScreen({
                           type="button"
                           onClick={() => setNewGender(option.value)}
                           className={`rounded-full px-3 py-1.5 text-xs transition-all ${
-                            active ? 'bg-[#1f2a44] text-white shadow-sm' : 'bg-white text-[#44505b]'
+                            active ? 'bg-[#16241D] text-white shadow-sm' : 'bg-white text-[#44505b]'
                           }`}
                         >
                           {option.label}
@@ -3172,8 +3283,8 @@ export function PlannerScreen({
                       onClick={() => handleLocationModeChange('address')}
                       className={`h-11 rounded-xl px-3 text-sm font-medium transition-all ${
                         locationMode === 'address'
-                          ? 'bg-[#1f2a44] text-white shadow-sm'
-                          : 'text-[#6b7280]'
+                          ? 'bg-[#16241D] text-white shadow-sm'
+                          : 'text-[#6E7C75]'
                       }`}
                     >
                       주소 검색
@@ -3184,8 +3295,8 @@ export function PlannerScreen({
                       onClick={() => handleLocationModeChange('current')}
                       className={`h-11 rounded-xl px-3 text-sm font-medium transition-all ${
                         locationMode === 'current'
-                          ? 'bg-[#1f2a44] text-white shadow-sm'
-                          : 'text-[#6b7280]'
+                          ? 'bg-[#16241D] text-white shadow-sm'
+                          : 'text-[#6E7C75]'
                       }`}
                     >
                       현재 위치
@@ -3195,8 +3306,8 @@ export function PlannerScreen({
                       onClick={() => handleLocationModeChange('map')}
                       className={`h-11 rounded-xl px-3 text-sm font-medium transition-all ${
                         locationMode === 'map'
-                          ? 'bg-[#1f2a44] text-white shadow-sm'
-                          : 'text-[#6b7280]'
+                          ? 'bg-[#16241D] text-white shadow-sm'
+                          : 'text-[#6E7C75]'
                       }`}
                     >
                       지도에서 찍기
@@ -3204,64 +3315,57 @@ export function PlannerScreen({
                   </div>
 
                   {locationMode === 'current' ? (
-                    <div className="rounded-2xl border border-[#e8edf3] bg-[#f8fbfd] p-4">
+                    <div className="rounded-2xl border border-[#E4EFE9] bg-[#F5F9F7] p-4">
                       <button
                         type="button"
                         onClick={handleUseCurrentLocation}
                         disabled={isLocating}
-                        className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#eef4ff] text-[#2d5aa7] transition-transform active:scale-95 disabled:opacity-60"
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#E6F7F0] text-[#0CA178] transition-transform active:scale-95 disabled:opacity-60"
                       >
                         {isLocating ? (
                           <LoaderCircle className="h-4 w-4 animate-spin" />
                         ) : (
                           <LocateFixed className="h-4 w-4" />
                         )}
-                        {isLocating ? '현재 위치 찾는 중' : '현재 위치 가져오기'}
-                      </button>
+	                        {isLocating ? '찾는 중' : '현재 위치'}
+	                      </button>
 
-                      <div className="mt-3 text-xs leading-relaxed text-[#6b7280]">
-                        브라우저 위치 권한을 허용하면 출발지를 바로 반영할 수 있어요.
-                      </div>
-
-                      {newCoordinates && (
-                        <div className="mt-3 rounded-xl border border-[#e8edf3] bg-white px-3 py-2 text-xs text-[#1a1a2e]">
-                          현재 위치가 들어왔어요.
-                        </div>
-                      )}
+	                      {newCoordinates && (
+	                        <div className="mt-3 rounded-xl border border-[#E4EFE9] bg-white px-3 py-2 text-xs text-[#16241D]">
+	                          위치를 골랐어요.
+	                        </div>
+	                      )}
 
                       {locationError && (
-                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#fff5f2] px-3 py-2 text-xs text-[#c15b3d]">
+                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#E6F7F0] px-3 py-2 text-xs text-[#c15b3d]">
                           {locationError}
                         </div>
                       )}
                     </div>
                   ) : locationMode === 'map' ? (
-                    <div className="rounded-2xl border border-[#e8edf3] bg-[#f8fbfd] p-4">
+                    <div className="rounded-2xl border border-[#E4EFE9] bg-[#F5F9F7] p-4">
                       <div className="rounded-2xl bg-white px-4 py-4">
-                        <div className="text-sm text-[#1a1a2e]">
-                          지도에서 우클릭하거나 길게 눌러 출발지를 찍어주세요.
-                        </div>
-                        <div className="mt-2 text-xs leading-relaxed text-[#6b7280]">
-                          지도에서 고른 곳이 바로 이 사람 위치로 들어갑니다.
-                        </div>
-                      </div>
+                        <div className="text-sm text-[#16241D]">
+	                          지도를 길게 눌러 골라요
+	                        </div>
+	                      </div>
 
                       {newCoordinates && (
-                        <div className="mt-3 rounded-xl border border-[#e8edf3] bg-white px-3 py-2 text-xs text-[#1a1a2e]">
+                        <div className="mt-3 rounded-xl border border-[#E4EFE9] bg-white px-3 py-2 text-xs text-[#16241D]">
                           {newLocation
                             ? getSafeLocationLabel(newLocation)
-                            : '선택한 위치가 들어왔어요.'}
+	                            : '위치를 골랐어요.'}
                         </div>
                       )}
 
                       {locationError && (
-                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#fff5f2] px-3 py-2 text-xs text-[#c15b3d]">
+                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#E6F7F0] px-3 py-2 text-xs text-[#c15b3d]">
                           {locationError}
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="rounded-2xl border border-[#e8edf3] bg-[#f8fbfd] p-2">
+                    <div className="rounded-2xl border border-[#E4EFE9] bg-[#F5F9F7] p-2">
                       <div className="flex items-center gap-2 rounded-xl bg-white p-1.5">
                         <input
                           type="text"
@@ -3277,7 +3381,7 @@ export function PlannerScreen({
                             }
                           }}
                           placeholder="역, 장소명, 건물명, 도로명"
-                          className="h-11 min-w-0 flex-1 rounded-lg border-0 bg-transparent px-3 text-sm text-[#1a1a2e] outline-none placeholder:text-[#9ca3af] focus:ring-0"
+                          className="h-11 min-w-0 flex-1 rounded-lg border-0 bg-transparent px-3 text-sm text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:ring-0"
                         />
 
                         <button
@@ -3286,7 +3390,7 @@ export function PlannerScreen({
                             void handleAddressSearch();
                           }}
                           disabled={isSearchingAddress}
-                          className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#eef4ff] px-4 text-sm font-medium text-[#2d5aa7] transition-transform active:scale-95 disabled:opacity-60"
+                          className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#E6F7F0] px-4 text-sm font-medium text-[#0CA178] transition-transform active:scale-95 disabled:opacity-60"
                         >
                           {isSearchingAddress ? (
                             <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -3310,15 +3414,15 @@ export function PlannerScreen({
                                 onClick={() => handleSelectAddressResult(result)}
                                 className={`w-full rounded-2xl border px-4 py-3 text-left transition-all ${
                                   isSelected
-                                    ? 'border-[#2d3561] bg-white shadow-sm'
-                                    : 'border-[#e8edf3] bg-white/85'
+                                    ? 'border-[#16241D] bg-white shadow-sm'
+                                    : 'border-[#E4EFE9] bg-white/85'
                                 }`}
                               >
-                                <div className="text-sm text-[#1a1a2e]">
+                                <div className="text-sm text-[#16241D]">
                                   {locationLabel}
                                 </div>
                                 {(result.roadAddress || result.jibunAddress) && (
-                                  <div className="mt-1 text-xs text-[#6b7280]">
+                                  <div className="mt-1 text-xs text-[#6E7C75]">
                                     {result.roadAddress || result.jibunAddress}
                                   </div>
                                 )}
@@ -3329,13 +3433,13 @@ export function PlannerScreen({
                       )}
 
                       {newCoordinates && (
-                        <div className="mt-3 rounded-xl border border-[#e8edf3] bg-white px-3 py-2 text-xs text-[#1a1a2e]">
-                          선택한 주소가 들어왔어요: {getSafeLocationLabel(newLocation)}
+                        <div className="mt-3 rounded-xl border border-[#E4EFE9] bg-white px-3 py-2 text-xs text-[#16241D]">
+	                          주소를 골랐어요: {getSafeLocationLabel(newLocation)}
                         </div>
                       )}
 
                       {locationError && (
-                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#fff5f2] px-3 py-2 text-xs text-[#c15b3d]">
+                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#E6F7F0] px-3 py-2 text-xs text-[#c15b3d]">
                           {locationError}
                         </div>
                       )}
@@ -3343,8 +3447,8 @@ export function PlannerScreen({
                   )}
                 </div>
 
-                <div className="rounded-2xl border border-[#e8edf3] bg-[#f8fbfd] p-3">
-                  <div className="mb-2 text-xs text-[#6b7280]">이동수단</div>
+                <div className="rounded-2xl border border-[#E4EFE9] bg-[#F5F9F7] p-3">
+                  <div className="mb-2 text-xs text-[#6E7C75]">이동수단</div>
                   <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#f7f3ed] p-1.5">
                     {travelModeOptions.map((option) => {
                       const active = newTravelMode === option.key;
@@ -3356,7 +3460,7 @@ export function PlannerScreen({
                           type="button"
                           onClick={() => setNewTravelMode(option.key)}
                           className={`flex h-12 items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium transition-all ${
-                            active ? 'bg-[#1f2a44] text-white shadow-sm' : 'text-[#6b7280]'
+                            active ? 'bg-[#16241D] text-white shadow-sm' : 'text-[#6E7C75]'
                           }`}
                         >
                           <Icon className="h-4 w-4" />
@@ -3370,7 +3474,7 @@ export function PlannerScreen({
                 <select
                   value={newTravelTime}
                   onChange={() => undefined}
-                  className="hidden h-12 w-full rounded-xl bg-[#f9f7f4] px-4 text-[#1a1a2e] outline-none focus:ring-2 focus:ring-[#2d3561]/20 sm:col-span-3"
+                  className="hidden h-12 w-full rounded-xl bg-[#F5F9F7] px-4 text-[#16241D] outline-none focus:ring-2 focus:ring-[#16241D]/20 sm:col-span-3"
                 >
                   <option value={30}>최대 이동 30분</option>
                   <option value={40}>최대 이동 40분</option>
@@ -3387,7 +3491,7 @@ export function PlannerScreen({
                     onChange={(event) => setSaveNewFriend(event.target.checked)}
                     className="h-4 w-4 rounded border-[#cfd6df]"
                   />
-                  다음에도 쓰게 친구로 저장
+	                  친구로 저장
                 </label>
               )}
 
@@ -3395,15 +3499,15 @@ export function PlannerScreen({
                 <button
                   type="button"
                   onClick={handleAddParticipant}
-                  className="h-11 rounded-2xl bg-[#2d3561] px-5 text-white transition-transform active:scale-95 sm:min-w-[180px]"
+                  className="h-11 rounded-2xl bg-[#16241D] px-5 text-white transition-transform active:scale-95 sm:min-w-[180px]"
                 >
-                  {isEditingSelfLocation ? '이번 위치 적용' : '참여자 추가'}
+	                  {isEditingSelfLocation ? '적용' : '추가'}
                 </button>
 
                 <button
                   type="button"
                   onClick={resetParticipantDraft}
-                  className="h-11 rounded-2xl bg-[#f5f1eb] px-5 text-[#6b7280] transition-transform active:scale-95"
+                  className="h-11 rounded-2xl bg-[#FFFFFF] px-5 text-[#6E7C75] transition-transform active:scale-95"
                 >
                   취소
                 </button>
@@ -3413,13 +3517,12 @@ export function PlannerScreen({
         </section>
 
         {participants.length > 0 && (
-          <section className="order-4 rounded-[2rem] border border-white/70 bg-white/95 p-4 shadow-[0_10px_30px_rgba(26,26,46,0.08)]">
+          <section className="order-4 rounded-[2rem] border border-white/70 bg-white/95 p-4 shadow-[0_10px_30px_rgba(20,35,29,0.08)]">
             <div className="mb-2 flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-base font-semibold text-[#1f2a44]">참여자 목록</h3>
-                <p className="text-xs text-[#76777e]">원하지 않는 사람은 바로 뺄 수 있어요.</p>
+	                <h3 className="text-base font-semibold text-[#16241D]">참여자</h3>
               </div>
-              <span className="rounded-full bg-[#f5f1eb] px-3 py-1 text-xs text-[#44505b]">
+              <span className="rounded-full bg-[#FFFFFF] px-3 py-1 text-xs text-[#44505b]">
                 {participants.length}명
               </span>
             </div>
@@ -3446,16 +3549,16 @@ export function PlannerScreen({
             {selectedInsight ? (
               <div
                 ref={routePanelRef}
-                className="mt-3 rounded-[1.25rem] border border-[#e8edf3] bg-[#f8fbfd] p-3"
+                className="mt-3 rounded-[1.25rem] border border-[#E4EFE9] bg-[#F5F9F7] p-3"
               >
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-sm text-[#1a1a2e]">
-                      <Route className="h-4 w-4 text-[#2d3561]" />
+                    <div className="flex items-center gap-2 text-sm text-[#16241D]">
+                      <Route className="h-4 w-4 text-[#16241D]" />
                       {selectedInsight.candidate.name}까지
                     </div>
-                    <div className="mt-1 text-xs text-[#8a94a2]">
-                      참여자별 선택 이동수단으로 계산
+                    <div className="mt-1 text-xs text-[#9AA8A1]">
+	                      이동수단 기준
                     </div>
                   </div>
                   <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs text-[#44505b] shadow-sm">
@@ -3483,7 +3586,7 @@ export function PlannerScreen({
                           onClick={() => setExpandedRouteKey(routeKey)}
                           className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-full px-3 text-xs font-semibold transition-transform active:scale-95 ${
                             active
-                              ? 'bg-[#1f2a44] text-white shadow-sm'
+                              ? 'bg-[#16241D] text-white shadow-sm'
                               : 'bg-white text-[#44505b] shadow-sm'
                           }`}
                         >
@@ -3528,10 +3631,10 @@ export function PlannerScreen({
                             )}
                           </span>
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-[#1a1a2e]">
+                            <div className="truncate text-sm font-semibold text-[#16241D]">
                               {selectedRouteParticipant.name}
                             </div>
-                            <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[#6b7280]">
+                            <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[#6E7C75]">
                               <SelectedRouteTravelIcon className="h-3.5 w-3.5" />
                               {getTravelModeLabel(selectedRouteParticipant.travelMode)}
                               {selectedRouteDetail
@@ -3546,12 +3649,12 @@ export function PlannerScreen({
                             <div className="mt-3 text-sm text-[#44505b]">
                               {getRouteHeadline(selectedRouteDetail)}
                             </div>
-                            <div className="mt-1 text-xs text-[#8a94a2]">
+                            <div className="mt-1 text-xs text-[#9AA8A1]">
                               {formatRouteFee(selectedRouteDetail)}
                             </div>
                           </>
                         ) : (
-                          <div className="mt-3 flex items-center gap-2 text-xs text-[#8a94a2]">
+                          <div className="mt-3 flex items-center gap-2 text-xs text-[#9AA8A1]">
                             <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
                             경로 계산 중
                           </div>
@@ -3560,10 +3663,10 @@ export function PlannerScreen({
 
                       {selectedRouteDetail ? (
                         <div className="shrink-0 text-right">
-                          <div className="text-lg font-semibold text-[#1a1a2e]">
+                          <div className="text-lg font-semibold text-[#16241D]">
                             {selectedRouteDetail.duration}분
                           </div>
-                          <div className="text-xs text-[#8a94a2]">
+                          <div className="text-xs text-[#9AA8A1]">
                             {getRouteDistanceLabel(selectedRouteDetail)}
                           </div>
                         </div>
@@ -3573,7 +3676,7 @@ export function PlannerScreen({
 	                    {selectedRouteDetail && showSelectedRouteSteps ? (
 	                      <div className="mt-3 border-t border-[#eef2f6] pt-3">
                         {selectedRouteMeta ? (
-                          <div className="mb-2 rounded-2xl bg-[#f8fbfd] px-3 py-2 text-xs text-[#6b7280]">
+                          <div className="mb-2 rounded-2xl bg-[#F5F9F7] px-3 py-2 text-xs text-[#6E7C75]">
                             {selectedRouteMeta}
                           </div>
                         ) : null}
@@ -3591,7 +3694,7 @@ export function PlannerScreen({
                               return (
                                 <li
                                   key={`${selectedRouteDetailKey}:step:${stepIndex}`}
-                                  className="flex gap-2 rounded-2xl bg-[#fbf8fb] px-3 py-2"
+                                  className="flex gap-2 rounded-2xl bg-[#F5F9F7] px-3 py-2"
                                 >
                                   <span
                                     className={`mt-0.5 h-fit shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${getRouteStepBadgeClass(step.type)}`}
@@ -3599,16 +3702,16 @@ export function PlannerScreen({
                                     {getRouteStepTypeLabel(step.type)}
                                   </span>
                                   <div className="min-w-0 flex-1">
-                                    <div className="text-xs font-semibold text-[#1f2a44]">
+                                    <div className="text-xs font-semibold text-[#16241D]">
                                       {step.label}
                                     </div>
                                     {step.from || step.to ? (
-                                      <div className="mt-0.5 truncate text-[11px] text-[#8a94a2]">
+                                      <div className="mt-0.5 truncate text-[11px] text-[#9AA8A1]">
                                         {[step.from, step.to].filter(Boolean).join(' → ')}
                                       </div>
                                     ) : null}
                                     {stepMeta.length ? (
-                                      <div className="mt-1 text-[11px] text-[#8a94a2]">
+                                      <div className="mt-1 text-[11px] text-[#9AA8A1]">
                                         {stepMeta.join(' · ')}
                                       </div>
                                     ) : null}
@@ -3618,12 +3721,12 @@ export function PlannerScreen({
                             })}
                           </ol>
                         ) : (
-                          <div className="rounded-2xl bg-[#fbf8fd] px-3 py-2 text-xs text-[#8a94a2]">
+                          <div className="rounded-2xl bg-[#F5F9F7] px-3 py-2 text-xs text-[#9AA8A1]">
                             {selectedRouteDetail.source === 'estimated'
                               ? selectedRouteDetail.mode === 'car'
-                                ? '예상 자동차 이동시간 기준으로 요약 표시 중이에요.'
-                                : '예상 대중교통 이동시간 기준으로 요약 표시 중이에요.'
-                              : '경로 단계는 요약으로 표시 중이에요.'}
+	                                ? '자동차 예상이에요'
+	                                : '대중교통 예상이에요'
+	                              : '경로 요약이에요'}
                           </div>
                         )}
                       </div>
@@ -3632,85 +3735,98 @@ export function PlannerScreen({
                 ) : null}
 
                 {selectedRouteError ? (
-                  <div className="mt-3 rounded-2xl bg-[#fff7ed] px-3 py-2 text-xs text-[#b45309]">
+                  <div className="mt-3 rounded-2xl bg-[#E6F7F0] px-3 py-2 text-xs text-[#0CA178]">
                     {selectedRouteError}
                   </div>
                 ) : null}
               </div>
             ) : null}
           </section>
-        )}
+	        )}
+	        </>
+	        )}
 
-        <section className="order-5">
+	        {activePlannerPage === 'candidates' && (
+	        <section className="order-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="text-lg font-semibold text-[#1f2a44]">
-                후보 {visibleCandidateInsights.length}곳
+              <h3 className="text-lg font-semibold text-[#16241D]">
+                후보 상세보기
               </h3>
             </div>
 
-            <div className="flex shrink-0 items-center gap-2">
-              {excludedCandidateIds.length > 0 && (
-                <button
-                  type="button"
+	            <div className="flex shrink-0 items-center gap-2">
+	              <span className="rounded-full bg-[#F5F9F7] px-3 py-1.5 text-xs font-bold text-[#6E7C75]">
+	                {visibleCandidateInsights.length}곳
+	              </span>
+	              {excludedCandidateIds.length > 0 && (
+	                <button
+	                  type="button"
                   onClick={() => setExcludedCandidateIds([])}
-                  className="h-10 rounded-full bg-white px-3 text-sm text-[#6b7280] shadow-sm transition-transform active:scale-95"
+                  className="h-10 rounded-full bg-white px-3 text-sm text-[#6E7C75] shadow-sm transition-transform active:scale-95"
                 >
-                  되돌리기
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setShowCandidateList((current) => !current)}
-                className="h-10 rounded-full bg-white px-4 text-sm text-[#1f2a44] shadow-sm transition-transform active:scale-95"
-              >
-                {showCandidateList ? '접기' : '보기'}
-              </button>
-            </div>
-          </div>
+	                  되돌리기
+	                </button>
+	              )}
+	            </div>
+	          </div>
 
-          {showCandidateList && (
-            <div className="kok-stagger-list space-y-3">
+	            <div className="kok-stagger-list space-y-3">
               {visibleCandidateInsights.map((insight) => (
                   <CandidateCard
                     key={insight.candidate.id}
                     insight={insight}
                     selected={selectedInsight?.candidate.id === insight.candidate.id}
-                    onClick={() => setSelectedCandidateId(insight.candidate.id)}
+                    expanded={expandedCandidateId === insight.candidate.id}
+                    onClick={() => handleCandidateCardSelect(insight.candidate.id)}
                     onExclude={() => handleExcludeCandidate(insight.candidate.id)}
-                    nearbySections={selectedInsight?.candidate.id === insight.candidate.id ? nearbySections : []}
+                    nearbySections={
+                      expandedCandidateId === insight.candidate.id &&
+                      selectedInsight?.candidate.id === insight.candidate.id
+                        ? nearbySections
+                        : []
+                    }
                     activeNearbyCategory={activeNearbyCategory}
                     onNearbyCategoryChange={setActiveNearbyCategory}
-                    onNearbySearch={() => setNearbySearchCandidateId(insight.candidate.id)}
+                    onNearbySearch={() => {
+                      setSelectedCandidateId(insight.candidate.id);
+                      setExpandedCandidateId(insight.candidate.id);
+                      setNearbySearchCandidateId(insight.candidate.id);
+                    }}
                     nearbyStatus={nearbyPlacesStatus}
                     nearbyMessage={nearbyPlacesMessage}
                     nearbyError={nearbyPlacesError}
                   />
               ))}
 
-	              {!visibleCandidateInsights.length && (
-	                <div className="rounded-2xl border border-dashed border-[#d9e0e7] bg-white/80 px-5 py-8 text-center text-sm text-[#6b7280]">
-		                  {excludedCandidateIds.length
-		                    ? '남은 후보가 없어요. 되돌리기를 눌러 다시 볼 수 있습니다.'
-		                    : fallbackNotice ??
-		                      (isFairnessMode
-		                        ? '조건에 맞는 후보가 없어요. 공정도를 넓히거나 다른 방식을 골라 주세요.'
-		                        : '조건에 맞는 후보가 없어요. 다른 모임 방식이나 카테고리를 골라 주세요.')}
-	                </div>
-	              )}
-            </div>
-          )}
+		              {!visibleCandidateInsights.length && (
+		                <div className="rounded-2xl border border-dashed border-[#E4EFE9] bg-white/80 px-5 py-8 text-center text-sm text-[#6E7C75]">
+			                  {excludedCandidateIds.length
+				                    ? '남은 후보가 없어요'
+				                    : fallbackNotice ??
+				                      (isFairnessMode
+				                        ? '조건에 맞는 후보가 없어요'
+				                        : '후보가 없어요')}
+		                </div>
+		              )}
+	            </div>
 
-        </section>
+	        </section>
+	        )}
       </div>
 
-      <div className="mx-auto max-w-[1040px] px-4 pb-8">
-        <div className="rounded-[2rem] border border-white/80 bg-white/95 p-4 shadow-[0_18px_42px_rgba(26,26,46,0.12)] backdrop-blur-xl">
-          {!onlineRoom && (
-            <div className="px-2 pb-2 text-xs text-[#76777e]">
-              {readyStatusText}
-            </div>
-          )}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/80 bg-white/88 px-4 pb-[calc(0.85rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-18px_42px_rgba(20,35,29,0.12)] backdrop-blur-xl">
+        <div className="mx-auto max-w-[1040px]">
+	          <div className="mb-2 flex items-center justify-between gap-3 px-1">
+	            <div className="min-w-0">
+	              <div className="truncate text-sm font-black text-[#16241D]">{plannerStageTitle}</div>
+	            </div>
+            {onlineRoom ? (
+              <span className="shrink-0 rounded-full bg-[#E6F7F0] px-3 py-1 text-xs font-extrabold text-[#0CA178]">
+                {readyCount}/{Math.max(readyRequiredCount, 0)}
+              </span>
+            ) : null}
+          </div>
 
           <button
             type="button"
@@ -3723,8 +3839,8 @@ export function PlannerScreen({
               openDrawDrawer();
             }}
             disabled={onlineRoom ? readyButtonDisabled : Boolean(drawDisabledReason)}
-            className={`flex h-16 w-full items-center justify-center gap-2 rounded-[1.35rem] text-lg font-bold tracking-[-0.03em] text-white shadow-[0_10px_30px_rgba(26,26,46,0.12)] transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 ${
-              onlineRoom && isCurrentActorReady ? 'bg-[#22c55e]' : 'bg-[#1f2a44]'
+            className={`kok-pressable flex h-16 w-full items-center justify-center gap-2 rounded-[1.35rem] text-lg font-black tracking-normal text-white shadow-[0_12px_30px_rgba(20,35,29,0.14)] disabled:cursor-not-allowed disabled:opacity-50 ${
+              onlineRoom && isCurrentActorReady ? 'bg-[#22c55e]' : 'bg-[#16241D]'
             }`}
           >
             {sharedCandidateStatus === 'loading' || fairnessVerificationPending || isSettingReady ? (
@@ -3737,36 +3853,33 @@ export function PlannerScreen({
             {onlineRoom
               ? onlineReadyButtonLabel
               : sharedCandidateStatus === 'loading'
-                ? 'AI 후보 정리 중'
-                : fairnessVerificationPending
-                  ? '실제 이동시간 확인 중'
-                : '장소 추첨 시작'}
+	                ? '후보 찾는 중이에요'
+	                : fairnessVerificationPending
+	                  ? '시간 확인 중이에요'
+	                : '추첨 시작'}
           </button>
         </div>
       </div>
 
       {showOptionsPage && (
-        <div className="kok-sheet-enter fixed inset-0 z-50 overflow-y-auto bg-[#f8fbf7] text-[#17233c]">
+        <div className="kok-sheet-enter fixed inset-0 z-50 overflow-y-auto bg-[#f8fbf7] text-[#16241D]">
           <div className="sticky top-0 z-10 border-b border-[#e6ebf0] bg-[#f8fbf7]/94 px-4 py-3 backdrop-blur-xl">
             <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => setShowOptionsPage(false)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#17233c] shadow-sm transition-transform active:scale-95"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#16241D] shadow-sm transition-transform active:scale-95"
                 aria-label="옵션 화면 닫기"
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
-              <div className="min-w-0 text-center">
-                <div className="text-base font-semibold text-[#17233c]">옵션</div>
-                <div className="mt-0.5 text-xs text-[#6f7b79]">
-                  {activeCategory.label} · {activeMode.shortLabel}
-                </div>
-              </div>
+	              <div className="min-w-0 text-center">
+	                <div className="text-base font-semibold text-[#16241D]">옵션</div>
+	              </div>
               <button
                 type="button"
                 onClick={() => setShowOptionsPage(false)}
-                className="h-10 rounded-full bg-[#17233c] px-4 text-sm text-white shadow-sm transition-transform active:scale-95"
+                className="h-10 rounded-full bg-[#16241D] px-4 text-sm text-white shadow-sm transition-transform active:scale-95"
               >
                 적용
               </button>
@@ -3774,8 +3887,8 @@ export function PlannerScreen({
           </div>
 
           <main className="kok-stagger-list mx-auto flex max-w-[720px] flex-col gap-4 px-4 py-5">
-            <section className="rounded-[1.75rem] border border-white/80 bg-white/95 p-4 shadow-[0_10px_30px_rgba(26,26,46,0.06)]">
-              <div className="mb-3 text-sm font-semibold text-[#17233c]">모임 종류</div>
+            <section className="rounded-[1.75rem] border border-white/80 bg-white/95 p-4 shadow-[0_10px_30px_rgba(20,35,29,0.06)]">
+              <div className="mb-3 text-sm font-semibold text-[#16241D]">모임 종류</div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {meetCategories.map((category) => {
                   const active = category.key === selectedCategory;
@@ -3787,7 +3900,7 @@ export function PlannerScreen({
                       onClick={() => handleCategorySelect(category.key)}
                       className={`min-h-12 rounded-2xl px-3 text-sm font-semibold transition-all active:scale-[0.99] ${
                         active
-                          ? 'bg-[#ff6b5f] text-white shadow-sm'
+                          ? 'bg-[#12B886] text-white shadow-sm'
                           : 'bg-[#f2f7f2] text-[#52615f]'
                       }`}
                     >
@@ -3798,8 +3911,8 @@ export function PlannerScreen({
               </div>
             </section>
 
-            <section className="rounded-[1.75rem] border border-white/80 bg-white/95 p-4 shadow-[0_10px_30px_rgba(26,26,46,0.06)]">
-              <div className="mb-3 text-sm font-semibold text-[#17233c]">선택 방식</div>
+            <section className="rounded-[1.75rem] border border-white/80 bg-white/95 p-4 shadow-[0_10px_30px_rgba(20,35,29,0.06)]">
+              <div className="mb-3 text-sm font-semibold text-[#16241D]">선택 방식</div>
               <div className="space-y-2">
                 {selectionModes.map((mode) => {
                   const active = mode.key === selectionMode;
@@ -3811,14 +3924,14 @@ export function PlannerScreen({
                       onClick={() => handleSelectionModeSelect(mode.key)}
                       className={`flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl border px-4 text-left transition-all active:scale-[0.99] ${
                         active
-                          ? 'border-[#17233c] bg-[#17233c] text-white shadow-sm'
+                          ? 'border-[#16241D] bg-[#16241D] text-white shadow-sm'
                           : 'border-[#e6ebf0] bg-white text-[#52615f]'
                       }`}
                     >
                       <span className="text-sm font-semibold">{mode.shortLabel}</span>
                       <span
                         className={`h-3 w-3 rounded-full ${
-                          active ? 'bg-[#ff6b5f]' : 'bg-[#dfe7e5]'
+                          active ? 'bg-[#12B886]' : 'bg-[#dfe7e5]'
                         }`}
                       />
                     </button>
@@ -3828,9 +3941,9 @@ export function PlannerScreen({
             </section>
 
             {isFairnessMode && (
-              <section className="rounded-[1.75rem] border border-white/80 bg-white/95 p-4 shadow-[0_10px_30px_rgba(26,26,46,0.06)]">
+              <section className="rounded-[1.75rem] border border-white/80 bg-white/95 p-4 shadow-[0_10px_30px_rgba(20,35,29,0.06)]">
                 <div className="mb-3 flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-[#17233c]">이동시간 공정도</div>
+                  <div className="text-sm font-semibold text-[#16241D]">이동시간 공정도</div>
                   <div className="text-xs text-[#6f7b79]">{activeModeDetailLabel}</div>
                 </div>
                 <div className="grid grid-cols-5 gap-1.5 rounded-2xl bg-[#f2f7f2] p-1.5">
@@ -3844,7 +3957,7 @@ export function PlannerScreen({
                         onClick={() => handleThrillLevelSelect(stage.level)}
                         className={`h-10 rounded-xl text-sm font-semibold transition-all ${
                           active
-                            ? 'bg-[#ff6b5f] text-white shadow-sm'
+                            ? 'bg-[#12B886] text-white shadow-sm'
                             : 'text-[#52615f]'
                         }`}
                       >
@@ -3857,9 +3970,9 @@ export function PlannerScreen({
             )}
 
             {!runtimeCapabilities.ai.connected && (
-              <section className="rounded-[1.75rem] border border-white/80 bg-white/95 p-4 shadow-[0_10px_30px_rgba(26,26,46,0.06)]">
+              <section className="rounded-[1.75rem] border border-white/80 bg-white/95 p-4 shadow-[0_10px_30px_rgba(20,35,29,0.06)]">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2 text-[#17233c]">
+                  <div className="flex min-w-0 items-center gap-2 text-[#16241D]">
                     <Bot className="h-4 w-4 shrink-0 text-[#33415f]" />
                     <span className="truncate text-sm font-semibold">
                       {runtimeAiConfig ? 'AI 연결됨' : 'AI 연결'}
@@ -3869,7 +3982,7 @@ export function PlannerScreen({
                   <button
                     type="button"
                     onClick={() => setIsAiConfigOpen(true)}
-                    className="inline-flex h-10 items-center justify-center rounded-full bg-[#f2f7f2] px-4 text-sm text-[#17233c] shadow-sm transition-transform active:scale-95"
+                    className="inline-flex h-10 items-center justify-center rounded-full bg-[#f2f7f2] px-4 text-sm text-[#16241D] shadow-sm transition-transform active:scale-95"
                   >
                     연결
                   </button>
@@ -3902,7 +4015,7 @@ export function PlannerScreen({
           initialLadderBars={activeDrawSession.ladderBars ?? null}
           waitingMessage={
             onlineRoom && !isCurrentDrawController
-              ? `${activeDrawControllerName}님이 게임을 진행 중이에요. 결과가 정해지면 자동으로 넘어갑니다.`
+	              ? `${activeDrawControllerName}님 진행 중`
               : undefined
           }
           onChoice={handleDrawChoice}

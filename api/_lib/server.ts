@@ -1,4 +1,18 @@
 type EnvMap = Record<string, string | undefined>;
+export type AiProviderName = 'gms' | 'upstage' | 'openai';
+
+export type ServerAiProvider =
+  | {
+      provider: 'gms' | 'upstage';
+      apiKey: string;
+      model: string;
+      baseUrl: string;
+    }
+  | {
+      provider: 'openai';
+      apiKey: string;
+      model: string;
+    };
 
 export async function readJsonBody(req: any) {
   if (req.body && typeof req.body === 'object') {
@@ -35,6 +49,110 @@ export function pickFirstEnv(env: EnvMap, keys: string[]) {
   }
 
   return '';
+}
+
+export function getServerGmsAiConfig(env: EnvMap): ServerAiProvider | null {
+  const apiKey = pickFirstEnv(env, ['GMS_AI_API_KEY', 'GMS_API_KEY', 'VITE_GMS_AI_API_KEY']);
+  const model = pickFirstEnv(env, ['GMS_AI_MODEL', 'GMS_MODEL', 'VITE_GMS_AI_MODEL']);
+  const baseUrl = pickFirstEnv(env, [
+    'GMS_AI_API_BASE_URL',
+    'GMS_API_BASE_URL',
+    'VITE_GMS_AI_API_BASE_URL',
+  ]);
+
+  if (!apiKey || !model || !baseUrl) {
+    return null;
+  }
+
+  return {
+    provider: 'gms',
+    apiKey,
+    model,
+    baseUrl,
+  };
+}
+
+export function getServerAiProviders(env: EnvMap, runtimeAiConfig: any): ServerAiProvider[] {
+  const providers: ServerAiProvider[] = [];
+  const seenProviders = new Set<AiProviderName>();
+  const addProvider = (provider: ServerAiProvider | null) => {
+    if (!provider || seenProviders.has(provider.provider)) {
+      return;
+    }
+
+    seenProviders.add(provider.provider);
+    providers.push(provider);
+  };
+
+  if (runtimeAiConfig?.provider === 'gms' && runtimeAiConfig.baseUrl) {
+    addProvider({
+      provider: 'gms',
+      apiKey: runtimeAiConfig.apiKey,
+      model: runtimeAiConfig.model,
+      baseUrl: runtimeAiConfig.baseUrl,
+    });
+  }
+
+  if (runtimeAiConfig?.provider === 'upstage') {
+    addProvider({
+      provider: 'upstage',
+      apiKey: runtimeAiConfig.apiKey,
+      model: runtimeAiConfig.model,
+      baseUrl:
+        runtimeAiConfig.baseUrl ||
+        pickFirstEnv(env, [
+          'UPSTAGE_API_BASE_URL',
+          'SOLAR_API_BASE_URL',
+          'VITE_UPSTAGE_API_BASE_URL',
+        ]) ||
+        'https://api.upstage.ai/v1',
+    });
+  }
+
+  if (runtimeAiConfig?.provider === 'openai') {
+    addProvider({
+      provider: 'openai',
+      apiKey: runtimeAiConfig.apiKey,
+      model: runtimeAiConfig.model,
+    });
+  }
+
+  addProvider(getServerGmsAiConfig(env));
+
+  const rawOpenAiKey = pickFirstEnv(env, ['OPENAI_API_KEY', 'AI_API_KEY', 'VITE_OPENAI_API_KEY']);
+  const rawUpstageKey = pickFirstEnv(env, [
+    'UPSTAGE_API_KEY',
+    'SOLAR_API_KEY',
+    'VITE_UPSTAGE_API_KEY',
+  ]);
+  const detectedUpstageKey =
+    rawUpstageKey || (rawOpenAiKey.startsWith('up_') ? rawOpenAiKey : '');
+  const detectedOpenAiKey =
+    detectedUpstageKey && rawOpenAiKey === detectedUpstageKey ? '' : rawOpenAiKey;
+
+  if (detectedUpstageKey) {
+    addProvider({
+      provider: 'upstage',
+      apiKey: detectedUpstageKey,
+      model: pickFirstEnv(env, ['UPSTAGE_MODEL', 'SOLAR_MODEL', 'VITE_UPSTAGE_MODEL']) || 'solar-pro3',
+      baseUrl:
+        pickFirstEnv(env, [
+          'UPSTAGE_API_BASE_URL',
+          'SOLAR_API_BASE_URL',
+          'VITE_UPSTAGE_API_BASE_URL',
+        ]) || 'https://api.upstage.ai/v1',
+    });
+  }
+
+  if (detectedOpenAiKey) {
+    addProvider({
+      provider: 'openai',
+      apiKey: detectedOpenAiKey,
+      model: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini',
+    });
+  }
+
+  return providers;
 }
 
 function getCandidateScopeBonus(candidateScope: string) {
@@ -866,7 +984,9 @@ export function getRuntimeAiConfig(body: any) {
   }
 
   const provider =
-    runtimeAiConfig.provider === 'upstage' || runtimeAiConfig.provider === 'openai'
+    runtimeAiConfig.provider === 'gms' ||
+    runtimeAiConfig.provider === 'upstage' ||
+    runtimeAiConfig.provider === 'openai'
       ? runtimeAiConfig.provider
       : null;
   const apiKey =
@@ -876,7 +996,7 @@ export function getRuntimeAiConfig(body: any) {
   const baseUrl =
     typeof runtimeAiConfig.baseUrl === 'string' ? runtimeAiConfig.baseUrl.trim() : '';
 
-  if (!provider || !apiKey || !model) {
+  if (!provider || !apiKey || !model || (provider === 'gms' && !baseUrl)) {
     return null;
   }
 
@@ -1013,6 +1133,7 @@ export async function fetchUpstageCandidateSelection({
   thrillLevel,
   candidateScope,
   requestedTargetCount,
+  providerLabel = 'Upstage',
 }: {
   apiKey: string;
   model: string;
@@ -1024,6 +1145,7 @@ export async function fetchUpstageCandidateSelection({
   thrillLevel: number;
   candidateScope: string;
   requestedTargetCount?: number;
+  providerLabel?: string;
 }) {
   const allowedIds = insights
     .map((insight) => insight?.candidate?.id)
@@ -1076,7 +1198,7 @@ export async function fetchUpstageCandidateSelection({
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(data?.error?.message ?? `Upstage candidate selection failed with status ${response.status}.`);
+    throw new Error(data?.error?.message ?? `${providerLabel} candidate selection failed with status ${response.status}.`);
   }
 
   const rawContent = data?.choices?.[0]?.message?.content;
@@ -1088,7 +1210,7 @@ export async function fetchUpstageCandidateSelection({
         : '';
 
   if (!content.trim()) {
-    throw new Error('Upstage candidate selection returned no content.');
+    throw new Error(`${providerLabel} candidate selection returned no content.`);
   }
 
   const parsed = JSON.parse(content);

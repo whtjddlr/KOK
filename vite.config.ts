@@ -628,7 +628,22 @@ function buildSelectionPayload(
   };
 }
 
-function pickFirstEnv(env: Record<string, string>, keys: string[]) {
+type AiProviderName = 'gms' | 'upstage' | 'openai';
+
+type ServerAiProvider =
+  | {
+      provider: 'gms' | 'upstage';
+      apiKey: string;
+      model: string;
+      baseUrl: string;
+    }
+  | {
+      provider: 'openai';
+      apiKey: string;
+      model: string;
+    };
+
+function pickFirstEnv(env: Record<string, string | undefined>, keys: string[]) {
   for (const key of keys) {
     const value = env[key];
 
@@ -640,6 +655,113 @@ function pickFirstEnv(env: Record<string, string>, keys: string[]) {
   return '';
 }
 
+function getServerGmsAiConfig(env: Record<string, string | undefined>): ServerAiProvider | null {
+  const apiKey = pickFirstEnv(env, ['GMS_AI_API_KEY', 'GMS_API_KEY', 'VITE_GMS_AI_API_KEY']);
+  const model = pickFirstEnv(env, ['GMS_AI_MODEL', 'GMS_MODEL', 'VITE_GMS_AI_MODEL']);
+  const baseUrl = pickFirstEnv(env, [
+    'GMS_AI_API_BASE_URL',
+    'GMS_API_BASE_URL',
+    'VITE_GMS_AI_API_BASE_URL',
+  ]);
+
+  if (!apiKey || !model || !baseUrl) {
+    return null;
+  }
+
+  return {
+    provider: 'gms',
+    apiKey,
+    model,
+    baseUrl,
+  };
+}
+
+function getServerAiProviders(
+  env: Record<string, string | undefined>,
+  runtimeAiConfig: any,
+): ServerAiProvider[] {
+  const providers: ServerAiProvider[] = [];
+  const seenProviders = new Set<AiProviderName>();
+  const addProvider = (provider: ServerAiProvider | null) => {
+    if (!provider || seenProviders.has(provider.provider)) {
+      return;
+    }
+
+    seenProviders.add(provider.provider);
+    providers.push(provider);
+  };
+
+  if (runtimeAiConfig?.provider === 'gms' && runtimeAiConfig.baseUrl) {
+    addProvider({
+      provider: 'gms',
+      apiKey: runtimeAiConfig.apiKey,
+      model: runtimeAiConfig.model,
+      baseUrl: runtimeAiConfig.baseUrl,
+    });
+  }
+
+  if (runtimeAiConfig?.provider === 'upstage') {
+    addProvider({
+      provider: 'upstage',
+      apiKey: runtimeAiConfig.apiKey,
+      model: runtimeAiConfig.model,
+      baseUrl:
+        runtimeAiConfig.baseUrl ||
+        pickFirstEnv(env, [
+          'UPSTAGE_API_BASE_URL',
+          'SOLAR_API_BASE_URL',
+          'VITE_UPSTAGE_API_BASE_URL',
+        ]) ||
+        'https://api.upstage.ai/v1',
+    });
+  }
+
+  if (runtimeAiConfig?.provider === 'openai') {
+    addProvider({
+      provider: 'openai',
+      apiKey: runtimeAiConfig.apiKey,
+      model: runtimeAiConfig.model,
+    });
+  }
+
+  addProvider(getServerGmsAiConfig(env));
+
+  const rawOpenAiKey = pickFirstEnv(env, ['OPENAI_API_KEY', 'AI_API_KEY', 'VITE_OPENAI_API_KEY']);
+  const rawUpstageKey = pickFirstEnv(env, [
+    'UPSTAGE_API_KEY',
+    'SOLAR_API_KEY',
+    'VITE_UPSTAGE_API_KEY',
+  ]);
+  const detectedUpstageKey =
+    rawUpstageKey || (rawOpenAiKey.startsWith('up_') ? rawOpenAiKey : '');
+  const detectedOpenAiKey =
+    detectedUpstageKey && rawOpenAiKey === detectedUpstageKey ? '' : rawOpenAiKey;
+
+  if (detectedUpstageKey) {
+    addProvider({
+      provider: 'upstage',
+      apiKey: detectedUpstageKey,
+      model: pickFirstEnv(env, ['UPSTAGE_MODEL', 'SOLAR_MODEL', 'VITE_UPSTAGE_MODEL']) || 'solar-pro3',
+      baseUrl:
+        pickFirstEnv(env, [
+          'UPSTAGE_API_BASE_URL',
+          'SOLAR_API_BASE_URL',
+          'VITE_UPSTAGE_API_BASE_URL',
+        ]) || 'https://api.upstage.ai/v1',
+    });
+  }
+
+  if (detectedOpenAiKey) {
+    addProvider({
+      provider: 'openai',
+      apiKey: detectedOpenAiKey,
+      model: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini',
+    });
+  }
+
+  return providers;
+}
+
 function getRuntimeAiConfig(body: any) {
   const runtimeAiConfig = body?.runtimeAiConfig;
 
@@ -648,7 +770,9 @@ function getRuntimeAiConfig(body: any) {
   }
 
   const provider =
-    runtimeAiConfig.provider === 'upstage' || runtimeAiConfig.provider === 'openai'
+    runtimeAiConfig.provider === 'gms' ||
+    runtimeAiConfig.provider === 'upstage' ||
+    runtimeAiConfig.provider === 'openai'
       ? runtimeAiConfig.provider
       : null;
   const apiKey =
@@ -658,7 +782,7 @@ function getRuntimeAiConfig(body: any) {
   const baseUrl =
     typeof runtimeAiConfig.baseUrl === 'string' ? runtimeAiConfig.baseUrl.trim() : '';
 
-  if (!provider || !apiKey || !model) {
+  if (!provider || !apiKey || !model || (provider === 'gms' && !baseUrl)) {
     return null;
   }
 
@@ -919,11 +1043,13 @@ async function fetchUpstagePlaceRanking({
   model,
   baseUrl,
   payload,
+  providerLabel = 'Upstage',
 }: {
   apiKey: string;
   model: string;
   baseUrl: string;
   payload: ReturnType<typeof buildPlaceSelectionPayload>;
+  providerLabel?: string;
 }) {
   const apiBase = baseUrl.replace(/\/$/, '');
   const response = await fetch(`${apiBase}/chat/completions`, {
@@ -954,7 +1080,7 @@ async function fetchUpstagePlaceRanking({
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(data?.error?.message ?? `Upstage place ranking failed with status ${response.status}.`);
+    throw new Error(data?.error?.message ?? `${providerLabel} place ranking failed with status ${response.status}.`);
   }
 
   const rawContent = data?.choices?.[0]?.message?.content;
@@ -966,7 +1092,7 @@ async function fetchUpstagePlaceRanking({
         : '';
 
   if (!content.trim()) {
-    throw new Error('Upstage place ranking returned no content.');
+    throw new Error(`${providerLabel} place ranking returned no content.`);
   }
 
   const parsed = JSON.parse(content);
@@ -989,6 +1115,7 @@ async function fetchOpenAiCandidateSelection({
   thrillLevel,
   candidateScope,
   requestedTargetCount,
+  providerLabel = 'Upstage',
 }: {
   apiKey: string;
   model: string;
@@ -999,6 +1126,7 @@ async function fetchOpenAiCandidateSelection({
   thrillLevel: number;
   candidateScope: string;
   requestedTargetCount?: number;
+  providerLabel?: string;
 }) {
   const allowedIds = insights
     .map((insight) => insight?.candidate?.id)
@@ -1167,7 +1295,7 @@ async function fetchUpstageCandidateSelection({
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(data?.error?.message ?? `Upstage candidate selection failed with status ${response.status}.`);
+    throw new Error(data?.error?.message ?? `${providerLabel} candidate selection failed with status ${response.status}.`);
   }
 
   const rawContent = data?.choices?.[0]?.message?.content;
@@ -1179,7 +1307,7 @@ async function fetchUpstageCandidateSelection({
         : '';
 
   if (!content.trim()) {
-    throw new Error('Upstage candidate selection returned no content.');
+    throw new Error(`${providerLabel} candidate selection returned no content.`);
   }
 
   const parsed = JSON.parse(content);
@@ -1494,18 +1622,12 @@ function odsayTransitProxy(apiKey: string) {
 }
 
 function runtimeCapabilitiesProxy({
-  openAiApiKey,
-  openAiModel,
-  upstageApiKey,
-  upstageModel,
+  aiProviders,
   naverSearchClientId,
   naverSearchClientSecret,
   odsayApiKey,
 }: {
-  openAiApiKey: string;
-  openAiModel: string;
-  upstageApiKey: string;
-  upstageModel: string;
+  aiProviders: ServerAiProvider[];
   naverSearchClientId: string;
   naverSearchClientSecret: string;
   odsayApiKey: string;
@@ -1523,8 +1645,7 @@ function runtimeCapabilitiesProxy({
       return;
     }
 
-    const aiProvider = upstageApiKey ? 'upstage' : openAiApiKey ? 'openai' : null;
-    const aiModel = upstageApiKey ? upstageModel : openAiApiKey ? openAiModel : null;
+    const [aiProvider] = aiProviders;
 
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -1532,8 +1653,8 @@ function runtimeCapabilitiesProxy({
       JSON.stringify({
         ai: {
           connected: Boolean(aiProvider),
-          provider: aiProvider,
-          model: aiModel,
+          provider: aiProvider?.provider ?? null,
+          model: aiProvider?.model ?? null,
         },
         naverSearch: {
           connected: Boolean(naverSearchClientId && naverSearchClientSecret),
@@ -1557,17 +1678,9 @@ function runtimeCapabilitiesProxy({
 }
 
 function liveCandidateProxy({
-  openAiApiKey,
-  openAiModel,
-  upstageApiKey,
-  upstageModel,
-  upstageBaseUrl,
+  env,
 }: {
-  openAiApiKey: string;
-  openAiModel: string;
-  upstageApiKey: string;
-  upstageModel: string;
-  upstageBaseUrl: string;
+  env: Record<string, string | undefined>;
 }) {
   const middleware = async (req: any, res: any, next: () => void) => {
     if (!req.url?.startsWith('/api/live-candidates')) {
@@ -1606,18 +1719,7 @@ function liveCandidateProxy({
           ? Math.max(candidateTargetCount ?? 0, participants.length)
           : candidateTargetCount;
       const runtimeAiConfig = getRuntimeAiConfig(body);
-      const effectiveUpstageApiKey =
-        runtimeAiConfig?.provider === 'upstage' ? runtimeAiConfig.apiKey : upstageApiKey;
-      const effectiveUpstageModel =
-        runtimeAiConfig?.provider === 'upstage' ? runtimeAiConfig.model : upstageModel;
-      const effectiveUpstageBaseUrl =
-        runtimeAiConfig?.provider === 'upstage' && runtimeAiConfig.baseUrl
-          ? runtimeAiConfig.baseUrl
-          : upstageBaseUrl;
-      const effectiveOpenAiApiKey =
-        runtimeAiConfig?.provider === 'openai' ? runtimeAiConfig.apiKey : openAiApiKey;
-      const effectiveOpenAiModel =
-        runtimeAiConfig?.provider === 'openai' ? runtimeAiConfig.model : openAiModel;
+      const aiProviders = getServerAiProviders(env, runtimeAiConfig);
 
       if (!insights.length) {
         res.statusCode = 400;
@@ -1654,7 +1756,7 @@ function liveCandidateProxy({
         thrillLevel,
       );
 
-      if (!effectiveOpenAiApiKey && !effectiveUpstageApiKey) {
+      if (!aiProviders.length) {
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.end(
@@ -1667,76 +1769,85 @@ function liveCandidateProxy({
         return;
       }
 
-      try {
-        const aiSelection = effectiveUpstageApiKey
-          ? await fetchUpstageCandidateSelection({
-              apiKey: effectiveUpstageApiKey,
-              model: effectiveUpstageModel,
-              baseUrl: effectiveUpstageBaseUrl,
-              participants,
-              insights,
-              selectedCategory,
-              selectionMode,
-              thrillLevel,
-              candidateScope,
-              requestedTargetCount: effectiveCandidateTargetCount,
-            })
-          : await fetchOpenAiCandidateSelection({
-              apiKey: effectiveOpenAiApiKey,
-              model: effectiveOpenAiModel,
-              participants,
-              insights,
-              selectedCategory,
-              selectionMode,
-              thrillLevel,
-              candidateScope,
-              requestedTargetCount: effectiveCandidateTargetCount,
-            });
+      let lastAiError: unknown = null;
 
-        const allowedIds = new Set(
-          insights
-            .map((insight) => insight?.candidate?.id)
-            .filter((candidateId: unknown): candidateId is string => typeof candidateId === 'string'),
-        );
-        const candidateIds = aiSelection.candidateIds
-          .filter((candidateId) => allowedIds.has(candidateId))
-          .slice(0, pickTargetCount(allowedIds.size, selectionMode, thrillLevel, candidateScope, effectiveCandidateTargetCount));
-        const coveredCandidateIds = reorderCandidateIdsByFairness(
-          ensureParticipantLocalCoverageIds(
-            candidateIds.length ? candidateIds : coveredSafeFallbackIds,
+      for (const aiProvider of aiProviders) {
+        try {
+          const aiSelection =
+            aiProvider.provider === 'openai'
+              ? await fetchOpenAiCandidateSelection({
+                  apiKey: aiProvider.apiKey,
+                  model: aiProvider.model,
+                  participants,
+                  insights,
+                  selectedCategory,
+                  selectionMode,
+                  thrillLevel,
+                  candidateScope,
+                  requestedTargetCount: effectiveCandidateTargetCount,
+                })
+              : await fetchUpstageCandidateSelection({
+                  apiKey: aiProvider.apiKey,
+                  model: aiProvider.model,
+                  baseUrl: aiProvider.baseUrl,
+                  participants,
+                  insights,
+                  selectedCategory,
+                  selectionMode,
+                  thrillLevel,
+                  candidateScope,
+                  requestedTargetCount: effectiveCandidateTargetCount,
+                  providerLabel: aiProvider.provider === 'gms' ? 'GMS AI' : 'Upstage',
+                });
+
+          const allowedIds = new Set(
+            insights
+              .map((insight) => insight?.candidate?.id)
+              .filter((candidateId: unknown): candidateId is string => typeof candidateId === 'string'),
+          );
+          const candidateIds = aiSelection.candidateIds
+            .filter((candidateId) => allowedIds.has(candidateId))
+            .slice(0, pickTargetCount(allowedIds.size, selectionMode, thrillLevel, candidateScope, effectiveCandidateTargetCount));
+          const coveredCandidateIds = reorderCandidateIdsByFairness(
+            ensureParticipantLocalCoverageIds(
+              candidateIds.length ? candidateIds : coveredSafeFallbackIds,
+              insights,
+              participants,
+              pickTargetCount(allowedIds.size, selectionMode, thrillLevel, candidateScope, effectiveCandidateTargetCount),
+              selectionMode,
+              thrillLevel,
+            ),
             insights,
-            participants,
-            pickTargetCount(allowedIds.size, selectionMode, thrillLevel, candidateScope, effectiveCandidateTargetCount),
-            selectionMode,
             thrillLevel,
-          ),
-          insights,
-          thrillLevel,
-        );
+          );
 
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(
-          JSON.stringify({
-            candidateIds: coveredCandidateIds.length ? coveredCandidateIds : coveredSafeFallbackIds,
-            source: effectiveUpstageApiKey ? 'upstage' : 'openai',
-            message: aiSelection.summary || undefined,
-          }),
-        );
-      } catch (error) {
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(
-          JSON.stringify({
-            candidateIds: coveredSafeFallbackIds,
-            source: 'heuristic',
-            message:
-              error instanceof Error
-                ? error.message
-                : 'AI 후보 생성에 실패해 기본 후보로 이어갑니다.',
-          }),
-        );
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.end(
+            JSON.stringify({
+              candidateIds: coveredCandidateIds.length ? coveredCandidateIds : coveredSafeFallbackIds,
+              source: aiProvider.provider,
+              message: aiSelection.summary || undefined,
+            }),
+          );
+          return;
+        } catch (error) {
+          lastAiError = error;
+        }
       }
+
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(
+        JSON.stringify({
+          candidateIds: coveredSafeFallbackIds,
+          source: 'heuristic',
+          message:
+            lastAiError instanceof Error
+              ? lastAiError.message
+              : 'AI 후보 생성에 실패해 기본 후보로 이어갑니다.',
+        }),
+      );
     } catch (error) {
       res.statusCode = 500;
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -1764,17 +1875,9 @@ function liveCandidateProxy({
 }
 
 function contentRecommendationsProxy({
-  openAiApiKey,
-  openAiModel,
-  upstageApiKey,
-  upstageModel,
-  upstageBaseUrl,
+  env,
 }: {
-  openAiApiKey: string;
-  openAiModel: string;
-  upstageApiKey: string;
-  upstageModel: string;
-  upstageBaseUrl: string;
+  env: Record<string, string | undefined>;
 }) {
   const middleware = async (req: any, res: any, next: () => void) => {
     if (!req.url?.startsWith('/api/content-recommendations')) {
@@ -1838,18 +1941,7 @@ function contentRecommendationsProxy({
       }
 
       const runtimeAiConfig = getRuntimeAiConfig(body);
-      const effectiveUpstageApiKey =
-        runtimeAiConfig?.provider === 'upstage' ? runtimeAiConfig.apiKey : upstageApiKey;
-      const effectiveUpstageModel =
-        runtimeAiConfig?.provider === 'upstage' ? runtimeAiConfig.model : upstageModel;
-      const effectiveUpstageBaseUrl =
-        runtimeAiConfig?.provider === 'upstage' && runtimeAiConfig.baseUrl
-          ? runtimeAiConfig.baseUrl
-          : upstageBaseUrl;
-      const effectiveOpenAiApiKey =
-        runtimeAiConfig?.provider === 'openai' ? runtimeAiConfig.apiKey : openAiApiKey;
-      const effectiveOpenAiModel =
-        runtimeAiConfig?.provider === 'openai' ? runtimeAiConfig.model : openAiModel;
+      const aiProviders = getServerAiProviders(env, runtimeAiConfig);
       const payload = buildPlaceSelectionPayload({
         candidateName: normalizePlaceText(body?.candidate?.name),
         candidateDistrict: normalizePlaceText(body?.candidate?.district),
@@ -1865,7 +1957,7 @@ function contentRecommendationsProxy({
         items,
       });
 
-      if (!effectiveOpenAiApiKey && !effectiveUpstageApiKey) {
+      if (!aiProviders.length) {
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.end(
@@ -1878,47 +1970,56 @@ function contentRecommendationsProxy({
         return;
       }
 
-      try {
-        const aiRanking = effectiveUpstageApiKey
-          ? await fetchUpstagePlaceRanking({
-              apiKey: effectiveUpstageApiKey,
-              model: effectiveUpstageModel,
-              baseUrl: effectiveUpstageBaseUrl,
-              payload,
-            })
-          : await fetchOpenAiPlaceRanking({
-              apiKey: effectiveOpenAiApiKey,
-              model: effectiveOpenAiModel,
-              payload,
-              allowedIds,
-            });
-        const itemIds = aiRanking.itemIds
-          .filter((id) => allowedIds.includes(id))
-          .slice(0, limit);
+      let lastAiError: unknown = null;
 
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(
-          JSON.stringify({
-            itemIds: itemIds.length ? itemIds : fallbackIds,
-            source: effectiveUpstageApiKey ? 'upstage' : 'openai',
-            message: aiRanking.summary || 'AI가 모임에 어울리는 순서로 장소를 정리했어요.',
-          }),
-        );
-      } catch (error) {
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(
-          JSON.stringify({
-            itemIds: fallbackIds,
-            source: 'heuristic',
-            message:
-              error instanceof Error
-                ? `AI 추천 정렬 실패: ${error.message}`
-                : 'AI 추천 정렬에 실패해 기본 필터로 장소를 정리했어요.',
-          }),
-        );
+      for (const aiProvider of aiProviders) {
+        try {
+          const aiRanking =
+            aiProvider.provider === 'openai'
+              ? await fetchOpenAiPlaceRanking({
+                  apiKey: aiProvider.apiKey,
+                  model: aiProvider.model,
+                  payload,
+                  allowedIds,
+                })
+              : await fetchUpstagePlaceRanking({
+                  apiKey: aiProvider.apiKey,
+                  model: aiProvider.model,
+                  baseUrl: aiProvider.baseUrl,
+                  payload,
+                  providerLabel: aiProvider.provider === 'gms' ? 'GMS AI' : 'Upstage',
+                });
+          const itemIds = aiRanking.itemIds
+            .filter((id) => allowedIds.includes(id))
+            .slice(0, limit);
+
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.end(
+            JSON.stringify({
+              itemIds: itemIds.length ? itemIds : fallbackIds,
+              source: aiProvider.provider,
+              message: aiRanking.summary || 'AI가 모임에 어울리는 순서로 장소를 정리했어요.',
+            }),
+          );
+          return;
+        } catch (error) {
+          lastAiError = error;
+        }
       }
+
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(
+        JSON.stringify({
+          itemIds: fallbackIds,
+          source: 'heuristic',
+          message:
+            lastAiError instanceof Error
+              ? `AI 추천 정렬 실패: ${lastAiError.message}`
+              : 'AI 추천 정렬에 실패해 기본 필터로 장소를 정리했어요.',
+        }),
+      );
     } catch (error) {
       res.statusCode = 500;
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -1948,16 +2049,7 @@ function contentRecommendationsProxy({
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const rawOpenAiKey = pickFirstEnv(env, ['OPENAI_API_KEY', 'AI_API_KEY', 'VITE_OPENAI_API_KEY']);
-  const rawUpstageKey = pickFirstEnv(env, [
-    'UPSTAGE_API_KEY',
-    'SOLAR_API_KEY',
-    'VITE_UPSTAGE_API_KEY',
-  ]);
-  const detectedUpstageKey =
-    rawUpstageKey || (rawOpenAiKey.startsWith('up_') ? rawOpenAiKey : '');
-  const detectedOpenAiKey =
-    detectedUpstageKey && rawOpenAiKey === detectedUpstageKey ? '' : rawOpenAiKey;
+  const serverAiProviders = getServerAiProviders(env, null);
   const odsayApiKey = pickFirstEnv(env, ['ODSAY_API_KEY', 'VITE_ODSAY_API_KEY']);
 
   return {
@@ -1967,43 +2059,16 @@ export default defineConfig(({ mode }) => {
       naverLocalSearchProxy(env.NAVER_SEARCH_CLIENT_ID, env.NAVER_SEARCH_CLIENT_SECRET),
       odsayTransitProxy(odsayApiKey),
       runtimeCapabilitiesProxy({
-        openAiApiKey: detectedOpenAiKey,
-        openAiModel: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini',
-        upstageApiKey: detectedUpstageKey,
-        upstageModel:
-          pickFirstEnv(env, ['UPSTAGE_MODEL', 'SOLAR_MODEL', 'VITE_UPSTAGE_MODEL']) ||
-          'solar-pro3',
+        aiProviders: serverAiProviders,
         naverSearchClientId: env.NAVER_SEARCH_CLIENT_ID,
         naverSearchClientSecret: env.NAVER_SEARCH_CLIENT_SECRET,
         odsayApiKey,
       }),
       liveCandidateProxy({
-        openAiApiKey: detectedOpenAiKey,
-        openAiModel: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini',
-        upstageApiKey: detectedUpstageKey,
-        upstageModel:
-          pickFirstEnv(env, ['UPSTAGE_MODEL', 'SOLAR_MODEL', 'VITE_UPSTAGE_MODEL']) ||
-          'solar-pro3',
-        upstageBaseUrl:
-          pickFirstEnv(env, [
-            'UPSTAGE_API_BASE_URL',
-            'SOLAR_API_BASE_URL',
-            'VITE_UPSTAGE_API_BASE_URL',
-          ]) || 'https://api.upstage.ai/v1',
+        env,
       }),
       contentRecommendationsProxy({
-        openAiApiKey: detectedOpenAiKey,
-        openAiModel: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini',
-        upstageApiKey: detectedUpstageKey,
-        upstageModel:
-          pickFirstEnv(env, ['UPSTAGE_MODEL', 'SOLAR_MODEL', 'VITE_UPSTAGE_MODEL']) ||
-          'solar-pro3',
-        upstageBaseUrl:
-          pickFirstEnv(env, [
-            'UPSTAGE_API_BASE_URL',
-            'SOLAR_API_BASE_URL',
-            'VITE_UPSTAGE_API_BASE_URL',
-          ]) || 'https://api.upstage.ai/v1',
+        env,
       }),
       react(),
       tailwindcss(),

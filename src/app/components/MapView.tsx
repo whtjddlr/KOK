@@ -55,11 +55,11 @@ function createParticipantIcon(name: string, color: string) {
 
 function createCandidateIcon(name: string, active: boolean, reachable: boolean) {
   const safeName = escapeHtml(name);
-  const background = active ? '#ff7b6b' : '#ffffff';
-  const border = active ? '#ff7b6b' : reachable ? '#4ecdc4' : '#c9d4dc';
+  const background = active ? '#12B886' : '#ffffff';
+  const border = active ? '#12B886' : reachable ? '#0CA178' : '#c9d4dc';
   const opacity = active || reachable ? 1 : 0.58;
   const shadow = active
-    ? '0 0 0 8px rgba(255,123,107,0.14)'
+    ? '0 0 0 8px rgba(18,184,134,0.14)'
     : '0 8px 20px rgba(18,28,45,0.12)';
 
   return {
@@ -80,9 +80,9 @@ function createNearbyPlaceIcon(label: string, category: NearbyPlace['category'])
   const safeLabel = escapeHtml(label);
   const palette =
     category === 'restaurant'
-      ? { background: '#ff7b6b', text: '#ffffff' }
+      ? { background: '#12B886', text: '#ffffff' }
       : category === 'cafe'
-        ? { background: '#4ecdc4', text: '#10373b' }
+        ? { background: '#0CA178', text: '#10373b' }
         : { background: '#ffd166', text: '#5b4300' };
 
   return {
@@ -114,7 +114,7 @@ function createRouteInfoIcon(participantName: string, route: TravelInfo, color: 
           ${initial}
         </span>
         <span style="display:flex;flex-direction:column;gap:1px;line-height:1.1;white-space:nowrap;">
-          <span style="font-size:13px;font-weight:800;color:#1f2a44;">${route.duration}분 · ${distanceLabel}</span>
+          <span style="font-size:13px;font-weight:800;color:#16241D;">${route.duration}분 · ${distanceLabel}</span>
           <span style="font-size:11px;color:#7a8491;">상세 보기</span>
         </span>
       </button>
@@ -128,8 +128,8 @@ function createPickedLocationIcon() {
   return {
     content: `
       <div style="display:flex;flex-direction:column;align-items:center;gap:6px;transform:translateY(-8px);">
-        <div style="width:18px;height:18px;transform:rotate(45deg);background:#1f2a44;border:2px solid rgba(255,255,255,0.96);border-radius:6px;box-shadow:0 10px 18px rgba(18,28,45,0.18);"></div>
-        <div style="padding:4px 9px;border-radius:9999px;background:rgba(31,42,68,0.94);color:#fff;font-size:11px;white-space:nowrap;box-shadow:0 10px 20px rgba(18,28,45,0.12);">
+        <div style="width:18px;height:18px;transform:rotate(45deg);background:#16241D;border:2px solid rgba(255,255,255,0.96);border-radius:6px;box-shadow:0 10px 18px rgba(18,28,45,0.18);"></div>
+        <div style="padding:4px 9px;border-radius:9999px;background:rgba(20,35,29,0.94);color:#fff;font-size:11px;white-space:nowrap;box-shadow:0 10px 20px rgba(18,28,45,0.12);">
           새 출발지
         </div>
       </div>
@@ -207,14 +207,14 @@ function buildViewportSignature(
 
 function getMapLocationErrorMessage(error: GeolocationPositionError) {
   if (error.code === error.PERMISSION_DENIED) {
-    return '위치 권한을 허용하면 현재 위치로 이동할 수 있어요.';
+    return '위치 권한이 필요해요.';
   }
 
   if (error.code === error.POSITION_UNAVAILABLE) {
-    return '현재 위치를 찾지 못했어요.';
+    return '위치를 못 찾았어요.';
   }
 
-  return '위치를 가져오는 데 시간이 걸렸어요.';
+  return '위치 확인이 늦어요.';
 }
 
 export function MapView({
@@ -733,7 +733,7 @@ export function MapView({
     }
 
     if (!navigator.geolocation) {
-      setMapCenterError('이 브라우저에서는 현재 위치 기능을 지원하지 않아요.');
+      setMapCenterError('현재 위치를 쓸 수 없어요.');
       return;
     }
 
@@ -780,26 +780,25 @@ export function MapView({
   if (error) {
     return (
       <div className="relative h-[24rem] w-full overflow-hidden rounded-[2rem] border border-[#f0d4d0] bg-[#fff8f7] p-5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)] md:h-[30rem]">
-        <div className="text-sm text-[#a24b41] mb-2">네이버 지도를 불러오지 못했습니다.</div>
-        <p className="text-sm text-[#6b7280] leading-relaxed">{error}</p>
+        <div className="text-sm text-[#a24b41] mb-2">지도를 못 불러왔어요.</div>
+        <p className="text-sm text-[#6E7C75] leading-relaxed">{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="relative h-[24rem] w-full overflow-hidden rounded-[2rem] border border-white/70 bg-[#e4e2e4] shadow-[0_10px_30px_rgba(26,26,46,0.08)] sm:h-[28rem] md:h-[32rem]">
+    <div className="relative h-[21rem] w-full overflow-hidden rounded-[2rem] border border-white/70 bg-[#EEF3F0] shadow-[0_10px_30px_rgba(20,35,29,0.08)] sm:h-[27rem] md:h-[32rem]">
       <div ref={containerRef} className="absolute inset-0 h-full w-full" />
 
       {!sdkReady && (
         <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.92),rgba(240,244,248,0.95))] px-6">
-          <div className="kok-loading-card w-full max-w-[320px] rounded-[1.5rem] bg-white/90 px-5 py-4 text-sm text-[#76777e] shadow-[0_10px_30px_rgba(26,26,46,0.08)] backdrop-blur-sm">
+          <div className="kok-loading-card w-full max-w-[320px] rounded-[1.5rem] bg-white/90 px-5 py-4 text-sm text-[#6E7C75] shadow-[0_10px_30px_rgba(20,35,29,0.08)] backdrop-blur-sm">
             <div className="flex items-center gap-3">
               <div className="kok-route-loader scale-90">
                 <span />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="font-bold text-[#17233c]">지도 여는 중</div>
-                <div className="mt-1 text-xs">후보와 출발지를 지도 위에 올리고 있어요.</div>
+                <div className="font-bold text-[#16241D]">지도 여는 중</div>
               </div>
             </div>
             <div className="mt-4 kok-loading-progress" />
@@ -808,8 +807,8 @@ export function MapView({
       )}
 
       {locationPickerHintVisible && (
-        <div className="pointer-events-none absolute left-4 top-4 rounded-full bg-[#1f2a44]/92 px-4 py-2 text-xs text-white shadow-[0_10px_30px_rgba(26,26,46,0.14)] backdrop-blur-sm">
-          지도에서 우클릭하거나 길게 눌러 출발지를 찍어주세요
+        <div className="pointer-events-none absolute left-4 top-4 rounded-full bg-[#16241D]/92 px-4 py-2 text-xs text-white shadow-[0_10px_30px_rgba(20,35,29,0.14)] backdrop-blur-sm">
+          길게 눌러 위치를 골라요
         </div>
       )}
 
@@ -820,20 +819,20 @@ export function MapView({
               <div className="min-w-0">
                 <div className="mb-2 flex flex-wrap gap-2">
                   {false ? (
-                    <span className="rounded-full bg-[#fff2ee] px-3 py-1 text-[11px] text-[#ff7b6b]">
+                    <span className="rounded-full bg-[#E6F7F0] px-3 py-1 text-[11px] text-[#12B886]">
                       후보 지역
                     </span>
                   ) : null}
                   {activeNearbyPlaceDetail ? (
-                    <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-[11px] text-[#2d5aa7]">
+                    <span className="rounded-full bg-[#E6F7F0] px-3 py-1 text-[11px] text-[#0CA178]">
                       {getNearbyCategoryLabel(activeNearbyPlaceDetail.category)}
                     </span>
                   ) : null}
                 </div>
-                <div className="truncate text-base text-[#1a1a2e]">
+                <div className="truncate text-base text-[#16241D]">
                   {activeNearbyPlaceDetail?.name}
                 </div>
-                <div className="mt-1 text-sm leading-relaxed text-[#6b7280]">
+                <div className="mt-1 text-sm leading-relaxed text-[#6E7C75]">
                   {activeNearbyPlaceDetail?.categoryPath ??
                     activeNearbyPlaceDetail?.description}
                 </div>
@@ -841,7 +840,7 @@ export function MapView({
               <button
                 type="button"
                 onClick={() => setActiveDetail(null)}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-[#f5f1eb] text-[#6b7280] transition-transform active:scale-95"
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-[#FFFFFF] text-[#6E7C75] transition-transform active:scale-95"
                 aria-label="상세 정보 닫기"
               >
                 <X className="h-4 w-4" />
@@ -853,8 +852,8 @@ export function MapView({
                 <p className="mt-3 text-sm leading-relaxed text-[#44505b]">
                   {activeCandidateDetail.description}
                 </p>
-                <div className="mt-3 flex items-start gap-2 text-xs text-[#6b7280]">
-                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#ff7b6b]" />
+                <div className="mt-3 flex items-start gap-2 text-xs text-[#6E7C75]">
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#12B886]" />
                   <span>{activeCandidateDetail.routeHint}</span>
                 </div>
               </>
@@ -862,8 +861,8 @@ export function MapView({
 
             {activeNearbyPlaceDetail ? (
               <>
-                <div className="mt-3 flex items-start gap-2 text-xs text-[#6b7280]">
-                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#ff7b6b]" />
+                <div className="mt-3 flex items-start gap-2 text-xs text-[#6E7C75]">
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#12B886]" />
                   <span>
                     {activeNearbyPlaceDetail.roadAddress ||
                       activeNearbyPlaceDetail.address ||
@@ -877,7 +876,7 @@ export function MapView({
                     }
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#1f2a44] px-4 text-xs text-white transition-transform active:scale-95"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#16241D] px-4 text-xs text-white transition-transform active:scale-95"
                   >
                     네이버 보기
                     <ExternalLink className="h-3.5 w-3.5" />
@@ -886,7 +885,7 @@ export function MapView({
                     href={buildNaverMapReservationLink(activeNearbyPlaceDetail.name)}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#f5f1eb] px-4 text-xs text-[#1a1a2e] transition-transform active:scale-95"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#FFFFFF] px-4 text-xs text-[#16241D] transition-transform active:scale-95"
                   >
                     예약 검색
                     <Search className="h-3.5 w-3.5" />
@@ -897,19 +896,19 @@ export function MapView({
           </div>
         </div>
       )}
-      <div className="pointer-events-none hidden absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs text-[#6b7280] shadow-sm">
+      <div className="pointer-events-none hidden absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs text-[#6E7C75] shadow-sm">
         수도권 연결 지도
       </div>
 
-      <div className="pointer-events-none hidden absolute left-4 bottom-4 bg-[#1f2a44]/82 text-white text-[11px] px-3 py-2 rounded-full shadow-lg backdrop-blur-sm">
-        드래그로 이동 · 스크롤/핀치로 확대/축소
+      <div className="pointer-events-none hidden absolute left-4 bottom-4 bg-[#16241D]/82 text-white text-[11px] px-3 py-2 rounded-full shadow-lg backdrop-blur-sm">
+        이동 · 확대
       </div>
 
       <div className="absolute right-3 bottom-3 flex flex-col gap-2 sm:right-4 sm:bottom-4">
         <button
           type="button"
           onClick={() => handleZoom(1)}
-          className="flex h-12 w-12 items-center justify-center rounded-full border border-white/80 bg-white/94 text-[#1f2a44] shadow-[0_10px_30px_rgba(26,26,46,0.12)] backdrop-blur-sm transition-transform active:scale-95"
+          className="flex h-12 w-12 items-center justify-center rounded-full border border-white/80 bg-white/94 text-[#16241D] shadow-[0_10px_30px_rgba(20,35,29,0.12)] backdrop-blur-sm transition-transform active:scale-95"
           aria-label="지도 확대"
         >
           <Plus className="h-5 w-5" />
@@ -917,7 +916,7 @@ export function MapView({
         <button
           type="button"
           onClick={() => handleZoom(-1)}
-          className="flex h-12 w-12 items-center justify-center rounded-full border border-white/80 bg-white/94 text-[#1f2a44] shadow-[0_10px_30px_rgba(26,26,46,0.12)] backdrop-blur-sm transition-transform active:scale-95"
+          className="flex h-12 w-12 items-center justify-center rounded-full border border-white/80 bg-white/94 text-[#16241D] shadow-[0_10px_30px_rgba(20,35,29,0.12)] backdrop-blur-sm transition-transform active:scale-95"
           aria-label="지도 축소"
         >
           <Minus className="h-5 w-5" />
@@ -926,7 +925,7 @@ export function MapView({
           type="button"
           onClick={handleMoveToCurrentLocation}
           disabled={isLocatingMapCenter || !sdkReady}
-          className="flex h-12 w-12 items-center justify-center rounded-full border border-[#314062] bg-[#1f2a44]/92 text-white shadow-[0_10px_30px_rgba(26,26,46,0.16)] backdrop-blur-sm transition-transform active:scale-95"
+          className="flex h-12 w-12 items-center justify-center rounded-full border border-[#244033] bg-[#16241D]/92 text-white shadow-[0_10px_30px_rgba(20,35,29,0.16)] backdrop-blur-sm transition-transform active:scale-95"
           aria-label="현재 위치로 이동"
         >
           {isLocatingMapCenter ? (
@@ -942,7 +941,7 @@ export function MapView({
           {mapCenterError}
         </div>
       ) : zoomLevel !== null && !activeNearbyPlaceDetail ? (
-        <div className="pointer-events-none absolute bottom-4 left-4 rounded-full bg-white/88 px-3 py-1.5 text-[11px] text-[#6b7280] shadow-sm backdrop-blur-sm">
+        <div className="pointer-events-none absolute bottom-4 left-4 rounded-full bg-white/88 px-3 py-1.5 text-[11px] text-[#6E7C75] shadow-sm backdrop-blur-sm">
           Zoom {zoomLevel}
         </div>
       ) : null}

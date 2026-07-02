@@ -3,7 +3,7 @@ export interface Coordinates {
   lng: number;
 }
 
-export type AiProvider = 'upstage' | 'openai';
+export type AiProvider = 'gms' | 'upstage' | 'openai';
 
 export interface RuntimeAiConfig {
   provider: AiProvider;

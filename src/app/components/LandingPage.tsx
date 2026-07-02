@@ -55,7 +55,7 @@ const appStoreUrl = 'https://apps.apple.com/app/id6766378613';
 
 function BrandMark() {
   return (
-    <div className="flex h-11 w-11 items-center justify-center rounded-[8px] bg-[#17233c] shadow-[0_12px_28px_rgba(23,35,60,0.16)]">
+    <div className="flex h-11 w-11 items-center justify-center rounded-[8px] bg-[#16241D] shadow-[0_12px_28px_rgba(20,35,29,0.16)]">
       <img src="/icons/kok-icon.svg" alt="" className="h-7 w-7" />
     </div>
   );
@@ -72,7 +72,7 @@ function PhonePreview({
 }) {
   return (
     <div
-      className={`overflow-hidden rounded-[28px] border-[7px] border-[#17233c] bg-[#17233c] shadow-[0_28px_70px_rgba(23,35,60,0.22)] ${className}`}
+      className={`overflow-hidden rounded-[28px] border-[7px] border-[#16241D] bg-[#16241D] shadow-[0_28px_70px_rgba(20,35,29,0.22)] ${className}`}
     >
       <img src={src} alt={alt} className="block h-full w-full object-cover" loading="eager" />
     </div>
@@ -85,7 +85,7 @@ export function LandingPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#f8fbf7] text-[#17233c]">
+    <div className="min-h-screen bg-[#f8fbf7] text-[#16241D]">
       <header className="fixed left-0 top-0 z-50 w-full border-b border-white/70 bg-[#f8fbf7]/86 backdrop-blur-xl">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-5">
           <a href="/landing" className="flex items-center gap-3" aria-label="KoK 소개 홈">
@@ -94,20 +94,20 @@ export function LandingPage() {
           </a>
 
           <nav className="hidden items-center gap-7 text-sm font-bold text-[#667280] sm:flex">
-            <a href="#flow" className="transition-colors hover:text-[#17233c]">
+            <a href="#flow" className="transition-colors hover:text-[#16241D]">
               사용 흐름
             </a>
-            <a href="#features" className="transition-colors hover:text-[#17233c]">
+            <a href="#features" className="transition-colors hover:text-[#16241D]">
               기능
             </a>
-            <a href="#download" className="transition-colors hover:text-[#17233c]">
+            <a href="#download" className="transition-colors hover:text-[#16241D]">
               시작하기
             </a>
           </nav>
 
           <a
             href="/"
-            className="kok-pressable inline-flex h-11 items-center justify-center rounded-full bg-[#17233c] px-5 text-sm font-extrabold tracking-normal text-white shadow-[0_12px_28px_rgba(23,35,60,0.14)]"
+            className="kok-pressable inline-flex h-11 items-center justify-center rounded-full bg-[#16241D] px-5 text-sm font-extrabold tracking-normal text-white shadow-[0_12px_28px_rgba(20,35,29,0.14)]"
           >
             앱 열기
           </a>
@@ -128,7 +128,7 @@ export function LandingPage() {
 
           <svg
             viewBox="0 0 980 620"
-            className="pointer-events-none absolute left-1/2 top-20 h-[620px] w-[980px] -translate-x-1/2 text-[#17233c]/18"
+            className="pointer-events-none absolute left-1/2 top-20 h-[620px] w-[980px] -translate-x-1/2 text-[#16241D]/18"
             aria-hidden="true"
           >
             <path
@@ -142,25 +142,25 @@ export function LandingPage() {
             <path
               d="M166 210c108 32 180 90 229 176 44 77 108 113 193 104 77-9 133-55 184-127"
               fill="none"
-              stroke="#5dd9d0"
+              stroke="#0CA178"
               strokeWidth="6"
               strokeLinecap="round"
               opacity="0.52"
             />
-            <circle cx="166" cy="210" r="14" fill="#ff6b5f" />
+            <circle cx="166" cy="210" r="14" fill="#12B886" />
             <circle cx="773" cy="362" r="14" fill="#ffd166" />
-            <circle cx="494" cy="402" r="18" fill="#17233c" />
+            <circle cx="494" cy="402" r="18" fill="#16241D" />
           </svg>
 
           <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-col items-center px-5 text-center">
             <div className="kok-screen-enter flex flex-col items-center">
-              <div className="mb-7 flex h-24 w-24 items-center justify-center rounded-[16px] bg-white/88 shadow-[0_24px_70px_rgba(23,35,60,0.14)] backdrop-blur-md">
+              <div className="mb-7 flex h-24 w-24 items-center justify-center rounded-[16px] bg-white/88 shadow-[0_24px_70px_rgba(20,35,29,0.14)] backdrop-blur-md">
                 <img src="/icons/kok-icon.svg" alt="" className="h-16 w-16" />
               </div>
-              <h1 className="text-6xl font-black leading-none tracking-normal text-[#17233c] sm:text-7xl">
+              <h1 className="text-6xl font-black leading-none tracking-normal text-[#16241D] sm:text-7xl">
                 KoK
               </h1>
-              <p className="mt-6 max-w-[720px] text-3xl font-black leading-tight tracking-normal text-[#17233c] sm:text-5xl">
+              <p className="mt-6 max-w-[720px] text-3xl font-black leading-tight tracking-normal text-[#16241D] sm:text-5xl">
                 친구들과 약속 장소를 더 짧고 가볍게 정하세요.
               </p>
               <p className="mt-5 max-w-[620px] text-lg font-semibold leading-8 tracking-normal text-[#667280]">
@@ -169,14 +169,14 @@ export function LandingPage() {
               <div className="mt-9 flex w-full max-w-[460px] flex-col gap-3 sm:flex-row sm:justify-center">
                 <a
                   href="/"
-                  className="kok-pressable inline-flex h-14 items-center justify-center rounded-full bg-[#17233c] px-7 text-base font-extrabold tracking-normal text-white shadow-[0_16px_36px_rgba(23,35,60,0.18)]"
+                  className="kok-pressable inline-flex h-14 items-center justify-center rounded-full bg-[#16241D] px-7 text-base font-extrabold tracking-normal text-white shadow-[0_16px_36px_rgba(20,35,29,0.18)]"
                 >
                   앱에서 시작하기
                   <ArrowRight className="ml-2 h-5 w-5" />
                 </a>
                 <a
                   href="/"
-                  className="kok-pressable inline-flex h-14 items-center justify-center rounded-full border border-[#dfe7e2] bg-white/88 px-7 text-base font-extrabold tracking-normal text-[#17233c] shadow-[0_12px_30px_rgba(23,35,60,0.06)] backdrop-blur-md"
+                  className="kok-pressable inline-flex h-14 items-center justify-center rounded-full border border-[#E4EFE9] bg-white/88 px-7 text-base font-extrabold tracking-normal text-[#16241D] shadow-[0_12px_30px_rgba(20,35,29,0.06)] backdrop-blur-md"
                 >
                   약속방 만들기
                 </a>
@@ -187,11 +187,11 @@ export function LandingPage() {
               {['강남역', '홍대입구역', '성수'].map((place, index) => (
                 <div
                   key={place}
-                  className="rounded-[8px] border border-white/80 bg-white/76 p-3 shadow-[0_12px_34px_rgba(23,35,60,0.08)] backdrop-blur-md"
+                  className="rounded-[8px] border border-white/80 bg-white/76 p-3 shadow-[0_12px_34px_rgba(20,35,29,0.08)] backdrop-blur-md"
                   style={{ animationDelay: `${index * 70 + 120}ms` }}
                 >
-                  <div className="text-xs font-bold text-[#8a94a2]">후보 {index + 1}</div>
-                  <div className="mt-1 text-base font-black tracking-normal text-[#17233c]">
+                  <div className="text-xs font-bold text-[#9AA8A1]">후보 {index + 1}</div>
+                  <div className="mt-1 text-base font-black tracking-normal text-[#16241D]">
                     {place}
                   </div>
                 </div>
@@ -203,7 +203,7 @@ export function LandingPage() {
         <section id="flow" className="bg-[#f8fbf7] px-5 py-20">
           <div className="mx-auto max-w-6xl">
             <div className="max-w-2xl">
-              <h2 className="text-4xl font-black leading-tight tracking-normal text-[#17233c]">
+              <h2 className="text-4xl font-black leading-tight tracking-normal text-[#16241D]">
                 약속 장소 결정 흐름을 한 번에 정리합니다.
               </h2>
               <p className="mt-4 text-lg font-semibold leading-8 tracking-normal text-[#667280]">
@@ -218,13 +218,13 @@ export function LandingPage() {
                 return (
                   <article
                     key={step.title}
-                    className="kok-pressable rounded-[8px] border border-[#e5ede8] bg-white p-6 shadow-[0_14px_38px_rgba(23,35,60,0.06)]"
+                    className="kok-pressable rounded-[8px] border border-[#e5ede8] bg-white p-6 shadow-[0_14px_38px_rgba(20,35,29,0.06)]"
                   >
-                    <div className="flex h-12 w-12 items-center justify-center rounded-[8px] bg-[#eef7f3] text-[#17233c]">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-[8px] bg-[#eef7f3] text-[#16241D]">
                       <Icon className="h-6 w-6" />
                     </div>
-                    <div className="mt-8 text-sm font-black text-[#ff6b5f]">0{index + 1}</div>
-                    <h3 className="mt-2 text-2xl font-black tracking-normal text-[#17233c]">
+                    <div className="mt-8 text-sm font-black text-[#12B886]">0{index + 1}</div>
+                    <h3 className="mt-2 text-2xl font-black tracking-normal text-[#16241D]">
                       {step.title}
                     </h3>
                     <p className="mt-3 text-base font-semibold leading-7 tracking-normal text-[#667280]">
@@ -240,7 +240,7 @@ export function LandingPage() {
         <section className="overflow-hidden bg-white px-5 py-20">
           <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[0.9fr_1.1fr]">
             <div>
-              <h2 className="text-4xl font-black leading-tight tracking-normal text-[#17233c]">
+              <h2 className="text-4xl font-black leading-tight tracking-normal text-[#16241D]">
                 앱 화면 그대로, 복잡한 설명 없이 바로 사용합니다.
               </h2>
               <p className="mt-5 text-lg font-semibold leading-8 tracking-normal text-[#667280]">
@@ -249,7 +249,7 @@ export function LandingPage() {
               <div className="mt-8 space-y-4">
                 {['참여자 출발지 저장', '지도 위 후보 확인', '결과와 주변 장소 공유'].map((item) => (
                   <div key={item} className="flex items-center gap-3 text-base font-extrabold">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#5dd9d0]/18 text-[#17233c]">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#0CA178]/18 text-[#16241D]">
                       <ArrowRight className="h-4 w-4" />
                     </span>
                     {item}
@@ -274,7 +274,7 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section id="features" className="bg-[#17233c] px-5 py-20 text-white">
+        <section id="features" className="bg-[#16241D] px-5 py-20 text-white">
           <div className="mx-auto max-w-6xl">
             <div className="grid gap-10 lg:grid-cols-[0.75fr_1.25fr]">
               <div>
@@ -295,7 +295,7 @@ export function LandingPage() {
                       key={feature.title}
                       className="rounded-[8px] border border-white/12 bg-white/8 p-5"
                     >
-                      <div className="flex h-11 w-11 items-center justify-center rounded-[8px] bg-white text-[#17233c]">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-[8px] bg-white text-[#16241D]">
                         <Icon className="h-5 w-5" />
                       </div>
                       <h3 className="mt-7 text-xl font-black tracking-normal">{feature.title}</h3>
@@ -313,7 +313,7 @@ export function LandingPage() {
         <section id="download" className="bg-[#eef7f3] px-5 py-20">
           <div className="mx-auto grid max-w-6xl items-center gap-10 lg:grid-cols-[1fr_0.85fr]">
             <div>
-              <h2 className="text-4xl font-black leading-tight tracking-normal text-[#17233c]">
+              <h2 className="text-4xl font-black leading-tight tracking-normal text-[#16241D]">
                 다음 약속은 KoK에서 바로 시작하세요.
               </h2>
               <p className="mt-5 max-w-xl text-lg font-semibold leading-8 tracking-normal text-[#667280]">
@@ -322,43 +322,43 @@ export function LandingPage() {
               <div className="mt-9 flex flex-col gap-3 sm:flex-row">
                 <a
                   href={appStoreUrl}
-                  className="kok-pressable inline-flex h-14 items-center justify-center rounded-full bg-[#17233c] px-7 text-base font-extrabold tracking-normal text-white shadow-[0_16px_36px_rgba(23,35,60,0.16)]"
+                  className="kok-pressable inline-flex h-14 items-center justify-center rounded-full bg-[#16241D] px-7 text-base font-extrabold tracking-normal text-white shadow-[0_16px_36px_rgba(20,35,29,0.16)]"
                 >
                   <Smartphone className="mr-2 h-5 w-5" />
                   App Store에서 받기
                 </a>
                 <a
                   href="/support.html"
-                  className="kok-pressable inline-flex h-14 items-center justify-center rounded-full border border-[#d8e5de] bg-white px-7 text-base font-extrabold tracking-normal text-[#17233c]"
+                  className="kok-pressable inline-flex h-14 items-center justify-center rounded-full border border-[#d8e5de] bg-white px-7 text-base font-extrabold tracking-normal text-[#16241D]"
                 >
                   지원 보기
                 </a>
               </div>
             </div>
 
-            <div className="rounded-[8px] border border-white/80 bg-white p-6 shadow-[0_18px_48px_rgba(23,35,60,0.08)]">
+            <div className="rounded-[8px] border border-white/80 bg-white p-6 shadow-[0_18px_48px_rgba(20,35,29,0.08)]">
               <div className="flex items-center gap-4">
                 <BrandMark />
                 <div>
-                  <div className="text-xl font-black tracking-normal text-[#17233c]">KoK</div>
-                  <div className="text-sm font-bold text-[#8a94a2]">친구들과 약속 장소 뽑기</div>
+                  <div className="text-xl font-black tracking-normal text-[#16241D]">KoK</div>
+                  <div className="text-sm font-bold text-[#9AA8A1]">친구들과 약속 장소 뽑기</div>
                 </div>
               </div>
               <div className="mt-8 grid grid-cols-2 gap-3">
                 <div className="rounded-[8px] bg-[#f8fbf7] p-4">
-                  <UsersRound className="h-5 w-5 text-[#ff6b5f]" />
-                  <div className="mt-4 text-sm font-black text-[#17233c]">친구 초대</div>
+                  <UsersRound className="h-5 w-5 text-[#12B886]" />
+                  <div className="mt-4 text-sm font-black text-[#16241D]">친구 초대</div>
                 </div>
                 <div className="rounded-[8px] bg-[#f8fbf7] p-4">
-                  <MapPin className="h-5 w-5 text-[#5dd9d0]" />
-                  <div className="mt-4 text-sm font-black text-[#17233c]">장소 추천</div>
+                  <MapPin className="h-5 w-5 text-[#0CA178]" />
+                  <div className="mt-4 text-sm font-black text-[#16241D]">장소 추천</div>
                 </div>
               </div>
               <div className="mt-7 flex flex-wrap gap-4 text-sm font-bold text-[#667280]">
-                <a href="/privacy.html" className="hover:text-[#17233c]">
+                <a href="/privacy.html" className="hover:text-[#16241D]">
                   개인정보처리방침
                 </a>
-                <a href="/support.html" className="hover:text-[#17233c]">
+                <a href="/support.html" className="hover:text-[#16241D]">
                   지원
                 </a>
               </div>

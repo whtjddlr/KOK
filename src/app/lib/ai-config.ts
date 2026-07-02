@@ -22,9 +22,12 @@ export function loadRuntimeAiConfig() {
 
     if (
       !parsed ||
-      (parsed.provider !== 'upstage' && parsed.provider !== 'openai') ||
+      (parsed.provider !== 'gms' &&
+        parsed.provider !== 'upstage' &&
+        parsed.provider !== 'openai') ||
       typeof parsed.apiKey !== 'string' ||
-      typeof parsed.model !== 'string'
+      typeof parsed.model !== 'string' ||
+      (parsed.provider === 'gms' && typeof parsed.baseUrl !== 'string')
     ) {
       return null as RuntimeAiConfig | null;
     }

@@ -1,7 +1,7 @@
 import {
   getRuntimeAiConfig,
+  getServerAiProviders,
   json,
-  pickFirstEnv,
   readJsonBody,
 } from './_lib/server.js';
 
@@ -502,6 +502,7 @@ async function fetchUpstageGeneratedAreas(input: {
   model: string;
   baseUrl: string;
   payload: ReturnType<typeof buildGenerationPayload>;
+  providerLabel?: string;
 }) {
   const apiBase = input.baseUrl.replace(/\/$/, '');
   const response = await fetch(`${apiBase}/chat/completions`, {
@@ -532,7 +533,10 @@ async function fetchUpstageGeneratedAreas(input: {
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(data?.error?.message ?? `Upstage candidate generation failed with status ${response.status}.`);
+    throw new Error(
+      data?.error?.message ??
+        `${input.providerLabel ?? 'Upstage'} candidate generation failed with status ${response.status}.`,
+    );
   }
 
   const rawContent = data?.choices?.[0]?.message?.content;
@@ -660,39 +664,10 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const rawOpenAiKey = pickFirstEnv(env, ['OPENAI_API_KEY', 'AI_API_KEY', 'VITE_OPENAI_API_KEY']);
-    const rawUpstageKey = pickFirstEnv(env, [
-      'UPSTAGE_API_KEY',
-      'SOLAR_API_KEY',
-      'VITE_UPSTAGE_API_KEY',
-    ]);
-    const detectedUpstageKey =
-      rawUpstageKey || (rawOpenAiKey.startsWith('up_') ? rawOpenAiKey : '');
-    const detectedOpenAiKey =
-      detectedUpstageKey && rawOpenAiKey === detectedUpstageKey ? '' : rawOpenAiKey;
     const runtimeAiConfig = getRuntimeAiConfig(body);
-    const effectiveUpstageApiKey =
-      runtimeAiConfig?.provider === 'upstage' ? runtimeAiConfig.apiKey : detectedUpstageKey;
-    const effectiveUpstageModel =
-      runtimeAiConfig?.provider === 'upstage'
-        ? runtimeAiConfig.model
-        : pickFirstEnv(env, ['UPSTAGE_MODEL', 'SOLAR_MODEL', 'VITE_UPSTAGE_MODEL']) || 'solar-pro3';
-    const effectiveUpstageBaseUrl =
-      runtimeAiConfig?.provider === 'upstage' && runtimeAiConfig.baseUrl
-        ? runtimeAiConfig.baseUrl
-        : pickFirstEnv(env, [
-            'UPSTAGE_API_BASE_URL',
-            'SOLAR_API_BASE_URL',
-            'VITE_UPSTAGE_API_BASE_URL',
-          ]) || 'https://api.upstage.ai/v1';
-    const effectiveOpenAiApiKey =
-      runtimeAiConfig?.provider === 'openai' ? runtimeAiConfig.apiKey : detectedOpenAiKey;
-    const effectiveOpenAiModel =
-      runtimeAiConfig?.provider === 'openai'
-        ? runtimeAiConfig.model
-        : pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini';
+    const aiProviders = getServerAiProviders(env, runtimeAiConfig);
 
-    if (!effectiveOpenAiApiKey && !effectiveUpstageApiKey) {
+    if (!aiProviders.length) {
       json(res, 200, {
         candidates: [],
         source: 'disabled',
@@ -709,18 +684,44 @@ export default async function handler(req: any, res: any) {
       thrillLevel,
       targetCount: generationTargetCount,
     });
-    const generatedAreas = effectiveUpstageApiKey
-      ? await fetchUpstageGeneratedAreas({
-          apiKey: effectiveUpstageApiKey,
-          model: effectiveUpstageModel,
-          baseUrl: effectiveUpstageBaseUrl,
-          payload,
-        })
-      : await fetchOpenAiGeneratedAreas({
-          apiKey: effectiveOpenAiApiKey,
-          model: effectiveOpenAiModel,
-          payload,
-        });
+    let generatedAreas: GeneratedArea[] | null = null;
+    let generationSource = '';
+    let lastAiError: unknown = null;
+
+    for (const aiProvider of aiProviders) {
+      try {
+        generatedAreas =
+          aiProvider.provider === 'openai'
+            ? await fetchOpenAiGeneratedAreas({
+                apiKey: aiProvider.apiKey,
+                model: aiProvider.model,
+                payload,
+              })
+            : await fetchUpstageGeneratedAreas({
+                apiKey: aiProvider.apiKey,
+                model: aiProvider.model,
+                baseUrl: aiProvider.baseUrl,
+                payload,
+                providerLabel: aiProvider.provider === 'gms' ? 'GMS AI' : 'Upstage',
+              });
+        generationSource = aiProvider.provider;
+        break;
+      } catch (error) {
+        lastAiError = error;
+      }
+    }
+
+    if (!generatedAreas) {
+      json(res, 200, {
+        candidates: [],
+        source: 'fallback',
+        message:
+          lastAiError instanceof Error
+            ? `AI 후보 생성 실패: ${lastAiError.message}`
+            : 'AI 후보 생성에 실패해 기본 후보를 사용했어요.',
+      });
+      return;
+    }
     const verifiedAreas = (
       await Promise.all(
         generatedAreas.map((proposal) =>
@@ -758,7 +759,7 @@ export default async function handler(req: any, res: any) {
 
     json(res, 200, {
       candidates,
-      source: effectiveUpstageApiKey ? 'upstage' : 'openai',
+      source: generationSource,
       message: candidates.length
         ? 'AI 생성 후보를 네이버 지도 검색으로 검증했어요.'
         : 'AI가 만든 후보가 지도 검증을 통과하지 못해 기본 후보를 사용했어요.',

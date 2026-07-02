@@ -84,19 +84,15 @@ function getRouteFallbackMessage(message: string | null, partial: boolean) {
 
   if (hasOdsayNoRoute) {
     return partial
-      ? '일부 대중교통 경로는 예상 이동시간 기준으로 안내해요.'
-      : '대중교통 예상 이동시간 기준으로 안내해요.';
+      ? '일부 경로는 예상이에요.'
+      : '대중교통은 예상이에요.';
   }
 
   if (message) {
-    return partial
-      ? '일부 경로는 예상 이동시간 기준으로 안내해요.'
-      : '예상 이동시간 기준으로 안내해요.';
+    return partial ? '일부 경로는 예상이에요.' : '예상 경로예요.';
   }
 
-  return partial
-    ? '일부 경로는 예상 이동시간 기준으로 안내해요.'
-    : '예상 이동시간 기준으로 안내해요.';
+  return partial ? '일부 경로는 예상이에요.' : '예상 경로예요.';
 }
 
 function mergeStableRoutes(currentRoutes: TravelInfo[], fallbackRoutes: TravelInfo[]) {
@@ -209,7 +205,7 @@ export function useCandidateTravelRoutes(
           canReuseCurrentRoutes ? mergeStableRoutes(currentRoutes, fallbackRoutes) : fallbackRoutes,
         );
         setStatus('error');
-        setError('예상 이동시간 기준으로 안내해요.');
+        setError('예상 경로예요.');
       });
 
     return () => {

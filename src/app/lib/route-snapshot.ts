@@ -48,32 +48,22 @@ function getTransitFallbackMessage(message: string | null, partial: boolean) {
     message?.includes('대중교통 경로 응답에 추천 경로가 없습니다');
 
   if (hasOdsayNoRoute) {
-    return partial
-      ? '일부 대중교통 경로는 실시간 응답이 없어 예상값으로 보정했습니다.'
-      : '대중교통 실시간 경로를 못 받아서 예상 이동시간으로 보정했습니다.';
+    return partial ? '일부 경로는 예상이에요.' : '대중교통은 예상이에요.';
   }
 
   if (message) {
-    return partial
-      ? `일부 대중교통 경로는 예상값으로 보정했습니다. ${message}`
-      : message;
+    return partial ? '일부 경로는 예상이에요.' : message;
   }
 
-  return partial
-    ? '일부 대중교통 경로는 응답이 없어 예상값으로 보정했습니다.'
-    : '대중교통 경로를 가져오지 못해 예상값으로 안내 중입니다.';
+  return partial ? '일부 경로는 예상이에요.' : '대중교통은 예상이에요.';
 }
 
 function getCarFallbackMessage(message: string | null, partial: boolean) {
   if (message) {
-    return partial
-      ? `일부 자동차 경로는 예상값으로 보정했습니다. ${message}`
-      : message;
+    return partial ? '일부 경로는 예상이에요.' : message;
   }
 
-  return partial
-    ? '일부 자동차 경로는 응답이 없어 예상값으로 보정했습니다.'
-    : '자동차 경로를 가져오지 못해 현재는 예상값으로 안내 중입니다.';
+  return partial ? '일부 경로는 예상이에요.' : '자동차는 예상이에요.';
 }
 
 function getSnapshotStatus(liveCount: number, totalCount: number): RouteSnapshotStatus {
