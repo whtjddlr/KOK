@@ -194,10 +194,6 @@ export function HomeScreen({
       >
         <div className="kok-hero-copy mb-9 text-center">
           <KoKBrandMark />
-          <div className="mx-auto mb-4 inline-flex h-9 items-center gap-2 rounded-full border border-[#F2DAD6] bg-white/78 px-3 text-xs font-black text-[#E85F55] shadow-[0_10px_24px_rgba(20,35,29,0.05)] backdrop-blur-md">
-            <span className="h-2 w-2 rounded-full bg-[#FF6B5F]" />
-            온라인 약속방
-          </div>
           <h1 className="text-5xl font-black tracking-normal text-[#16241D]">KoK</h1>
           <p className="mt-4 text-2xl font-bold leading-tight tracking-normal text-[#667280]">
             어디서 볼지, 같이 가볍게 정해요.
