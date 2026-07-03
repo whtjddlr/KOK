@@ -55,9 +55,11 @@ const appStoreUrl = 'https://apps.apple.com/app/id6766378613';
 
 function BrandMark() {
   return (
-    <div className="flex h-11 w-11 items-center justify-center rounded-[8px] bg-[#16241D] shadow-[0_12px_28px_rgba(20,35,29,0.16)]">
-      <img src="/icons/kok-icon.svg" alt="" className="h-7 w-7" />
-    </div>
+    <img
+      src="/icons/kok-icon.svg"
+      alt=""
+      className="h-11 w-11 rounded-[12px] shadow-[0_12px_28px_rgba(20,35,29,0.16)]"
+    />
   );
 }
 
@@ -154,9 +156,11 @@ export function LandingPage() {
 
           <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-col items-center px-5 text-center">
             <div className="kok-screen-enter flex flex-col items-center">
-              <div className="mb-7 flex h-24 w-24 items-center justify-center rounded-[16px] bg-white/88 shadow-[0_24px_70px_rgba(20,35,29,0.14)] backdrop-blur-md">
-                <img src="/icons/kok-icon.svg" alt="" className="h-16 w-16" />
-              </div>
+              <img
+                src="/icons/kok-icon.svg"
+                alt=""
+                className="mb-7 h-24 w-24 rounded-[1.75rem] shadow-[0_24px_70px_rgba(20,35,29,0.16)]"
+              />
               <h1 className="text-6xl font-black leading-none tracking-normal text-[#16241D] sm:text-7xl">
                 KoK
               </h1>

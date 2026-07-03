@@ -74,47 +74,14 @@ function formatRoomUpdatedAt(value: string) {
 
 function KoKBrandMark() {
   return (
-    <div className="kok-brand-float kok-brand-glow mx-auto mb-6 flex h-28 w-28 items-center justify-center rounded-[1.75rem] bg-[#16241D] shadow-[0_24px_60px_rgba(20,35,29,0.18)]">
-      <svg
-        viewBox="0 0 160 160"
-        className="h-24 w-24"
-        aria-hidden="true"
-      >
+    <div className="kok-brand-float kok-brand-glow mx-auto mb-6 flex h-28 w-28 items-center justify-center rounded-full bg-[#FFF0EE]/84 shadow-[0_24px_64px_rgba(255,107,95,0.16)] ring-1 ring-[#FFD8D2] backdrop-blur-md">
+      <svg viewBox="0 0 128 128" className="h-20 w-20" aria-hidden="true">
         <path
-          d="M40 43c16 4 28 14 39 32"
-          fill="none"
-          stroke="#0CA178"
-          strokeWidth="10"
-          strokeLinecap="round"
+          d="M64 8C35 8 13 30 13 58c0 37 51 74 51 74s51-37 51-74C115 30 93 8 64 8Z"
+          fill="#FF6B5F"
         />
-        <path
-          d="M120 43c-16 4-28 14-39 32"
-          fill="none"
-          stroke="#8d7cff"
-          strokeWidth="10"
-          strokeLinecap="round"
-        />
-        <path
-          d="M39 112c18-5 31-17 43-37"
-          fill="none"
-          stroke="#ffd166"
-          strokeWidth="10"
-          strokeLinecap="round"
-        />
-        <circle cx="36" cy="42" r="13" fill="#f8fbf7" stroke="#0CA178" strokeWidth="4" />
-        <circle cx="124" cy="42" r="13" fill="#f8fbf7" stroke="#8d7cff" strokeWidth="4" />
-        <circle cx="34" cy="116" r="13" fill="#f8fbf7" stroke="#ffd166" strokeWidth="4" />
-        <circle cx="80" cy="80" r="42" fill="#f8fbf7" />
-        <path
-          d="M80 43c-21 0-36 16-36 36 0 26 36 54 36 54s36-28 36-54c0-20-15-36-36-36Z"
-          fill="#12B886"
-        />
-        <circle cx="80" cy="77" r="14" fill="#16241D" />
-        <path
-          d="M64 59c6-8 15-13 26-12 10 0 18 5 24 12-7-4-15-6-24-6-11 0-20 2-26 6Z"
-          fill="#A8EAD6"
-          opacity=".9"
-        />
+        <circle cx="64" cy="56" r="24" fill="#FFFDFC" />
+        <circle cx="64" cy="56" r="10" fill="#17233C" />
       </svg>
     </div>
   );
@@ -227,8 +194,8 @@ export function HomeScreen({
       >
         <div className="kok-hero-copy mb-9 text-center">
           <KoKBrandMark />
-          <div className="mx-auto mb-4 inline-flex h-9 items-center gap-2 rounded-full border border-[#E4EFE9] bg-white/78 px-3 text-xs font-black text-[#0CA178] shadow-[0_10px_24px_rgba(20,35,29,0.05)] backdrop-blur-md">
-            <span className="h-2 w-2 rounded-full bg-[#12B886]" />
+          <div className="mx-auto mb-4 inline-flex h-9 items-center gap-2 rounded-full border border-[#F2DAD6] bg-white/78 px-3 text-xs font-black text-[#E85F55] shadow-[0_10px_24px_rgba(20,35,29,0.05)] backdrop-blur-md">
+            <span className="h-2 w-2 rounded-full bg-[#FF6B5F]" />
             온라인 약속방
           </div>
           <h1 className="text-5xl font-black tracking-normal text-[#16241D]">KoK</h1>
@@ -241,7 +208,7 @@ export function HomeScreen({
           {currentUser ? (
             <>
               <div className="kok-card-pop rounded-[1.5rem] border border-white/70 bg-white/92 px-5 py-4 text-left shadow-[0_10px_30px_rgba(20,35,29,0.06)] backdrop-blur-md">
-                <div className="text-sm font-semibold text-[#12B886]">온라인 약속방</div>
+                <div className="text-sm font-semibold text-[#E85F55]">온라인 약속방</div>
                 <div className="mt-1 truncate text-xl font-extrabold tracking-normal text-[#16241D]">
                   {currentUser.name}님, 바로 시작할까요?
                 </div>
@@ -281,7 +248,7 @@ export function HomeScreen({
                   aria-pressed={showCreatedRooms}
                   className={`kok-pressable flex h-16 items-center justify-center gap-2 rounded-[1.5rem] px-4 text-lg font-extrabold tracking-normal shadow-[0_10px_30px_rgba(20,35,29,0.06)] transition-transform active:scale-95 disabled:opacity-60 ${
                     showCreatedRooms
-                      ? 'bg-[#12B886] text-white'
+                      ? 'bg-[#FF6B5F] text-white'
                       : 'border border-white/70 bg-white/92 text-[#16241D]'
                   }`}
                 >
@@ -309,7 +276,7 @@ export function HomeScreen({
                     void onJoinRoom(roomCode);
                   }}
                   disabled={isOpeningRoom}
-                  className="absolute bottom-2 right-2 top-2 flex w-14 items-center justify-center rounded-[1.1rem] bg-[#E6F7F0] text-[#0CA178] shadow-sm transition-transform active:scale-95 disabled:opacity-60"
+                  className="absolute bottom-2 right-2 top-2 flex w-14 items-center justify-center rounded-[1.1rem] bg-[#FFF0EE] text-[#E85F55] shadow-sm transition-transform active:scale-95 disabled:opacity-60"
                   aria-label="방 코드 입장"
                 >
                   <ArrowRight className="h-6 w-6" />
@@ -335,7 +302,7 @@ export function HomeScreen({
                             setSelectedRoomIds([]);
                           }}
                           disabled={isDeletingRooms}
-                          className="rounded-full bg-[#eef7f3] px-3 py-2 text-xs font-bold text-[#16241D] shadow-sm transition-transform active:scale-95 disabled:opacity-50"
+                          className="rounded-full bg-[#F3F5FB] px-3 py-2 text-xs font-bold text-[#16241D] shadow-sm transition-transform active:scale-95 disabled:opacity-50"
                         >
                           {isEditingRooms ? '완료' : '편집'}
                         </button>
@@ -348,7 +315,7 @@ export function HomeScreen({
                             void onRefreshRooms();
                           }}
                           disabled={isLoadingCreatedRooms || isDeletingRooms}
-                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#eef7f3] text-[#16241D] shadow-sm transition-transform active:scale-95 disabled:opacity-50"
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F3F5FB] text-[#16241D] shadow-sm transition-transform active:scale-95 disabled:opacity-50"
                           aria-label="기존 방 새로고침"
                         >
                           <RefreshCw
@@ -375,7 +342,7 @@ export function HomeScreen({
                           void onDeleteExistingRooms?.(selectedRooms);
                         }}
                         disabled={!selectedRooms.length || isDeletingRooms}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#E6F7F0] px-3 text-xs font-bold text-[#0CA178] shadow-sm transition-transform active:scale-95 disabled:opacity-40"
+                        className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#FFF0EE] px-3 text-xs font-bold text-[#E85F55] shadow-sm transition-transform active:scale-95 disabled:opacity-40"
                       >
                         {isDeletingRooms ? (
                           <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
@@ -421,14 +388,14 @@ export function HomeScreen({
                             }}
                             disabled={isOpeningRoom || isDeletingRoom}
                             className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-transform active:scale-[0.99] disabled:opacity-60 ${
-                              isSelected ? 'bg-[#E6F7F0] ring-2 ring-[#12B886]' : 'bg-[#fbfdfb]'
+                              isSelected ? 'bg-[#FFF0EE] ring-2 ring-[#FF6B5F]' : 'bg-[#fbfdfb]'
                             }`}
                           >
                             {isEditingRooms ? (
                               <span
                                 className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 ${
                                   isSelected
-                                    ? 'border-[#12B886] bg-[#12B886] text-white'
+                                    ? 'border-[#FF6B5F] bg-[#FF6B5F] text-white'
                                     : 'border-[#E4EFE9] bg-white text-transparent'
                                 }`}
                               >
@@ -488,7 +455,7 @@ export function HomeScreen({
                   )}
 
                   {createdRoomsError ? (
-                    <div className="mt-2 rounded-2xl bg-[#E6F7F0] px-3 py-2 text-xs text-[#0CA178]">
+                    <div className="mt-2 rounded-2xl bg-[#FFF0EE] px-3 py-2 text-xs text-[#E85F55]">
                       {createdRoomsError}
                     </div>
                   ) : null}
@@ -518,7 +485,7 @@ export function HomeScreen({
           )}
 
           {roomError && (
-            <div className="rounded-[1.25rem] border border-[#CFEBDF] bg-[#E6F7F0] px-4 py-3 text-sm text-[#0CA178]">
+            <div className="rounded-[1.25rem] border border-[#F2DAD6] bg-[#FFF0EE] px-4 py-3 text-sm text-[#E85F55]">
               {roomError}
             </div>
           )}

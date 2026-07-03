@@ -1,24 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="KoK">
   <defs>
-    <linearGradient id="kok-bg" x1="72" y1="58" x2="448" y2="466" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#20304f"/>
-      <stop offset="1" stop-color="#101a30"/>
-    </linearGradient>
-    <linearGradient id="kok-pin" x1="204" y1="162" x2="316" y2="334" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ff8a76"/>
-      <stop offset="1" stop-color="#ff4f62"/>
-    </linearGradient>
+    <radialGradient id="kok-warm" cx="50%" cy="22%" r="72%">
+      <stop offset="0" stop-color="#FFF0EE"/>
+      <stop offset=".58" stop-color="#FFF9F7"/>
+      <stop offset="1" stop-color="#F8FAFF"/>
+    </radialGradient>
+    <filter id="kok-mark-shadow" x="82" y="118" width="348" height="238" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#17233C" flood-opacity=".14"/>
+    </filter>
   </defs>
-  <rect width="512" height="512" rx="112" fill="url(#kok-bg)"/>
-  <path d="M145 153c43 10 75 36 106 86" fill="none" stroke="#5dd9d0" stroke-width="28" stroke-linecap="round"/>
-  <path d="M370 153c-44 10-77 36-108 86" fill="none" stroke="#8d7cff" stroke-width="28" stroke-linecap="round"/>
-  <path d="M137 347c49-13 84-43 118-97" fill="none" stroke="#ffd166" stroke-width="28" stroke-linecap="round"/>
-  <circle cx="134" cy="150" r="34" fill="#f8fbf7" stroke="#5dd9d0" stroke-width="12"/>
-  <circle cx="378" cy="150" r="34" fill="#f8fbf7" stroke="#8d7cff" stroke-width="12"/>
-  <circle cx="132" cy="352" r="34" fill="#f8fbf7" stroke="#ffd166" stroke-width="12"/>
-  <circle cx="256" cy="256" r="118" fill="#f8fbf7"/>
-  <path d="M256 152c-56 0-98 42-98 96 0 70 98 144 98 144s98-74 98-144c0-54-42-96-98-96Z" fill="url(#kok-pin)"/>
-  <circle cx="256" cy="242" r="39" fill="#17233c"/>
-  <path d="M220 339c23 22 49 39 76 51-16 14-30 24-40 31-10-7-22-17-36-30-13-12-26-25-39-40 12 1 26-3 39-12Z" fill="#ff6b5f"/>
-  <path d="M214 196c16-21 41-34 70-33 26 1 50 13 65 33-18-10-39-16-62-16-30 0-55 6-73 16Z" fill="#ffb1a5" opacity=".82"/>
+  <rect width="512" height="512" rx="112" fill="#FFFDFC"/>
+  <rect width="512" height="512" rx="112" fill="url(#kok-warm)"/>
+  <rect x="20" y="20" width="472" height="472" rx="94" fill="none" stroke="#F2E7E4" stroke-width="4"/>
+  <g filter="url(#kok-mark-shadow)">
+    <text x="142" y="300" fill="#17233C" font-family="Arial Rounded MT Bold, Arial, sans-serif" font-size="150" font-weight="900" text-anchor="middle">K</text>
+    <text x="370" y="300" fill="#17233C" font-family="Arial Rounded MT Bold, Arial, sans-serif" font-size="150" font-weight="900" text-anchor="middle">K</text>
+    <path d="M256 150c-52 0-92 39-92 89 0 66 92 136 92 136s92-70 92-136c0-50-40-89-92-89Z" fill="#FF6B5F"/>
+    <circle cx="256" cy="236" r="43" fill="#FFFDFC"/>
+    <circle cx="256" cy="236" r="18" fill="#17233C"/>
+  </g>
+  <path d="M156 348c58 40 142 42 200 0" fill="none" stroke="#F2B4AD" stroke-width="16" stroke-linecap="round" opacity=".9"/>
 </svg>

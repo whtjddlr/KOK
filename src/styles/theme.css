@@ -388,15 +388,15 @@
   inset: -14px;
   z-index: -1;
   border-radius: 2.25rem;
-  background: linear-gradient(145deg, rgba(18, 184, 134, 0.2), rgba(230, 247, 240, 0));
+  background: linear-gradient(145deg, rgba(255, 107, 95, 0.2), rgba(23, 35, 60, 0));
   filter: blur(18px);
 }
 
 .kok-home-ambient {
   background:
-    linear-gradient(180deg, #FAFCFB 0%, #F0F7F3 54%, #FBFCFA 100%),
-    radial-gradient(ellipse at 50% 24%, rgba(18, 184, 134, 0.12), transparent 42%),
-    radial-gradient(ellipse at 68% 78%, rgba(205, 124, 47, 0.08), transparent 34%);
+    linear-gradient(180deg, #FAFCFB 0%, #F4F6FB 54%, #FBFCFA 100%),
+    radial-gradient(ellipse at 50% 24%, rgba(125, 140, 255, 0.1), transparent 42%),
+    radial-gradient(ellipse at 68% 78%, rgba(255, 107, 95, 0.08), transparent 34%);
 }
 
 .kok-route-lines {
