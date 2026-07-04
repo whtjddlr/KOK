@@ -79,7 +79,7 @@ export function CandidateCard({
     >
       <div
         onClick={onClick}
-        className="group flex cursor-pointer items-center gap-4 px-4 py-4"
+        className="group flex cursor-pointer items-center gap-3 px-3.5 py-4 sm:gap-4 sm:px-4"
       >
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[1rem] bg-[#F0F5F2] text-[#16241D]">
           <MapPin className="h-5 w-5" />
@@ -87,21 +87,28 @@ export function CandidateCard({
 
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <div className="truncate text-base font-semibold tracking-[-0.03em] text-[#16241D]">{candidate.name}</div>
-            <span className="shrink-0 rounded-full bg-[#FFFFFF] px-2.5 py-1 text-[11px] text-[#44534C]">
+            <div className="min-w-0 flex-1 break-keep text-base font-semibold leading-snug tracking-normal text-[#16241D] line-clamp-2">
+              {candidate.name}
+            </div>
+            <span className="shrink-0 rounded-full bg-[#F5F9F7] px-2.5 py-1 text-[11px] text-[#44534C]">
               {metroAreaLabel}
             </span>
-            {candidateGroup && (
-              <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] ${candidateGroup.className}`}>
-                {candidateGroup.label}
-              </span>
-            )}
-            {minorityBenefitProfile && (
-              <span className="shrink-0 rounded-full bg-[#E6F7F0] px-2.5 py-1 text-[11px] text-[#0CA178]">
-                효율 후보
-              </span>
-            )}
           </div>
+
+          {(candidateGroup || minorityBenefitProfile) && (
+            <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">
+              {candidateGroup && (
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] ${candidateGroup.className}`}>
+                  {candidateGroup.label}
+                </span>
+              )}
+              {minorityBenefitProfile && (
+                <span className="shrink-0 rounded-full bg-[#E6F7F0] px-2.5 py-1 text-[11px] text-[#0CA178]">
+                  효율 후보
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-2">

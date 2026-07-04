@@ -790,6 +790,26 @@ export function PlannerScreen({
   }, [onComplete]);
 
   useEffect(() => {
+    const root = document.documentElement;
+    const userAgent = window.navigator.userAgent;
+    const isIos = /iPad|iPhone|iPod/.test(userAgent);
+    const isStandalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
+    const hasSafariChrome =
+      isIos &&
+      !isStandalone &&
+      /Safari/i.test(userAgent) &&
+      !/(CriOS|FxiOS|EdgiOS)/i.test(userAgent);
+
+    root.classList.toggle('kok-ios-browser-chrome', hasSafariChrome);
+
+    return () => {
+      root.classList.remove('kok-ios-browser-chrome');
+    };
+  }, []);
+
+  useEffect(() => {
     showDrawerRef.current = showDrawer;
   }, [showDrawer]);
 
@@ -2870,7 +2890,7 @@ export function PlannerScreen({
           : null;
 
   return (
-    <div className="kok-screen-enter min-h-screen bg-[#FFFFFF] pb-56 text-[#16241D] sm:pb-52">
+    <div className="kok-planner-screen kok-screen-enter min-h-screen bg-[#FFFFFF] text-[#16241D]">
       <div className="sticky top-0 z-20 flex items-center justify-between rounded-b-[2rem] bg-[#FFFFFF]/88 px-5 py-4 shadow-[0_10px_30px_rgba(20,35,29,0.08)] backdrop-blur-md">
         <button
           type="button"
@@ -3815,7 +3835,7 @@ export function PlannerScreen({
 	        )}
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/80 bg-white/88 px-4 pb-[calc(0.85rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-18px_42px_rgba(20,35,29,0.12)] backdrop-blur-xl">
+      <div className="kok-planner-bottom-bar fixed inset-x-0 z-30 rounded-t-[1.75rem] border border-white/80 bg-white/90 px-4 pt-3 shadow-[0_-18px_42px_rgba(20,35,29,0.12)] backdrop-blur-xl sm:border-t sm:border-x-0 sm:bg-white/88">
         <div className="mx-auto max-w-[1040px]">
 	          <div className="mb-2 flex items-center justify-between gap-3 px-1">
 	            <div className="min-w-0">

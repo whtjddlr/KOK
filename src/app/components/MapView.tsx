@@ -30,6 +30,14 @@ interface SelectedRouteOverlay {
   labelPosition: Coordinates;
 }
 
+const ROUTE_LABEL_OFFSETS: Coordinates[] = [
+  { lat: 0.012, lng: 0 },
+  { lat: -0.008, lng: 0.012 },
+  { lat: 0.006, lng: -0.014 },
+  { lat: -0.014, lng: -0.006 },
+  { lat: 0.014, lng: 0.01 },
+];
+
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -53,7 +61,7 @@ function createParticipantIcon(name: string, color: string) {
   };
 }
 
-function createCandidateIcon(name: string, active: boolean, reachable: boolean) {
+function createCandidateIcon(name: string, active: boolean, reachable: boolean, showLabel: boolean) {
   const safeName = escapeHtml(name);
   const background = active ? '#12B886' : '#ffffff';
   const border = active ? '#12B886' : reachable ? '#0CA178' : '#c9d4dc';
@@ -66,13 +74,13 @@ function createCandidateIcon(name: string, active: boolean, reachable: boolean) 
     content: `
       <div style="display:flex;flex-direction:column;align-items:center;gap:6px;opacity:${opacity};transform:translateY(-4px);">
         <div style="width:22px;height:22px;transform:rotate(45deg);background:${background};border:2px solid ${border};border-radius:6px;box-shadow:${shadow};"></div>
-        ${(active || reachable)
-          ? `<div style="padding:4px 8px;border-radius:9999px;background:rgba(255,255,255,0.92);backdrop-filter:blur(8px);font-size:11px;color:#44505b;white-space:nowrap;box-shadow:0 8px 16px rgba(18,28,45,0.08);">${safeName}</div>`
+        ${showLabel
+          ? `<div style="max-width:104px;padding:4px 8px;border-radius:9999px;background:rgba(255,255,255,0.94);backdrop-filter:blur(8px);font-size:11px;color:#44505b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 8px 16px rgba(18,28,45,0.08);">${safeName}</div>`
           : ''}
       </div>
     `,
-    size: new window.naver.maps.Size(88, active || reachable ? 52 : 24),
-    anchor: new window.naver.maps.Point(44, 24),
+    size: new window.naver.maps.Size(showLabel ? 116 : 30, showLabel ? 52 : 30),
+    anchor: new window.naver.maps.Point(showLabel ? 58 : 15, 24),
   };
 }
 
@@ -109,18 +117,18 @@ function createRouteInfoIcon(participantName: string, route: TravelInfo, color: 
 
   return {
     content: `
-      <button type="button" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:18px;background:rgba(255,255,255,0.96);backdrop-filter:blur(12px);box-shadow:0 14px 34px rgba(18,28,45,0.18);border:1px solid rgba(226,232,240,0.92);font-family:inherit;">
-        <span style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:9999px;background:${color};color:#fff;font-weight:800;font-size:12px;flex-shrink:0;">
+      <button type="button" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:6px;max-width:122px;padding:7px 9px;border-radius:9999px;background:rgba(255,255,255,0.96);backdrop-filter:blur(12px);box-shadow:0 12px 24px rgba(18,28,45,0.14);border:1px solid rgba(226,232,240,0.92);font-family:inherit;">
+        <span style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:9999px;background:${color};color:#fff;font-weight:800;font-size:11px;flex-shrink:0;">
           ${initial}
         </span>
-        <span style="display:flex;flex-direction:column;gap:1px;line-height:1.1;white-space:nowrap;">
-          <span style="font-size:13px;font-weight:800;color:#16241D;">${route.duration}분 · ${distanceLabel}</span>
-          <span style="font-size:11px;color:#7a8491;">상세 보기</span>
+        <span style="display:flex;min-width:0;flex-direction:column;gap:1px;line-height:1.1;white-space:nowrap;">
+          <span style="max-width:82px;overflow:hidden;text-overflow:ellipsis;font-size:12px;font-weight:800;color:#16241D;">${route.duration}분 · ${distanceLabel}</span>
+          <span style="font-size:10px;color:#7a8491;">상세</span>
         </span>
       </button>
     `,
-    size: new window.naver.maps.Size(150, 74),
-    anchor: new window.naver.maps.Point(75, 74),
+    size: new window.naver.maps.Size(124, 58),
+    anchor: new window.naver.maps.Point(62, 58),
   };
 }
 
@@ -275,6 +283,7 @@ export function MapView({
     return participants
       .map((participant, index) => {
         const route = selectedRoutes.find((item) => item.participantId === participant.id);
+        const labelOffset = ROUTE_LABEL_OFFSETS[index % ROUTE_LABEL_OFFSETS.length];
 
         if (!route) {
           return null;
@@ -295,7 +304,10 @@ export function MapView({
           route,
           color: colors[index % colors.length],
           path,
-          labelPosition: participant.coordinates,
+          labelPosition: {
+            lat: participant.coordinates.lat + labelOffset.lat,
+            lng: participant.coordinates.lng + labelOffset.lng,
+          },
         };
       })
       .filter((item): item is SelectedRouteOverlay => Boolean(item));
@@ -467,12 +479,13 @@ export function MapView({
     candidates.forEach((candidate) => {
       const isSelected = selectedCandidate?.id === candidate.id;
       const isReachable = reachableCandidateIds.includes(candidate.id);
+      const showCandidateLabel = Boolean(isSelected) || (isReachable && candidates.length <= 4);
       const candidatePosition = new maps.LatLng(candidate.coordinates.lat, candidate.coordinates.lng);
       const marker = new maps.Marker({
         map,
         position: candidatePosition,
         title: candidate.name,
-        icon: createCandidateIcon(candidate.name, Boolean(isSelected), isReachable),
+        icon: createCandidateIcon(candidate.name, Boolean(isSelected), isReachable, showCandidateLabel),
       });
 
       if (onCandidateSelect) {
