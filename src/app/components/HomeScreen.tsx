@@ -29,6 +29,7 @@ interface HomeScreenProps {
   onDeleteExistingRoom?: (room: MeetingRoom) => void | Promise<void>;
   onDeleteExistingRooms?: (rooms: MeetingRoom[]) => void | Promise<void>;
   onJoinRoom: (code: string) => void | Promise<void>;
+  onStartGuest: () => void;
   onOpenAuth: (mode: AuthMode) => void;
   onOpenProfile: () => void;
   onSignOut: () => void;
@@ -98,6 +99,7 @@ export function HomeScreen({
   onOpenExistingRoom,
   onDeleteExistingRooms,
   onJoinRoom,
+  onStartGuest,
   onOpenAuth,
   onOpenProfile,
   onSignOut,
@@ -476,6 +478,15 @@ export function HomeScreen({
               >
                 <UserRound className="h-5 w-5 text-[#6E7C75]" />
                 로그인
+              </button>
+
+              <button
+                type="button"
+                onClick={onStartGuest}
+                className="kok-pressable flex h-12 w-full items-center justify-center gap-2 rounded-[1.25rem] px-5 text-base font-semibold text-[#6E7C75] transition-colors hover:bg-white/70 hover:text-[#16241D] active:scale-95"
+              >
+                <UserRound className="h-4 w-4" />
+                비회원으로 시작
               </button>
             </>
           )}

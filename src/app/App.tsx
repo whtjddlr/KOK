@@ -550,6 +550,17 @@ export default function App() {
     });
   };
 
+  const handleStartGuest = () => {
+    setActiveRoom(null);
+    setCurrentParticipants([]);
+    setSelectedWinner(null);
+    setSelectedRouteSnapshot(null);
+    setDrawProof(null);
+    setRoomError(null);
+    syncRoomUrl(null);
+    setCurrentScreen('planner');
+  };
+
   const handleOpenExistingRoom = (room: MeetingRoom) => {
     void handleJoinRoom(room.code);
   };
@@ -948,6 +959,7 @@ export default function App() {
           onDeleteExistingRoom={handleDeleteExistingRoom}
           onDeleteExistingRooms={handleDeleteExistingRooms}
           onJoinRoom={handleJoinRoom}
+          onStartGuest={handleStartGuest}
           onOpenAuth={openAuth}
           onOpenProfile={openProfile}
           onSignOut={handleSignOut}
