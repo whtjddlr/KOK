@@ -148,7 +148,7 @@ export function getServerAiProviders(env: EnvMap, runtimeAiConfig: any): ServerA
     addProvider({
       provider: 'openai',
       apiKey: detectedOpenAiKey,
-      model: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini',
+      model: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o',
     });
   }
 

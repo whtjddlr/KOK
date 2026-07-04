@@ -22,7 +22,7 @@ const providerPresets: Record<AiProvider, { label: string; model: string; baseUr
   },
   openai: {
     label: 'OpenAI',
-    model: 'gpt-4o-mini',
+    model: 'gpt-4o',
   },
 };
 

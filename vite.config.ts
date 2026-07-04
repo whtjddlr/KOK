@@ -755,7 +755,7 @@ function getServerAiProviders(
     addProvider({
       provider: 'openai',
       apiKey: detectedOpenAiKey,
-      model: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o-mini',
+      model: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o',
     });
   }
 

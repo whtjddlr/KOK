@@ -798,8 +798,7 @@ export async function signUp(input: {
 
   if (!data.session) {
     return {
-      error:
-        'Supabase 이메일 확인이 켜져 있어요. 아이디 로그인 테스트에서는 Authentication에서 Confirm email을 꺼 주세요.',
+      error: '가입 확인이 필요해요. 이메일을 확인한 뒤 다시 로그인해 주세요.',
     };
   }
 
