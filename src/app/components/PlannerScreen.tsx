@@ -3579,6 +3579,31 @@ export function PlannerScreen({
               </div>
             </div>
           )}
+
+          {!showAddForm && participants.length === 1 && (
+            <div className="mb-3 rounded-[1.5rem] border border-[#E4EFE9] bg-white/90 px-4 py-3 text-sm font-bold text-[#6E7C75] shadow-[0_8px_22px_rgba(20,35,29,0.04)]">
+              한 명 더 추가하면 후보를 볼 수 있어요.
+            </div>
+          )}
+
+          {!showAddForm && participants.length >= 2 && (
+            <div className="mb-3 flex flex-col gap-3 rounded-[1.5rem] border border-[#FFD8D2] bg-[#FFF0EE] p-4 shadow-[0_10px_28px_rgba(255,107,95,0.12)] sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-sm font-black text-[#E85F55]">후보를 볼 수 있어요</div>
+                <div className="mt-1 text-xs font-semibold text-[#6E7C75]">
+                  {participants.length}명 기준으로 장소를 비교해요.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePlannerPage('map')}
+                className="kok-pressable inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-[1.15rem] bg-[#FF6B5F] px-4 text-sm font-extrabold text-white shadow-sm transition-transform active:scale-95"
+              >
+                <Sparkles className="h-4 w-4" />
+                후보 보기
+              </button>
+            </div>
+          )}
         </section>
 
         {participants.length > 0 && (
