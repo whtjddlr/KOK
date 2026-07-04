@@ -792,7 +792,7 @@ export function MapView({
 
   if (error) {
     return (
-      <div className="relative h-[24rem] w-full overflow-hidden rounded-[2rem] border border-[#f0d4d0] bg-[#fff8f7] p-5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)] md:h-[30rem]">
+      <div className="relative h-[24rem] w-full overflow-hidden rounded-[2rem] border border-[#f0d4d0] bg-[#fff8f7] p-5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)] md:h-[28rem]">
         <div className="text-sm text-[#a24b41] mb-2">지도를 못 불러왔어요.</div>
         <p className="text-sm text-[#6E7C75] leading-relaxed">{error}</p>
       </div>
@@ -800,7 +800,7 @@ export function MapView({
   }
 
   return (
-    <div className="relative h-[21rem] w-full overflow-hidden rounded-[2rem] border border-white/70 bg-[#EEF3F0] shadow-[0_10px_30px_rgba(20,35,29,0.08)] sm:h-[27rem] md:h-[32rem]">
+    <div className="relative h-[21rem] w-full overflow-hidden rounded-[2rem] border border-white/70 bg-[#EEF3F0] shadow-[0_10px_30px_rgba(20,35,29,0.08)] sm:h-[27rem] md:h-[28rem]">
       <div ref={containerRef} className="absolute inset-0 h-full w-full" />
 
       {!sdkReady && (

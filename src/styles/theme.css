@@ -398,6 +398,17 @@
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
 
+@media (min-width: 768px) {
+  .kok-planner-screen {
+    padding-bottom: 2rem;
+  }
+
+  .kok-planner-bottom-bar {
+    bottom: auto;
+    padding-bottom: 1rem;
+  }
+}
+
 .kok-sheet-enter {
   animation: kok-sheet-enter 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }

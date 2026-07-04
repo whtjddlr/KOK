@@ -3850,7 +3850,7 @@ export function PlannerScreen({
 	        )}
       </div>
 
-      <div className="kok-planner-bottom-bar fixed inset-x-0 z-30 rounded-t-[1.75rem] border border-white/80 bg-white/90 px-4 pt-3 shadow-[0_-18px_42px_rgba(20,35,29,0.12)] backdrop-blur-xl sm:border-t sm:border-x-0 sm:bg-white/88">
+      <div className="kok-planner-bottom-bar fixed inset-x-0 z-30 rounded-t-[1.75rem] border border-white/80 bg-white/90 px-4 pt-3 shadow-[0_-18px_42px_rgba(20,35,29,0.12)] backdrop-blur-xl md:static md:mx-auto md:mb-6 md:max-w-[1040px] md:rounded-[1.75rem] md:shadow-[0_12px_34px_rgba(20,35,29,0.08)] sm:border-t sm:border-x-0 sm:bg-white/88">
         <div className="mx-auto max-w-[1040px]">
 	          <div className="mb-2 flex items-center justify-between gap-3 px-1">
 	            <div className="min-w-0">
