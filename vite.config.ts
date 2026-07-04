@@ -629,6 +629,7 @@ function buildSelectionPayload(
 }
 
 type AiProviderName = 'gms' | 'upstage' | 'openai';
+const GMS_OPENAI_COMPAT_PATH = 'api.openai.com/v1';
 
 type ServerAiProvider =
   | {
@@ -655,6 +656,20 @@ function pickFirstEnv(env: Record<string, string | undefined>, keys: string[]) {
   return '';
 }
 
+function normalizeGmsAiBaseUrl(baseUrl: string) {
+  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
+
+  if (!normalizedBaseUrl) {
+    return '';
+  }
+
+  if (normalizedBaseUrl.endsWith(`/${GMS_OPENAI_COMPAT_PATH}`)) {
+    return normalizedBaseUrl;
+  }
+
+  return `${normalizedBaseUrl}/${GMS_OPENAI_COMPAT_PATH}`;
+}
+
 function getServerGmsAiConfig(env: Record<string, string | undefined>): ServerAiProvider | null {
   const apiKey = pickFirstEnv(env, ['GMS_AI_API_KEY', 'GMS_API_KEY', 'VITE_GMS_AI_API_KEY']);
   const model = pickFirstEnv(env, ['GMS_AI_MODEL', 'GMS_MODEL', 'VITE_GMS_AI_MODEL']);
@@ -672,7 +687,7 @@ function getServerGmsAiConfig(env: Record<string, string | undefined>): ServerAi
     provider: 'gms',
     apiKey,
     model,
-    baseUrl,
+    baseUrl: normalizeGmsAiBaseUrl(baseUrl),
   };
 }
 
@@ -696,7 +711,7 @@ function getServerAiProviders(
       provider: 'gms',
       apiKey: runtimeAiConfig.apiKey,
       model: runtimeAiConfig.model,
-      baseUrl: runtimeAiConfig.baseUrl,
+      baseUrl: normalizeGmsAiBaseUrl(runtimeAiConfig.baseUrl),
     });
   }
 

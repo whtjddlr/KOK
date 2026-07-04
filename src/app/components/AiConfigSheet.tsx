@@ -13,7 +13,8 @@ interface AiConfigSheetProps {
 const providerPresets: Record<AiProvider, { label: string; model: string; baseUrl?: string }> = {
   gms: {
     label: 'GMS AI',
-    model: '',
+    model: 'gpt-4o',
+    baseUrl: 'https://gms.ssafy.io/gmsapi/',
   },
   upstage: {
     label: 'Upstage',
