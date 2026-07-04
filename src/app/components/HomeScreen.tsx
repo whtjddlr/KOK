@@ -6,8 +6,11 @@ import {
   ExternalLink,
   LoaderCircle,
   LogOut,
+  MapPin,
   Plus,
   RefreshCw,
+  Route,
+  Shuffle,
   Trash2,
   UserPlus,
   UserRound,
@@ -44,6 +47,24 @@ const categoryLabels: Record<MeetCategoryKey, string> = {
   culture: '문화',
   activity: '액티비티',
 };
+
+const guestFlowSteps = [
+  {
+    icon: MapPin,
+    title: '출발지 모으기',
+    description: '각자 출발지를 입력해 약속방에 모아요.',
+  },
+  {
+    icon: Route,
+    title: '이동 부담 비교',
+    description: '이동 시간과 접근성을 기준으로 후보를 좁혀요.',
+  },
+  {
+    icon: Shuffle,
+    title: '랜덤 추첨',
+    description: '납득 가능한 후보 안에서 최종 장소를 뽑아요.',
+  },
+];
 
 function formatRoomUpdatedAt(value: string) {
   const date = new Date(value);
@@ -461,6 +482,31 @@ export function HomeScreen({
             </>
           ) : (
             <>
+              <div className="grid gap-2 rounded-[1.5rem] border border-white/70 bg-white/76 p-3 text-left shadow-[0_10px_30px_rgba(20,35,29,0.04)] backdrop-blur-md">
+                {guestFlowSteps.map((step, index) => {
+                  const StepIcon = step.icon;
+
+                  return (
+                    <div key={step.title} className="flex items-center gap-3 rounded-[1.1rem] px-2 py-2">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#FFF0EE] text-[#FF6B5F]">
+                        <StepIcon className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-black text-[#FF6B5F]">
+                            0{index + 1}
+                          </span>
+                          <span className="text-sm font-black text-[#16241D]">{step.title}</span>
+                        </div>
+                        <p className="mt-0.5 text-xs font-semibold leading-5 text-[#667280]">
+                          {step.description}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
               <button
                 type="button"
                 onClick={() => onOpenAuth('signup')}
@@ -472,21 +518,23 @@ export function HomeScreen({
 
               <button
                 type="button"
-                onClick={() => onOpenAuth('login')}
-                className="kok-pressable flex h-14 w-full items-center justify-center gap-2 rounded-[1.35rem] border border-[#E4EFE9] bg-white/88 px-5 text-base font-semibold text-[#16241D] shadow-[0_10px_30px_rgba(20,35,29,0.04)] backdrop-blur-md transition-transform active:scale-95"
+                onClick={onStartGuest}
+                className="kok-pressable flex h-14 w-full items-center justify-center gap-2 rounded-[1.35rem] border border-[#C9D8D0] bg-white/88 px-5 text-base font-extrabold text-[#16241D] shadow-[0_10px_30px_rgba(20,35,29,0.04)] backdrop-blur-md transition-transform active:scale-95"
               >
                 <UserRound className="h-5 w-5 text-[#6E7C75]" />
-                로그인
-              </button>
-
-              <button
-                type="button"
-                onClick={onStartGuest}
-                className="kok-pressable flex h-12 w-full items-center justify-center gap-2 rounded-[1.25rem] px-5 text-base font-semibold text-[#6E7C75] transition-colors hover:bg-white/70 hover:text-[#16241D] active:scale-95"
-              >
-                <UserRound className="h-4 w-4" />
                 비회원으로 시작
               </button>
+
+              <div className="text-center text-sm font-semibold text-[#6E7C75]">
+                이미 계정이 있나요?{' '}
+                <button
+                  type="button"
+                  onClick={() => onOpenAuth('login')}
+                  className="font-extrabold text-[#16241D] underline underline-offset-4 transition-colors hover:text-[#FF6B5F]"
+                >
+                  로그인
+                </button>
+              </div>
             </>
           )}
 

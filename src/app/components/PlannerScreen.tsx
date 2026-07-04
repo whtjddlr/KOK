@@ -1551,6 +1551,7 @@ export function PlannerScreen({
       ariaLabel: '후보 상세보기',
     },
   ];
+  const showPlannerTabCounts = participants.length > 0;
   const readyDrawSessionSeed = useMemo(
     () =>
       onlineRoom && !isSettingReady && isOnlineReadyComplete && drawPool.length
@@ -3035,7 +3036,7 @@ export function PlannerScreen({
 	                key={page.key}
 	                type="button"
 	                onClick={() => setActivePlannerPage(page.key)}
-	                aria-label={`${page.ariaLabel} ${page.value}`}
+	                aria-label={showPlannerTabCounts ? `${page.ariaLabel} ${page.value}` : page.ariaLabel}
 	                className={`kok-pressable flex min-h-11 flex-col items-center justify-center rounded-[0.9rem] px-2 text-center transition-all ${
 	                  active
 	                    ? 'bg-white text-[#16241D] shadow-sm'
@@ -3052,7 +3053,9 @@ export function PlannerScreen({
 	                  </span>
 	                  <span className="text-xs font-black">{page.label}</span>
 	                </span>
-	                <span className="mt-0.5 text-[11px] font-bold">{page.value}</span>
+	                {showPlannerTabCounts ? (
+	                  <span className="mt-0.5 text-[11px] font-bold">{page.value}</span>
+	                ) : null}
 	              </button>
 	            );
 	          })}
@@ -3926,11 +3929,11 @@ export function PlannerScreen({
       {showOptionsPage && (
         <div className="kok-sheet-enter fixed inset-0 z-50 overflow-y-auto bg-[#f8fbf7] text-[#16241D]">
           <div className="sticky top-0 z-10 border-b border-[#e6ebf0] bg-[#f8fbf7]/94 px-4 py-3 backdrop-blur-xl">
-            <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3">
+            <div className="relative mx-auto flex max-w-[720px] items-center justify-center gap-3">
               <button
                 type="button"
                 onClick={() => setShowOptionsPage(false)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#16241D] shadow-sm transition-transform active:scale-95"
+                className="absolute left-0 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#16241D] shadow-sm transition-transform active:scale-95"
                 aria-label="옵션 화면 닫기"
               >
                 <ChevronLeft className="h-5 w-5" />
@@ -3938,13 +3941,6 @@ export function PlannerScreen({
 	              <div className="min-w-0 text-center">
 	                <div className="text-base font-semibold text-[#16241D]">옵션</div>
 	              </div>
-              <button
-                type="button"
-                onClick={() => setShowOptionsPage(false)}
-                className="h-10 rounded-full bg-[#16241D] px-4 text-sm text-white shadow-sm transition-transform active:scale-95"
-              >
-                적용
-              </button>
             </div>
           </div>
 
@@ -3986,13 +3982,13 @@ export function PlannerScreen({
                       onClick={() => handleSelectionModeSelect(mode.key)}
                       className={`flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl border px-4 text-left transition-all active:scale-[0.99] ${
                         active
-                          ? 'border-[#16241D] bg-[#16241D] text-white shadow-sm'
+                          ? 'border-[#FF6B5F] bg-[#FFF0EE] text-[#16241D] shadow-sm'
                           : 'border-[#e6ebf0] bg-white text-[#52615f]'
                       }`}
                     >
                       <span className="text-sm font-semibold">{mode.shortLabel}</span>
                       <span
-                        className={`h-3 w-3 rounded-full ${
+                        className={`h-3 w-3 shrink-0 rounded-full ${
                           active ? 'bg-[#FF6B5F]' : 'bg-[#dfe7e5]'
                         }`}
                       />
