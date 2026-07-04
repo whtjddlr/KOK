@@ -15,10 +15,6 @@ export interface AuthUser {
   homeLocation: UserHomeLocation | null;
 }
 
-interface StoredAuthUser extends AuthUser {
-  passwordHash: string;
-}
-
 interface ProfileRow {
   id: string;
   email: string;
@@ -130,8 +126,8 @@ export const preferenceKeywordOptions = [
   '주차 편한',
 ] as const;
 
-const USERS_KEY = 'randommeet.auth.users';
-const SESSION_KEY = 'randommeet.auth.session';
+const AUTH_SERVICE_UNAVAILABLE_MESSAGE =
+  '로그인 서비스가 설정되지 않았어요. 잠시 후 다시 시도해 주세요.';
 const PROFILE_SETTINGS_KEY_PREFIX = 'randommeet.profile.';
 const SAVED_FRIENDS_KEY_PREFIX = 'randommeet.saved-friends.';
 const PROFILE_BASE_SELECT = 'id, email, name, favorite_categories, vibe, favorite_keywords';
@@ -225,6 +221,20 @@ function canUseStorage() {
   return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 }
 
+function getAuthClientOrThrow() {
+  if (!isSupabaseConfigured()) {
+    throw new Error(AUTH_SERVICE_UNAVAILABLE_MESSAGE);
+  }
+
+  const supabase = getSupabaseBrowserClient();
+
+  if (!supabase) {
+    throw new Error(AUTH_SERVICE_UNAVAILABLE_MESSAGE);
+  }
+
+  return supabase;
+}
+
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
@@ -297,60 +307,6 @@ function getLoginIdFromEmail(email?: string | null) {
   return email;
 }
 
-function readStoredUsers() {
-  if (!canUseStorage()) {
-    return [] as StoredAuthUser[];
-  }
-
-  try {
-    const raw = window.localStorage.getItem(USERS_KEY);
-
-    if (!raw) {
-      return [] as StoredAuthUser[];
-    }
-
-    const parsed = JSON.parse(raw);
-
-    if (!Array.isArray(parsed)) {
-      return [] as StoredAuthUser[];
-    }
-
-    return parsed.map((user) => ({
-      ...(user as StoredAuthUser),
-      loginId:
-        (user as Partial<StoredAuthUser>).loginId ||
-        getLoginIdFromEmail((user as Partial<StoredAuthUser>).email),
-      gender: normalizeParticipantGender((user as Partial<StoredAuthUser>).gender),
-      avatarUrl: normalizeAvatarUrl((user as Partial<StoredAuthUser>).avatarUrl),
-      preferences: normalizePreferences((user as StoredAuthUser).preferences),
-      homeLocation: normalizeHomeLocation((user as StoredAuthUser).homeLocation),
-    }));
-  } catch {
-    return [] as StoredAuthUser[];
-  }
-}
-
-function persistStoredUsers(users: StoredAuthUser[]) {
-  if (!canUseStorage()) {
-    return;
-  }
-
-  window.localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
-
-function persistSession(userId: string | null) {
-  if (!canUseStorage()) {
-    return;
-  }
-
-  if (!userId) {
-    window.localStorage.removeItem(SESSION_KEY);
-    return;
-  }
-
-  window.localStorage.setItem(SESSION_KEY, userId);
-}
-
 function getProfileSettingsKey(userId: string) {
   return `${PROFILE_SETTINGS_KEY_PREFIX}${userId}`;
 }
@@ -417,10 +373,6 @@ function clearStoredUserArtifacts(userId: string) {
 
   window.localStorage.removeItem(getProfileSettingsKey(userId));
   window.localStorage.removeItem(`${SAVED_FRIENDS_KEY_PREFIX}${userId}`);
-}
-
-async function hashPassword(password: string) {
-  return hashStableText(password);
 }
 
 function getNameFromMetadata(user: User) {
@@ -606,53 +558,19 @@ async function clearStaleSupabaseSession() {
 }
 
 export async function loadSessionUser() {
-  if (isSupabaseConfigured()) {
-    const supabase = getSupabaseBrowserClient();
+  const supabase = getAuthClientOrThrow();
 
-    if (!supabase) {
-      return null as AuthUser | null;
+  const { data, error } = await supabase.auth.getUser();
+
+  if (error || !data.user) {
+    if (error) {
+      await clearStaleSupabaseSession();
     }
 
-    const { data, error } = await supabase.auth.getUser();
-
-    if (error || !data.user) {
-      if (error) {
-        await clearStaleSupabaseSession();
-      }
-
-      return null as AuthUser | null;
-    }
-
-    return mapSupabaseUser(data.user);
-  }
-
-  if (!canUseStorage()) {
     return null as AuthUser | null;
   }
 
-  const sessionUserId = window.localStorage.getItem(SESSION_KEY);
-
-  if (!sessionUserId) {
-    return null as AuthUser | null;
-  }
-
-  const matchedUser = readStoredUsers().find((user) => user.id === sessionUserId);
-
-  if (!matchedUser) {
-    persistSession(null);
-    return null as AuthUser | null;
-  }
-
-  return {
-    id: matchedUser.id,
-    name: matchedUser.name,
-    avatarUrl: normalizeAvatarUrl(matchedUser.avatarUrl),
-    loginId: matchedUser.loginId || getLoginIdFromEmail(matchedUser.email),
-    email: matchedUser.email,
-    gender: normalizeParticipantGender(matchedUser.gender),
-    preferences: normalizePreferences(matchedUser.preferences),
-    homeLocation: normalizeHomeLocation(matchedUser.homeLocation),
-  };
+  return mapSupabaseUser(data.user);
 }
 
 export function subscribeToAuthChanges(callback: (user: AuthUser | null) => void) {
@@ -715,78 +633,61 @@ export function subscribeToPasswordRecovery(callback: () => void) {
 }
 
 export async function signOut() {
-  if (isSupabaseConfigured()) {
-    const supabase = getSupabaseBrowserClient();
-    await supabase?.auth.signOut();
-    return;
-  }
-
-  persistSession(null);
+  const supabase = getAuthClientOrThrow();
+  await supabase.auth.signOut();
 }
 
 export async function deleteAccount(currentUser: AuthUser) {
-  if (isSupabaseConfigured()) {
-    const supabase = getSupabaseBrowserClient();
+  const supabase = getAuthClientOrThrow();
 
-    if (!supabase) {
-      return { error: 'Supabase 클라이언트를 초기화하지 못했어요.' };
-    }
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
 
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
-
-    if (sessionError || !session?.access_token) {
-      return { error: '로그인 정보를 다시 확인해 주세요.' };
-    }
-
-    let response: Response;
-
-    try {
-      response = await fetch('/api/account-delete', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ userId: currentUser.id }),
-      });
-    } catch {
-      return { error: '계정 삭제 서버에 연결하지 못했어요.' };
-    }
-
-    const body = await response.json().catch(() => ({} as { message?: string }));
-
-    if (!response.ok) {
-      return {
-        error:
-          typeof body.message === 'string' && body.message
-            ? body.message
-            : '계정을 삭제하지 못했어요.',
-      };
-    }
-
-    try {
-      await supabase.auth.signOut({ scope: 'local' });
-    } catch {
-      // 삭제된 계정의 로컬 세션 정리는 실패해도 다음 화면 흐름을 막지 않는다.
-    }
-
-    clearStoredUserArtifacts(currentUser.id);
-    return {};
+  if (sessionError || !session?.access_token) {
+    return { error: '로그인 정보를 다시 확인해 주세요.' };
   }
 
-  const users = readStoredUsers();
-  persistStoredUsers(users.filter((user) => user.id !== currentUser.id));
-  persistSession(null);
+  let response: Response;
+
+  try {
+    response = await fetch('/api/account-delete', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId: currentUser.id }),
+    });
+  } catch {
+    return { error: '계정 삭제 서버에 연결하지 못했어요.' };
+  }
+
+  const body = await response.json().catch(() => ({} as { message?: string }));
+
+  if (!response.ok) {
+    return {
+      error:
+        typeof body.message === 'string' && body.message
+          ? body.message
+          : '계정을 삭제하지 못했어요.',
+    };
+  }
+
+  try {
+    await supabase.auth.signOut({ scope: 'local' });
+  } catch {
+    // 삭제된 계정의 로컬 세션 정리는 실패해도 다음 화면 흐름을 막지 않는다.
+  }
+
   clearStoredUserArtifacts(currentUser.id);
 
   return {};
 }
 
 export async function updateProfileSettings(
-  currentUser: AuthUser,
+  _currentUser: AuthUser,
   input: ProfileSettingsInput,
 ) {
   const name = input.name.trim();
@@ -799,82 +700,44 @@ export async function updateProfileSettings(
     return { error: '닉네임을 입력해 주세요.' };
   }
 
-  if (isSupabaseConfigured()) {
-    const supabase = getSupabaseBrowserClient();
+  const supabase = getAuthClientOrThrow();
+  const { data: authData, error: authError } = await supabase.auth.getUser();
 
-    if (!supabase) {
-      return { error: 'Supabase 클라이언트를 초기화하지 못했어요.' };
-    }
+  if (authError || !authData.user) {
+    return { error: '로그인 정보를 다시 확인해 주세요.' };
+  }
 
-    const { data: authData, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !authData.user) {
-      return { error: '로그인 정보를 다시 확인해 주세요.' };
-    }
-
-    const { data: updatedAuth, error: updateError } = await supabase.auth.updateUser({
-      data: {
-        name,
-        loginId: getLoginIdFromMetadata(authData.user),
-        avatarUrl,
-        gender,
-        preferences,
-        homeLocation,
-      },
-    });
-
-    if (updateError) {
-      return { error: updateError.message };
-    }
-
-    const authUser = updatedAuth.user ?? authData.user;
-    persistStoredProfileSettings(authUser.id, {
+  const { data: updatedAuth, error: updateError } = await supabase.auth.updateUser({
+    data: {
       name,
+      loginId: getLoginIdFromMetadata(authData.user),
       avatarUrl,
       gender,
       preferences,
       homeLocation,
-    });
+    },
+  });
 
-    void upsertProfile(authUser, name, preferences, homeLocation);
-
-    return {
-      user: {
-        ...mapSupabaseUser(authUser),
-        avatarUrl,
-        gender,
-        homeLocation,
-      } satisfies AuthUser,
-    };
+  if (updateError) {
+    return { error: updateError.message };
   }
 
-  const users = readStoredUsers();
-  const nextUser = users.find((user) => user.id === currentUser.id);
-
-  if (!nextUser) {
-    return { error: '저장된 사용자를 찾지 못했어요.' };
-  }
-
-  const updatedUser: StoredAuthUser = {
-    ...nextUser,
+  const authUser = updatedAuth.user ?? authData.user;
+  persistStoredProfileSettings(authUser.id, {
     name,
     avatarUrl,
     gender,
     preferences,
     homeLocation,
-  };
+  });
 
-  persistStoredUsers(users.map((user) => (user.id === currentUser.id ? updatedUser : user)));
+  void upsertProfile(authUser, name, preferences, homeLocation);
 
   return {
     user: {
-      id: updatedUser.id,
-      name: updatedUser.name,
-      avatarUrl: normalizeAvatarUrl(updatedUser.avatarUrl),
-      loginId: updatedUser.loginId || getLoginIdFromEmail(updatedUser.email),
-      email: updatedUser.email,
-      gender: normalizeParticipantGender(updatedUser.gender),
-      preferences: updatedUser.preferences,
+      ...mapSupabaseUser(authUser),
+      avatarUrl,
+      gender,
       homeLocation,
     } satisfies AuthUser,
   };
@@ -908,90 +771,49 @@ export async function signUp(input: {
   }
 
   const { email, loginId } = authIdentifier;
+  const supabase = getAuthClientOrThrow();
 
-  if (isSupabaseConfigured()) {
-    const supabase = getSupabaseBrowserClient();
-
-    if (!supabase) {
-      return { error: 'Supabase 클라이언트를 초기화하지 못했어요.' };
-    }
-
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          name,
-          loginId,
-          gender,
-          preferences,
-          homeLocation,
-        },
-        emailRedirectTo: window.location.origin,
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        name,
+        loginId,
+        gender,
+        preferences,
+        homeLocation,
       },
-    });
+      emailRedirectTo: window.location.origin,
+    },
+  });
 
-    if (error) {
-      return { error: error.message };
-    }
+  if (error) {
+    return { error: error.message };
+  }
 
-    if (!data.user) {
-      return { error: '회원가입 결과를 확인하지 못했어요.' };
-    }
+  if (!data.user) {
+    return { error: '회원가입 결과를 확인하지 못했어요.' };
+  }
 
-    if (!data.session) {
-      return {
-        error:
-          'Supabase 이메일 확인이 켜져 있어요. 아이디 로그인 테스트에서는 Authentication에서 Confirm email을 꺼 주세요.',
-      };
-    }
-
-    persistStoredProfileSettings(data.user.id, {
-      name,
-      gender,
-      preferences,
-      homeLocation,
-    });
-
-    void upsertProfile(data.user, name, preferences, homeLocation);
-
+  if (!data.session) {
     return {
-      user: mapSupabaseUser(data.user) satisfies AuthUser,
+      error:
+        'Supabase 이메일 확인이 켜져 있어요. 아이디 로그인 테스트에서는 Authentication에서 Confirm email을 꺼 주세요.',
     };
   }
 
-  const users = readStoredUsers();
-
-  if (users.some((user) => user.email === email)) {
-    return { error: '이미 가입된 아이디예요.' };
-  }
-
-  const nextUser: StoredAuthUser = {
-    id: `user-${Date.now()}`,
+  persistStoredProfileSettings(data.user.id, {
     name,
-    avatarUrl: null,
-    loginId,
-    email,
     gender,
     preferences,
     homeLocation,
-    passwordHash: await hashPassword(password),
-  };
+  });
 
-  persistStoredUsers([...users, nextUser]);
-  persistSession(nextUser.id);
+  void upsertProfile(data.user, name, preferences, homeLocation);
 
   return {
-    user: {
-      id: nextUser.id,
-      name: nextUser.name,
-      avatarUrl: normalizeAvatarUrl(nextUser.avatarUrl),
-      loginId: nextUser.loginId,
-      email: nextUser.email,
-      gender: normalizeParticipantGender(nextUser.gender),
-      preferences: normalizePreferences(nextUser.preferences),
-      homeLocation,
-    } satisfies AuthUser,
+    user: mapSupabaseUser(data.user) satisfies AuthUser,
   };
 }
 
@@ -1008,58 +830,23 @@ export async function signIn(input: { identifier: string; password: string }) {
   }
 
   const { email } = authIdentifier;
+  const supabase = getAuthClientOrThrow();
 
-  if (isSupabaseConfigured()) {
-    const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
-    if (!supabase) {
-      return { error: 'Supabase 클라이언트를 초기화하지 못했어요.' };
-    }
-
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      return { error: error.message };
-    }
-
-    if (!data.user) {
-      return { error: '로그인 결과를 확인하지 못했어요.' };
-    }
-
-    return {
-      user: mapSupabaseUser(data.user) satisfies AuthUser,
-    };
+  if (error) {
+    return { error: error.message };
   }
 
-  const users = readStoredUsers();
-  const matchedUser = users.find((user) => user.email === email);
-
-  if (!matchedUser) {
-    return { error: '가입한 계정을 찾지 못했어요.' };
+  if (!data.user) {
+    return { error: '로그인 결과를 확인하지 못했어요.' };
   }
-
-  const passwordHash = await hashPassword(password);
-
-  if (matchedUser.passwordHash !== passwordHash) {
-    return { error: '비밀번호가 맞지 않아요.' };
-  }
-
-  persistSession(matchedUser.id);
 
   return {
-    user: {
-      id: matchedUser.id,
-      name: matchedUser.name,
-      avatarUrl: normalizeAvatarUrl(matchedUser.avatarUrl),
-      loginId: matchedUser.loginId || getLoginIdFromEmail(matchedUser.email),
-      email: matchedUser.email,
-      gender: normalizeParticipantGender(matchedUser.gender),
-      preferences: normalizePreferences(matchedUser.preferences),
-      homeLocation: normalizeHomeLocation(matchedUser.homeLocation),
-    } satisfies AuthUser,
+    user: mapSupabaseUser(data.user) satisfies AuthUser,
   };
 }
 
@@ -1071,23 +858,12 @@ export async function requestPasswordReset(input: { identifier: string }) {
   }
 
   const { email } = authIdentifier;
+  const supabase = getAuthClientOrThrow();
 
   if (email.endsWith(`@${SYNTHETIC_EMAIL_DOMAIN}`)) {
     return {
       error: '비밀번호 재설정은 이메일로 가입한 계정만 가능해요.',
     };
-  }
-
-  if (!isSupabaseConfigured()) {
-    return {
-      error: '비밀번호 재설정은 온라인 계정에서만 가능해요.',
-    };
-  }
-
-  const supabase = getSupabaseBrowserClient();
-
-  if (!supabase) {
-    return { error: 'Supabase 클라이언트를 초기화하지 못했어요.' };
   }
 
   const redirectTo =
@@ -1113,17 +889,7 @@ export async function updateRecoveredPassword(input: { password: string }) {
     return { error: '비밀번호는 6자 이상으로 입력해 주세요.' };
   }
 
-  if (!isSupabaseConfigured()) {
-    return {
-      error: '비밀번호 변경은 온라인 계정에서만 가능해요.',
-    };
-  }
-
-  const supabase = getSupabaseBrowserClient();
-
-  if (!supabase) {
-    return { error: 'Supabase 클라이언트를 초기화하지 못했어요.' };
-  }
+  const supabase = getAuthClientOrThrow();
 
   const { data, error } = await supabase.auth.updateUser({
     password,
