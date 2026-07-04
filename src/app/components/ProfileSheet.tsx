@@ -377,7 +377,7 @@ export function ProfileSheet({
                 ) : (
                   <span>{name.trim().charAt(0) || currentUser.name.charAt(0)}</span>
                 )}
-                <span className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#12B886] text-white">
+                <span className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#FF6B5F] text-white">
                   {isAvatarProcessing ? (
                     <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
                   ) : (
@@ -467,7 +467,7 @@ export function ProfileSheet({
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2 text-sm text-[#16241D]">
-                  <MapPin className="h-4 w-4 text-[#12B886]" />
+                  <MapPin className="h-4 w-4 text-[#FF6B5F]" />
                   기본 출발지
                 </div>
                 <div className="mt-1 text-xs text-[#9AA8A1]">
@@ -522,7 +522,7 @@ export function ProfileSheet({
                   void handleLocationSearch();
                 }}
                 disabled={isSearchingLocation}
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[#E6F7F0] px-4 text-sm text-[#0CA178] transition-transform active:scale-95 disabled:opacity-60"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[#FFF0EE] px-4 text-sm text-[#E85F55] transition-transform active:scale-95 disabled:opacity-60"
               >
                 {isSearchingLocation ? (
                   <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -557,7 +557,7 @@ export function ProfileSheet({
           </div>
         </div>
 
-        <div className="mt-5 space-y-4 rounded-[24px] bg-[#E6F7F0] p-4">
+        <div className="mt-5 space-y-4 rounded-[24px] bg-[#FFF0EE] p-4">
           <div>
             <div className="flex items-center justify-between text-sm text-[#16241D]">
               <span>자주 찾는 카테고리</span>
@@ -595,7 +595,7 @@ export function ProfileSheet({
                     type="button"
                     onClick={() => setVibe(option.value)}
                     className={`rounded-full px-4 py-2 text-sm transition-all ${
-                      active ? 'bg-[#12B886] text-white shadow-sm' : 'bg-white text-[#44505b]'
+                      active ? 'bg-[#FF6B5F] text-white shadow-sm' : 'bg-white text-[#44505b]'
                     }`}
                   >
                     {option.label}
@@ -632,13 +632,13 @@ export function ProfileSheet({
         </div>
 
         {error && (
-          <div className="mt-4 rounded-2xl border border-[#ffd9cf] bg-[#E6F7F0] px-4 py-3 text-sm text-[#c15b3d]">
+          <div className="mt-4 rounded-2xl border border-[#ffd9cf] bg-[#FFF0EE] px-4 py-3 text-sm text-[#c15b3d]">
             {error}
           </div>
         )}
 
         {success && (
-          <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[#d8f3e8] bg-[#f0fdf8] px-4 py-3 text-sm text-[#107569]">
+          <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[#FFD8D2] bg-[#FFF8F7] px-4 py-3 text-sm text-[#9F3D2F]">
             <CheckCircle2 className="h-4 w-4" />
             {success}
           </div>

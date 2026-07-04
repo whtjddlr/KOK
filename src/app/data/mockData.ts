@@ -120,7 +120,7 @@ export const meetCategories: MeetCategory[] = [
     key: 'activity',
     label: '액티비티',
     cue: '먹기만 하기 아쉬운 날이라면, 에너지가 살아 있는 동네를 먼저 보여줘요.',
-    accent: '#22c55e',
+    accent: '#FF6B5F',
     beats: ['액티비티 먼저', '식사 합류 쉬움', '밤까지 이어가기 좋음'],
   },
 ];

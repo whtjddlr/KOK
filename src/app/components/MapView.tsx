@@ -63,11 +63,11 @@ function createParticipantIcon(name: string, color: string) {
 
 function createCandidateIcon(name: string, active: boolean, reachable: boolean, showLabel: boolean) {
   const safeName = escapeHtml(name);
-  const background = active ? '#12B886' : '#ffffff';
-  const border = active ? '#12B886' : reachable ? '#0CA178' : '#c9d4dc';
+  const background = active ? '#FF6B5F' : '#ffffff';
+  const border = active ? '#FF6B5F' : reachable ? '#E85F55' : '#c9d4dc';
   const opacity = active || reachable ? 1 : 0.58;
   const shadow = active
-    ? '0 0 0 8px rgba(18,184,134,0.14)'
+    ? '0 0 0 8px rgba(255, 107, 95,0.14)'
     : '0 8px 20px rgba(18,28,45,0.12)';
 
   return {
@@ -88,9 +88,9 @@ function createNearbyPlaceIcon(label: string, category: NearbyPlace['category'])
   const safeLabel = escapeHtml(label);
   const palette =
     category === 'restaurant'
-      ? { background: '#12B886', text: '#ffffff' }
+      ? { background: '#FF6B5F', text: '#ffffff' }
       : category === 'cafe'
-        ? { background: '#0CA178', text: '#10373b' }
+        ? { background: '#E85F55', text: '#ffffff' }
         : { background: '#ffd166', text: '#5b4300' };
 
   return {
@@ -832,12 +832,12 @@ export function MapView({
               <div className="min-w-0">
                 <div className="mb-2 flex flex-wrap gap-2">
                   {false ? (
-                    <span className="rounded-full bg-[#E6F7F0] px-3 py-1 text-[11px] text-[#12B886]">
+                    <span className="rounded-full bg-[#FFF0EE] px-3 py-1 text-[11px] text-[#FF6B5F]">
                       후보 지역
                     </span>
                   ) : null}
                   {activeNearbyPlaceDetail ? (
-                    <span className="rounded-full bg-[#E6F7F0] px-3 py-1 text-[11px] text-[#0CA178]">
+                    <span className="rounded-full bg-[#FFF0EE] px-3 py-1 text-[11px] text-[#E85F55]">
                       {getNearbyCategoryLabel(activeNearbyPlaceDetail.category)}
                     </span>
                   ) : null}
@@ -866,7 +866,7 @@ export function MapView({
                   {activeCandidateDetail.description}
                 </p>
                 <div className="mt-3 flex items-start gap-2 text-xs text-[#6E7C75]">
-                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#12B886]" />
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF6B5F]" />
                   <span>{activeCandidateDetail.routeHint}</span>
                 </div>
               </>
@@ -875,7 +875,7 @@ export function MapView({
             {activeNearbyPlaceDetail ? (
               <>
                 <div className="mt-3 flex items-start gap-2 text-xs text-[#6E7C75]">
-                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#12B886]" />
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF6B5F]" />
                   <span>
                     {activeNearbyPlaceDetail.roadAddress ||
                       activeNearbyPlaceDetail.address ||

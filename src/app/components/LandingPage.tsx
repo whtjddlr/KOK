@@ -144,12 +144,12 @@ export function LandingPage() {
             <path
               d="M166 210c108 32 180 90 229 176 44 77 108 113 193 104 77-9 133-55 184-127"
               fill="none"
-              stroke="#0CA178"
+              stroke="#E85F55"
               strokeWidth="6"
               strokeLinecap="round"
               opacity="0.52"
             />
-            <circle cx="166" cy="210" r="14" fill="#12B886" />
+            <circle cx="166" cy="210" r="14" fill="#FF6B5F" />
             <circle cx="773" cy="362" r="14" fill="#ffd166" />
             <circle cx="494" cy="402" r="18" fill="#16241D" />
           </svg>
@@ -227,7 +227,7 @@ export function LandingPage() {
                     <div className="flex h-12 w-12 items-center justify-center rounded-[8px] bg-[#eef7f3] text-[#16241D]">
                       <Icon className="h-6 w-6" />
                     </div>
-                    <div className="mt-8 text-sm font-black text-[#12B886]">0{index + 1}</div>
+                    <div className="mt-8 text-sm font-black text-[#FF6B5F]">0{index + 1}</div>
                     <h3 className="mt-2 text-2xl font-black tracking-normal text-[#16241D]">
                       {step.title}
                     </h3>
@@ -253,7 +253,7 @@ export function LandingPage() {
               <div className="mt-8 space-y-4">
                 {['참여자 출발지 저장', '지도 위 후보 확인', '결과와 주변 장소 공유'].map((item) => (
                   <div key={item} className="flex items-center gap-3 text-base font-extrabold">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#0CA178]/18 text-[#16241D]">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#E85F55]/18 text-[#16241D]">
                       <ArrowRight className="h-4 w-4" />
                     </span>
                     {item}
@@ -350,11 +350,11 @@ export function LandingPage() {
               </div>
               <div className="mt-8 grid grid-cols-2 gap-3">
                 <div className="rounded-[8px] bg-[#f8fbf7] p-4">
-                  <UsersRound className="h-5 w-5 text-[#12B886]" />
+                  <UsersRound className="h-5 w-5 text-[#FF6B5F]" />
                   <div className="mt-4 text-sm font-black text-[#16241D]">친구 초대</div>
                 </div>
                 <div className="rounded-[8px] bg-[#f8fbf7] p-4">
-                  <MapPin className="h-5 w-5 text-[#0CA178]" />
+                  <MapPin className="h-5 w-5 text-[#E85F55]" />
                   <div className="mt-4 text-sm font-black text-[#16241D]">장소 추천</div>
                 </div>
               </div>

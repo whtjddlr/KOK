@@ -73,8 +73,8 @@ const drawVariants: DrawVariant[] = [
 const drawVariantAccents: Record<DrawVariant, string> = {
   'card-shuffle': '#f59e0b',
   'shell-game': '#a78bfa',
-  'ladder-game': '#22c55e',
-  'spin-wheel': '#0CA178',
+  'ladder-game': '#FF6B5F',
+  'spin-wheel': '#E85F55',
   'dart-map': '#ef4444',
 };
 
@@ -293,10 +293,10 @@ function shouldAddLadderBar(bars: LadderBar[], nextBar: LadderBar) {
 }
 
 const wheelColors = [
-  '#12B886',
+  '#FF6B5F',
   '#f59e0b',
-  '#22c55e',
-  '#0CA178',
+  '#FF6B5F',
+  '#E85F55',
   '#60a5fa',
   '#a78bfa',
   '#f472b6',
@@ -497,7 +497,7 @@ function PinMarker({
     <div className="relative flex flex-col items-center">
       {(active || winner) && (
         <motion.div
-          className="absolute top-8 h-10 w-10 rounded-full bg-[#12B886]/24"
+          className="absolute top-8 h-10 w-10 rounded-full bg-[#FF6B5F]/24"
           animate={{ scale: [0.55, 1.8, 1.15], opacity: [0.6, 0.04, 0.2] }}
           transition={{
             duration: winner ? 1.1 : 0.7,
@@ -509,7 +509,7 @@ function PinMarker({
       <div
         className={`relative flex h-12 w-12 items-center justify-center rounded-full shadow-[0_14px_28px_rgba(20,35,29,0.18)] ${
           winner
-            ? 'bg-[#12B886] text-white'
+            ? 'bg-[#FF6B5F] text-white'
             : active
               ? 'bg-[#16241D] text-white'
               : landed
@@ -521,7 +521,7 @@ function PinMarker({
       </div>
       <div
         className={`mt-[-2px] h-2.5 w-2.5 rotate-45 rounded-[3px] ${
-          winner ? 'bg-[#12B886]' : active ? 'bg-[#16241D]' : 'bg-white'
+          winner ? 'bg-[#FF6B5F]' : active ? 'bg-[#16241D]' : 'bg-white'
         }`}
       />
     </div>
@@ -556,7 +556,7 @@ function PinDropStage({
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e7edf2] bg-[#eef3f7] shadow-inner">
       <div className="absolute inset-0 bg-[linear-gradient(rgba(20,35,29,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(20,35,29,0.06)_1px,transparent_1px)] bg-[size:34px_34px]" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_18%,rgba(18,184,134,0.12),transparent_28%),radial-gradient(circle_at_78%_72%,rgba(78,205,196,0.14),transparent_25%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_18%,rgba(255, 107, 95,0.12),transparent_28%),radial-gradient(circle_at_78%_72%,rgba(78,205,196,0.14),transparent_25%)]" />
 
       <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
         <motion.div
@@ -660,7 +660,7 @@ function PinDropStage({
             initial={{ opacity: 0.7, scale: 0.22 }}
             animate={{ opacity: 0, scale: 3 }}
             transition={{ duration: 0.58, ease: 'easeOut' }}
-            className="absolute h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#12B886] bg-[#12B886]/20"
+            className="absolute h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#FF6B5F] bg-[#FF6B5F]/20"
             style={{ left: `${winnerPoint.x}%`, top: `${winnerPoint.y}%` }}
           />
         ) : null}
@@ -690,7 +690,7 @@ function CardShuffleStage({
 
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e8e0d6] bg-[#171f35] shadow-inner">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(18,184,134,0.24),transparent_28%),radial-gradient(circle_at_78%_70%,rgba(78,205,196,0.2),transparent_24%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(255, 107, 95,0.24),transparent_28%),radial-gradient(circle_at_78%_70%,rgba(78,205,196,0.2),transparent_24%)]" />
       <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[size:28px_28px]" />
 
       <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
@@ -709,7 +709,7 @@ function CardShuffleStage({
                 key={`${insight.candidate.id}-${index}`}
                 className={`absolute h-56 w-40 rounded-[1.6rem] border p-4 shadow-[0_28px_55px_rgba(0,0,0,0.28)] ${
                   isWinner
-                    ? 'border-[#12B886] bg-[#12B886] text-white'
+                    ? 'border-[#FF6B5F] bg-[#FF6B5F] text-white'
                     : 'border-white/24 bg-white text-[#16241D]'
                 }`}
                 initial={{ x: offset * 54, y: 18, rotate: offset * 9, opacity: 0 }}
@@ -784,7 +784,7 @@ function DartMapStage({
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e4e8ee] bg-[#edf5ef] shadow-inner">
       <div className="absolute inset-0 bg-[linear-gradient(rgba(20,35,29,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(20,35,29,0.06)_1px,transparent_1px)] bg-[size:32px_32px]" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_48%_48%,rgba(255,255,255,0.72),transparent_18%),radial-gradient(circle_at_20%_30%,rgba(78,205,196,0.18),transparent_25%),radial-gradient(circle_at_78%_65%,rgba(18,184,134,0.16),transparent_24%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_48%_48%,rgba(255,255,255,0.72),transparent_18%),radial-gradient(circle_at_20%_30%,rgba(78,205,196,0.18),transparent_25%),radial-gradient(circle_at_78%_65%,rgba(255, 107, 95,0.16),transparent_24%)]" />
 
       <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
@@ -806,7 +806,7 @@ function DartMapStage({
               <motion.div
                 className={`h-5 w-5 rounded-full border-4 shadow-sm ${
                   isWinner
-                    ? 'border-[#12B886] bg-white'
+                    ? 'border-[#FF6B5F] bg-white'
                     : isActive
                       ? 'border-[#16241D] bg-white'
                       : 'border-white bg-[#16241D]/52'
@@ -834,7 +834,7 @@ function DartMapStage({
             transition={{ type: 'spring', stiffness: 180, damping: 16, mass: 0.7 }}
           >
             <div className="relative">
-              <MousePointer2 className="h-16 w-16 fill-[#12B886] text-[#12B886] drop-shadow-[0_14px_24px_rgba(18,184,134,0.28)]" />
+              <MousePointer2 className="h-16 w-16 fill-[#FF6B5F] text-[#FF6B5F] drop-shadow-[0_14px_24px_rgba(255, 107, 95,0.28)]" />
               <Crosshair className="absolute -bottom-2 -right-2 h-8 w-8 rounded-full bg-white p-1.5 text-[#16241D] shadow-sm" />
             </div>
           </motion.div>
@@ -845,7 +845,7 @@ function DartMapStage({
             initial={{ opacity: 0.75, scale: 0.2 }}
             animate={{ opacity: 0, scale: 3.4 }}
             transition={{ duration: 0.6, ease: 'easeOut' }}
-            className="absolute h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#12B886] bg-[#12B886]/16"
+            className="absolute h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#FF6B5F] bg-[#FF6B5F]/16"
             style={{ left: `${winnerPoint.x}%`, top: `${winnerPoint.y}%` }}
           />
         )}
@@ -879,12 +879,12 @@ function RadarStage({
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:34px_34px]" />
 
       <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
-        <div className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#0CA178]/20" />
-        <div className="absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#0CA178]/20" />
-        <div className="absolute left-1/2 top-1/2 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#0CA178]/20" />
+        <div className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#E85F55]/20" />
+        <div className="absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#E85F55]/20" />
+        <div className="absolute left-1/2 top-1/2 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#E85F55]/20" />
 
         <motion.div
-          className="absolute left-1/2 top-1/2 h-[34rem] w-1 origin-top rounded-full bg-[linear-gradient(180deg,#0CA178,transparent)]"
+          className="absolute left-1/2 top-1/2 h-[34rem] w-1 origin-top rounded-full bg-[linear-gradient(180deg,#E85F55,transparent)]"
           animate={{ rotate: phase === 'revealed' ? 520 : 1440 }}
           transition={{ duration: phase === 'revealed' ? 0.6 : 3.8, ease: 'easeOut' }}
         />
@@ -901,7 +901,7 @@ function RadarStage({
             >
               <motion.div
                 className={`h-4 w-4 rounded-full ${
-                  isWinner ? 'bg-[#12B886]' : isActive ? 'bg-[#0CA178]' : 'bg-white/40'
+                  isWinner ? 'bg-[#FF6B5F]' : isActive ? 'bg-[#E85F55]' : 'bg-white/40'
                 }`}
                 animate={{
                   scale: isWinner ? [1, 1.9, 1.2] : isActive ? [1, 1.35, 1] : 1,
@@ -925,7 +925,7 @@ function RadarStage({
             initial={{ opacity: 0, scale: 0.7 }}
             animate={{ opacity: 1, scale: 1 }}
           >
-            <ScanLine className="h-20 w-20 text-[#12B886] drop-shadow-[0_0_22px_rgba(18,184,134,0.48)]" />
+            <ScanLine className="h-20 w-20 text-[#FF6B5F] drop-shadow-[0_0_22px_rgba(255, 107, 95,0.48)]" />
           </motion.div>
         )}
 
@@ -954,7 +954,7 @@ function ShellGameStage({
 
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e7ddff] bg-[#f7f2ff] shadow-inner">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_18%,rgba(167,139,250,0.22),transparent_30%),radial-gradient(circle_at_82%_72%,rgba(18,184,134,0.16),transparent_24%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_18%,rgba(167,139,250,0.22),transparent_30%),radial-gradient(circle_at_82%_72%,rgba(255, 107, 95,0.16),transparent_24%)]" />
       <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
         <div className="absolute inset-x-4 top-8 grid grid-cols-3 gap-4">
           {Array.from({ length: 3 }, (_, index) => {
@@ -1141,13 +1141,13 @@ function TarotChoiceCard({
             <div className="absolute inset-[1rem] rounded-[0.45rem] border border-white/10" />
             <div className="absolute left-3 top-2.5 text-center text-[13px] font-black leading-none text-white">
               <div>{rank}</div>
-              <div className="mt-0.5 text-[11px]" style={{ color: isRedSuit ? '#12B886' : '#ffffff' }}>
+              <div className="mt-0.5 text-[11px]" style={{ color: isRedSuit ? '#FF6B5F' : '#ffffff' }}>
                 {suit}
               </div>
             </div>
             <div className="absolute bottom-2.5 right-3 rotate-180 text-center text-[13px] font-black leading-none text-white">
               <div>{rank}</div>
-              <div className="mt-0.5 text-[11px]" style={{ color: isRedSuit ? '#12B886' : '#ffffff' }}>
+              <div className="mt-0.5 text-[11px]" style={{ color: isRedSuit ? '#FF6B5F' : '#ffffff' }}>
                 {suit}
               </div>
             </div>
@@ -1176,7 +1176,7 @@ function TarotChoiceCard({
           }}
         >
           <div
-            className={`text-left text-base font-black leading-none ${active && revealed ? 'text-white/80' : isRedSuit ? 'text-[#12B886]' : 'text-[#16241D]'}`}
+            className={`text-left text-base font-black leading-none ${active && revealed ? 'text-white/80' : isRedSuit ? 'text-[#FF6B5F]' : 'text-[#16241D]'}`}
           >
             <div>{rank}</div>
             <div className="mt-0.5 text-sm">{suit}</div>
@@ -1191,7 +1191,7 @@ function TarotChoiceCard({
               {slot.insight.candidate.name}
             </div>
           </motion.div>
-          <div className={`self-end rotate-180 text-base font-black leading-none ${active && revealed ? 'text-white/80' : isRedSuit ? 'text-[#12B886]' : 'text-[#16241D]'}`}>
+          <div className={`self-end rotate-180 text-base font-black leading-none ${active && revealed ? 'text-white/80' : isRedSuit ? 'text-[#FF6B5F]' : 'text-[#16241D]'}`}>
             <div>{rank}</div>
             <div className="mt-0.5 text-sm">{suit}</div>
           </div>
@@ -1793,9 +1793,9 @@ function DartGraphic({ compact = false }: { compact?: boolean }) {
     <div className={`relative ${compact ? 'h-12 w-16' : 'h-20 w-28'} rotate-[-28deg]`}>
       <div className="absolute left-5 top-1/2 h-1.5 w-16 -translate-y-1/2 rounded-full bg-[#16241D] shadow-[0_8px_18px_rgba(0,0,0,0.24)]" />
       <div className="absolute right-2 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[6px] border-l-[18px] border-y-transparent border-l-[#f8fafc]" />
-      <div className="absolute left-0 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[11px] border-r-[28px] border-y-transparent border-r-[#12B886]" />
+      <div className="absolute left-0 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[11px] border-r-[28px] border-y-transparent border-r-[#FF6B5F]" />
       <div className="absolute left-1 top-[calc(50%-13px)] h-0 w-0 border-x-[11px] border-b-[16px] border-x-transparent border-b-[#ffd166]" />
-      <div className="absolute left-1 top-[calc(50%-3px)] h-0 w-0 border-x-[11px] border-t-[16px] border-x-transparent border-t-[#0CA178]" />
+      <div className="absolute left-1 top-[calc(50%-3px)] h-0 w-0 border-x-[11px] border-t-[16px] border-x-transparent border-t-[#E85F55]" />
     </div>
   );
 }
@@ -1819,7 +1819,7 @@ function MarkerPenGraphic({ compact = false }: { compact?: boolean }) {
         <div className="absolute bottom-1.5 left-6 right-8 h-1 rounded-full bg-white/22" />
       </div>
       <div
-        className={`absolute top-1/2 -translate-y-1/2 rounded-r-full bg-[#12B886] ${
+        className={`absolute top-1/2 -translate-y-1/2 rounded-r-full bg-[#FF6B5F] ${
           compact ? 'left-[5.7rem] h-7 w-8' : 'left-[7.5rem] h-9 w-11'
         }`}
       />
@@ -1943,7 +1943,7 @@ function MapSnapshotLayer({
             <motion.div
               className={`relative flex h-6 w-6 items-center justify-center rounded-full border-[3px] shadow-[0_8px_18px_rgba(20,35,29,0.16)] ${
                 isWinner
-                  ? 'border-white bg-[#12B886]'
+                  ? 'border-white bg-[#FF6B5F]'
                   : isActive
                     ? 'border-white bg-[#16241D]'
                     : 'border-white bg-[#4f7cff]'
@@ -1956,7 +1956,7 @@ function MapSnapshotLayer({
               <span className="text-[10px] font-bold text-white">{index + 1}</span>
               {isWinner && (
                 <motion.span
-                  className="absolute inset-[-12px] rounded-full border-2 border-[#12B886]"
+                  className="absolute inset-[-12px] rounded-full border-2 border-[#FF6B5F]"
                   initial={{ scale: 0.3, opacity: 0.65 }}
                   animate={{ scale: 1.9, opacity: 0 }}
                   transition={{ duration: 0.8, repeat: 2, ease: 'easeOut' }}
@@ -1967,7 +1967,7 @@ function MapSnapshotLayer({
             {showLabel && (
               <div
                 className={`absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] shadow-sm ${
-                  isWinner ? 'bg-[#12B886] text-white' : 'bg-white/92 text-[#16241D]'
+                  isWinner ? 'bg-[#FF6B5F] text-white' : 'bg-white/92 text-[#16241D]'
                 }`}
               >
                 {point.insight.candidate.name}
@@ -1996,7 +1996,7 @@ function createLiveCandidateMarkerIcon(
 ) {
   const isWinner = state === 'winner';
   const isActive = state === 'active';
-  const markerColor = isWinner ? '#12B886' : isActive ? '#16241D' : '#0CA178';
+  const markerColor = isWinner ? '#FF6B5F' : isActive ? '#16241D' : '#E85F55';
   const label = escapeMapLabel(name);
 
   return {
@@ -2004,9 +2004,9 @@ function createLiveCandidateMarkerIcon(
       <div style="display:flex;flex-direction:column;align-items:center;gap:5px;transform:translateY(-8px);">
         <div style="position:relative;display:flex;align-items:center;justify-content:center;width:${isWinner ? 34 : 28}px;height:${isWinner ? 34 : 28}px;border-radius:9999px;background:${markerColor};color:white;border:3px solid rgba(255,255,255,0.96);box-shadow:0 12px 26px rgba(20,35,29,0.22);font-size:12px;font-weight:800;">
           ${index + 1}
-          ${isWinner ? '<span style="position:absolute;inset:-12px;border:2px solid rgba(18,184,134,0.72);border-radius:9999px;"></span>' : ''}
+          ${isWinner ? '<span style="position:absolute;inset:-12px;border:2px solid rgba(255, 107, 95,0.72);border-radius:9999px;"></span>' : ''}
         </div>
-        <div style="max-width:124px;padding:4px 8px;border-radius:9999px;background:${isWinner ? 'rgba(18,184,134,0.96)' : 'rgba(255,255,255,0.94)'};color:${isWinner ? '#ffffff' : '#16241D'};font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 8px 18px rgba(20,35,29,0.12);">
+        <div style="max-width:124px;padding:4px 8px;border-radius:9999px;background:${isWinner ? 'rgba(255, 107, 95,0.96)' : 'rgba(255,255,255,0.94)'};color:${isWinner ? '#ffffff' : '#16241D'};font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 8px 18px rgba(20,35,29,0.12);">
           ${label}
         </div>
       </div>
@@ -2378,7 +2378,7 @@ function PickedChoiceStage({
       {isRevealed ? (
         <>
           <motion.div
-            className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#22c55e]/15"
+            className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#FF6B5F]/15"
             initial={{ scale: 0.3, opacity: 0.65 }}
             animate={{ scale: 1.8, opacity: 0 }}
             transition={{ duration: 0.78, ease: 'easeOut' }}
@@ -2389,7 +2389,7 @@ function PickedChoiceStage({
             return (
               <motion.div
                 key={index}
-                className="absolute left-1/2 top-1/2 h-1.5 w-1.5 rounded-full bg-[#22c55e]/40"
+                className="absolute left-1/2 top-1/2 h-1.5 w-1.5 rounded-full bg-[#FF6B5F]/40"
                 initial={{ x: 0, y: 0, scale: 0.6, opacity: 0.9 }}
                 animate={{
                   x: Math.cos(angle) * 150,
@@ -2555,7 +2555,7 @@ function PickedChoiceStage({
 
               {(phase === 'impact' || isRevealed) && (
                 <motion.div
-                  className="absolute z-10 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#12B886] bg-[#12B886]/18"
+                  className="absolute z-10 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#FF6B5F] bg-[#FF6B5F]/18"
                   style={{ left: `${mapWinnerPoint.x}%`, top: `${mapWinnerPoint.y}%` }}
                   initial={{ opacity: 0.8, scale: 0.18 }}
                   animate={{ opacity: 0, scale: 2.8 }}
@@ -2569,7 +2569,7 @@ function PickedChoiceStage({
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   className="absolute bottom-4 left-4 right-4 z-30 rounded-2xl bg-white/94 px-4 py-3 text-center text-[#16241D] shadow-sm backdrop-blur-sm"
                 >
-                  <div className="text-xs font-semibold text-[#12B886]">사인펜이 찍은 곳</div>
+                  <div className="text-xs font-semibold text-[#FF6B5F]">사인펜이 찍은 곳</div>
                   <div className="mt-1 text-xl font-bold tracking-[-0.04em]">{candidate.name}</div>
                 </motion.div>
               ) : null}
@@ -2635,7 +2635,7 @@ function DrawStatusCard({
         </div>
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#e7ded2]">
           <motion.div
-            className="h-full rounded-full bg-[linear-gradient(90deg,#16241D,#12B886)]"
+            className="h-full rounded-full bg-[linear-gradient(90deg,#16241D,#FF6B5F)]"
             animate={{
               width: `${phase === 'revealed' ? 100 : Math.max(progress * 100, 4)}%`,
             }}

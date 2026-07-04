@@ -22,14 +22,14 @@ function getCandidateGroup(candidateId: string) {
   if (candidateId.startsWith('thrill-hyper-')) {
     return {
       label: '집앞 상권',
-      className: 'bg-[#CFEBDF] text-[#93000a]',
+      className: 'bg-[#FFD8D2] text-[#93000a]',
     };
   }
 
   if (candidateId.startsWith('thrill-local-')) {
     return {
       label: '극단 로컬',
-      className: 'bg-[#fff0eb] text-[#0CA178]',
+      className: 'bg-[#fff0eb] text-[#E85F55]',
     };
   }
 
@@ -73,7 +73,7 @@ export function CandidateCard({
     <div
       className={`rounded-[1.35rem] border bg-white shadow-[0_10px_30px_rgba(20,35,29,0.06)] transition-all ${
         selected
-          ? 'border-[#12B886] ring-2 ring-[#12B886]/20'
+          ? 'border-[#FF6B5F] ring-2 ring-[#FF6B5F]/20'
           : 'border-[#EEF3F0] hover:border-[#c6c6ce] hover:shadow-[0_18px_42px_rgba(20,35,29,0.1)]'
       }`}
     >
@@ -103,7 +103,7 @@ export function CandidateCard({
                 </span>
               )}
               {minorityBenefitProfile && (
-                <span className="shrink-0 rounded-full bg-[#E6F7F0] px-2.5 py-1 text-[11px] text-[#0CA178]">
+                <span className="shrink-0 rounded-full bg-[#FFF0EE] px-2.5 py-1 text-[11px] text-[#E85F55]">
                   효율 후보
                 </span>
               )}
@@ -122,7 +122,7 @@ export function CandidateCard({
               event.stopPropagation();
               onExclude?.();
             }}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F0F5F2] text-[#6E7C75] transition-colors hover:bg-[#CFEBDF] hover:text-[#0CA178]"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F0F5F2] text-[#6E7C75] transition-colors hover:bg-[#FFD8D2] hover:text-[#E85F55]"
             aria-label={`${candidate.name} 후보 제외`}
           >
             <Minus className="h-4 w-4" />

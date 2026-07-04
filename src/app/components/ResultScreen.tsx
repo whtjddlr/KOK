@@ -75,7 +75,7 @@ interface ResultScreenProps {
   onHome: () => void;
 }
 
-const PARTICIPANT_COLORS = ['#12B886', '#0CA178', '#38C7A6', '#7BD3B0', '#2FB48A', '#16C79A'];
+const PARTICIPANT_COLORS = ['#FF6B5F', '#16241D', '#F59E0B', '#E85F55', '#667280', '#CD7C2F'];
 
 type DisplayTravelMode = TravelMode | 'preferred';
 type ParkingSearchStatus = 'idle' | 'loading' | 'ready' | 'empty';
@@ -541,15 +541,15 @@ function getRouteStepTypeLabel(type: TravelRouteStep['type']) {
 
 function getRouteStepBadgeClass(type: TravelRouteStep['type']) {
   if (type === 'subway') {
-    return 'bg-[#E6F7F0] text-[#0CA178]';
+    return 'bg-[#FFF0EE] text-[#E85F55]';
   }
 
   if (type === 'bus') {
-    return 'bg-[#ecfdf5] text-[#059669]';
+    return 'bg-[#FFF7ED] text-[#CD7C2F]';
   }
 
   if (type === 'car') {
-    return 'bg-[#E6F7F0] text-[#ea580c]';
+    return 'bg-[#FFF0EE] text-[#ea580c]';
   }
 
   return 'bg-[#FFFFFF] text-[#6E7C75]';
@@ -1202,7 +1202,7 @@ export function ResultScreen({
                 className={`inline-flex h-12 items-center justify-center gap-2 rounded-2xl px-6 text-sm font-bold transition-transform active:scale-95 ${
                   isConfirmed
                     ? 'border border-[#E4EFE9] bg-white text-[#16241D]'
-                    : 'bg-[#12B886] text-white shadow-[0_10px_24px_rgba(18,184,134,0.22)]'
+                    : 'bg-[#FF6B5F] text-white shadow-[0_10px_24px_rgba(255, 107, 95,0.22)]'
                 }`}
               >
                 <Sparkles className="h-4 w-4" />
@@ -1215,7 +1215,7 @@ export function ResultScreen({
                 className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-[#E4EFE9] bg-white px-5 text-sm text-[#16241D] shadow-sm transition-transform active:scale-95"
               >
                 {copiedPlaceShare ? (
-                  <CheckCircle2 className="h-4 w-4 text-[#22c55e]" />
+                  <CheckCircle2 className="h-4 w-4 text-[#FF6B5F]" />
                 ) : navigator.share ? (
                   <Share2 className="h-4 w-4" />
                 ) : (
@@ -1243,7 +1243,7 @@ export function ResultScreen({
 
           <div className="mt-4 rounded-2xl border border-[#eef2f6] bg-[#f8fafc] px-4 py-3">
             <div className="flex items-center gap-2 text-sm font-bold text-[#16241D]">
-              <CalendarPlus className="h-4 w-4 text-[#12B886]" />
+              <CalendarPlus className="h-4 w-4 text-[#FF6B5F]" />
               일정 메모
             </div>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
@@ -1254,7 +1254,7 @@ export function ResultScreen({
                   setCalendarDateTime(event.target.value);
                   setCalendarSaved(false);
                 }}
-                className="min-h-12 flex-1 rounded-2xl border border-[#E4EFE9] bg-white px-4 text-sm font-semibold text-[#16241D] outline-none transition focus:border-[#12B886]"
+                className="min-h-12 flex-1 rounded-2xl border border-[#E4EFE9] bg-white px-4 text-sm font-semibold text-[#16241D] outline-none transition focus:border-[#FF6B5F]"
                 aria-label="약속 날짜와 시간"
               />
               <button
@@ -1264,7 +1264,7 @@ export function ResultScreen({
                 className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-[#E4EFE9] bg-white px-5 text-sm font-bold text-[#16241D] transition-transform active:scale-95"
               >
                 {calendarSaved ? (
-                  <CheckCircle2 className="h-4 w-4 text-[#22c55e]" />
+                  <CheckCircle2 className="h-4 w-4 text-[#FF6B5F]" />
                 ) : (
                   <CalendarPlus className="h-4 w-4" />
                 )}
@@ -1514,7 +1514,7 @@ export function ResultScreen({
                       rel="noreferrer"
                       className="flex items-center gap-3 rounded-2xl bg-white px-4 py-3 shadow-[0_6px_16px_rgba(20,35,29,0.04)] transition-transform active:scale-[0.99]"
                     >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E6F7F0] text-sm font-black text-[#ea580c]">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#FFF0EE] text-sm font-black text-[#ea580c]">
                         P
                       </span>
                       <span className="min-w-0 flex-1">
@@ -1714,7 +1714,7 @@ export function ResultScreen({
           )}
 
           {recommendationStatus === 'loading' && (
-            <div className="kok-loading-card mt-5 rounded-2xl bg-[#E6F7F0] px-4 py-4 text-sm text-[#6E7C75]">
+            <div className="kok-loading-card mt-5 rounded-2xl bg-[#FFF0EE] px-4 py-4 text-sm text-[#6E7C75]">
               <div className="flex items-center gap-3">
                 <div className="kok-route-loader scale-75">
                   <span />
@@ -1752,7 +1752,7 @@ export function ResultScreen({
                         </div>
 
                         <div className="mt-3 flex items-center gap-2 text-xs text-[#6E7C75]">
-                          <MapPin className="h-3.5 w-3.5 text-[#12B886]" />
+                          <MapPin className="h-3.5 w-3.5 text-[#FF6B5F]" />
                           <span>{item.roadAddress || item.address || `${winner.name} 근처`}</span>
                         </div>
                       </div>
@@ -1820,7 +1820,7 @@ export function ResultScreen({
           )}
 
           {recommendationStatus === 'error' && (
-            <div className="mt-5 rounded-2xl border border-[#ffd9cf] bg-[#E6F7F0] px-4 py-4 text-sm text-[#c15b3d]">
+            <div className="mt-5 rounded-2xl border border-[#ffd9cf] bg-[#FFF0EE] px-4 py-4 text-sm text-[#c15b3d]">
               {recommendationError}
             </div>
           )}

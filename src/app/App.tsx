@@ -130,7 +130,7 @@ function InstallAppButton() {
           <section className="kok-auth-sheet w-full max-w-[420px] rounded-[1.75rem] bg-white p-6 text-[#16241D] shadow-[0_30px_80px_rgba(20,35,29,0.24)]">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm font-bold text-[#12B886]">KoK 설치</p>
+                <p className="text-sm font-bold text-[#FF6B5F]">KoK 설치</p>
                 <h2 className="mt-1 text-2xl font-black tracking-[-0.06em]">앱처럼 열기</h2>
               </div>
               <button

@@ -45,7 +45,7 @@ export function ParticipantCard({
             <button
               type="button"
               onClick={() => onRemove(participant.id)}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#9AA8A1] transition-colors hover:bg-[#CFEBDF] hover:text-[#0CA178]"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#9AA8A1] transition-colors hover:bg-[#FFD8D2] hover:text-[#E85F55]"
             >
               <X className="h-4 w-4" />
             </button>

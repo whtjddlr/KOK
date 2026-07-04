@@ -44,7 +44,7 @@ export function NearbyPlacesPanel({
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-[#16241D]">
-            <Sparkles className="h-4 w-4 text-[#12B886]" />
+            <Sparkles className="h-4 w-4 text-[#FF6B5F]" />
             <h3 className={compact ? 'text-sm font-medium' : 'text-base'}>
               {candidate.name} 근처 정보
             </h3>
@@ -56,7 +56,7 @@ export function NearbyPlacesPanel({
       </div>
 
       {status === 'loading' && (
-        <div className="kok-loading-card mt-4 rounded-2xl bg-[#E6F7F0] px-4 py-3 text-sm text-[#6E7C75]">
+        <div className="kok-loading-card mt-4 rounded-2xl bg-[#FFF0EE] px-4 py-3 text-sm text-[#6E7C75]">
           <div className="flex items-center gap-3">
             <div className="kok-route-loader scale-75">
               <span />
@@ -129,7 +129,7 @@ export function NearbyPlacesPanel({
                   </div>
 
                   <div className="mt-3 flex items-center gap-2 text-xs text-[#6E7C75]">
-                    <MapPin className="h-3.5 w-3.5 text-[#12B886]" />
+                    <MapPin className="h-3.5 w-3.5 text-[#FF6B5F]" />
                     <span>{place.roadAddress || place.address || `${candidate.name} 근처`}</span>
                   </div>
                 </div>

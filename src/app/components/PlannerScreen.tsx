@@ -180,7 +180,7 @@ type DrawChoiceChannel = {
   }) => Promise<unknown>;
 };
 
-const PARTICIPANT_COLORS = ['#12B886', '#0CA178', '#38C7A6', '#7BD3B0', '#2FB48A', '#16C79A'];
+const PARTICIPANT_COLORS = ['#FF6B5F', '#16241D', '#F59E0B', '#E85F55', '#667280', '#CD7C2F'];
 
 const travelModeOptions: Array<{
   key: TravelMode;
@@ -524,15 +524,15 @@ function getRouteStepTypeLabel(type: TravelRouteStep['type']) {
 
 function getRouteStepBadgeClass(type: TravelRouteStep['type']) {
   if (type === 'subway') {
-    return 'bg-[#E6F7F0] text-[#0CA178]';
+    return 'bg-[#FFF0EE] text-[#E85F55]';
   }
 
   if (type === 'bus') {
-    return 'bg-[#ecfdf5] text-[#059669]';
+    return 'bg-[#FFF7ED] text-[#CD7C2F]';
   }
 
   if (type === 'car') {
-    return 'bg-[#E6F7F0] text-[#ea580c]';
+    return 'bg-[#FFF0EE] text-[#ea580c]';
   }
 
   return 'bg-[#FFFFFF] text-[#6E7C75]';
@@ -2948,12 +2948,12 @@ export function PlannerScreen({
                 <button
                   type="button"
                   onClick={handleCopyRoomLink}
-                  className="kok-pressable inline-flex h-8 max-w-full items-center gap-1.5 rounded-full bg-[#E6F7F0] px-3 text-xs font-extrabold text-[#0CA178] shadow-[0_8px_20px_rgba(12,161,120,0.1)]"
+                  className="kok-pressable inline-flex h-8 max-w-full items-center gap-1.5 rounded-full bg-[#FFF0EE] px-3 text-xs font-extrabold text-[#E85F55] shadow-[0_8px_20px_rgba(232, 95, 85,0.1)]"
                   aria-label={`약속방 ${onlineRoom.code} 링크 공유`}
                 >
                   <Wifi className="h-3.5 w-3.5 shrink-0" />
                   방 {onlineRoom.code}
-                  <span className="h-4 w-px bg-[#0CA178]/20" aria-hidden="true" />
+                  <span className="h-4 w-px bg-[#E85F55]/20" aria-hidden="true" />
                   <Copy className="h-3 w-3 shrink-0" />
                   <span>{copiedRoomLink ? '복사됨' : '공유'}</span>
                 </button>
@@ -3008,7 +3008,7 @@ export function PlannerScreen({
 	                <span className="flex items-center justify-center gap-1">
 	                  <span
 	                    className={`flex h-5 w-5 items-center justify-center rounded-full transition-all ${
-	                      active ? 'bg-[#E6F7F0] text-[#0CA178]' : 'bg-white/70 text-[#9AA8A1]'
+	                      active ? 'bg-[#FFF0EE] text-[#E85F55]' : 'bg-white/70 text-[#9AA8A1]'
 	                    }`}
 	                  >
 	                    <PageIcon className="h-3.5 w-3.5" />
@@ -3051,8 +3051,8 @@ export function PlannerScreen({
 
         <div className="order-3 flex flex-col gap-2 rounded-[1.25rem] border border-white/80 bg-white/95 p-3 shadow-[0_8px_24px_rgba(20,35,29,0.05)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <Sparkles className="h-4 w-4 text-[#12B886]" />
-            <span className="rounded-full bg-[#E6F7F0] px-3 py-1 text-xs font-semibold text-[#12B886]">
+            <Sparkles className="h-4 w-4 text-[#FF6B5F]" />
+            <span className="rounded-full bg-[#FFF0EE] px-3 py-1 text-xs font-semibold text-[#FF6B5F]">
               {activeCategory.label}
             </span>
             <span className="rounded-full bg-[#FFFFFF] px-3 py-1 text-xs font-semibold text-[#16241D]">
@@ -3143,7 +3143,7 @@ export function PlannerScreen({
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <div className="text-base font-black text-[#16241D]">내 위치</div>
-                    <span className="rounded-full bg-[#E6F7F0] px-2.5 py-1 text-[11px] font-extrabold text-[#0CA178]">
+                    <span className="rounded-full bg-[#FFF0EE] px-2.5 py-1 text-[11px] font-extrabold text-[#E85F55]">
 	                      {selfProfileParticipant ? '참여됐어요' : '위치 필요'}
                     </span>
                   </div>
@@ -3240,7 +3240,7 @@ export function PlannerScreen({
                       <button
                         type="button"
                         onClick={() => handleDeleteSavedFriend(friend.id)}
-                        className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#9AA8A1] transition-colors hover:bg-[#CFEBDF] hover:text-[#0CA178]"
+                        className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#9AA8A1] transition-colors hover:bg-[#FFD8D2] hover:text-[#E85F55]"
                         aria-label={`${friend.name} 저장된 친구 삭제`}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -3355,7 +3355,7 @@ export function PlannerScreen({
                         type="button"
                         onClick={handleUseCurrentLocation}
                         disabled={isLocating}
-                        className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#E6F7F0] text-[#0CA178] transition-transform active:scale-95 disabled:opacity-60"
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#FFF0EE] text-[#E85F55] transition-transform active:scale-95 disabled:opacity-60"
                       >
                         {isLocating ? (
                           <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -3372,7 +3372,7 @@ export function PlannerScreen({
 	                      )}
 
                       {locationError && (
-                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#E6F7F0] px-3 py-2 text-xs text-[#c15b3d]">
+                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#FFF0EE] px-3 py-2 text-xs text-[#c15b3d]">
                           {locationError}
                         </div>
                       )}
@@ -3394,7 +3394,7 @@ export function PlannerScreen({
                       )}
 
                       {locationError && (
-                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#E6F7F0] px-3 py-2 text-xs text-[#c15b3d]">
+                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#FFF0EE] px-3 py-2 text-xs text-[#c15b3d]">
                           {locationError}
                         </div>
                       )}
@@ -3425,7 +3425,7 @@ export function PlannerScreen({
                             void handleAddressSearch();
                           }}
                           disabled={isSearchingAddress}
-                          className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#E6F7F0] px-4 text-sm font-medium text-[#0CA178] transition-transform active:scale-95 disabled:opacity-60"
+                          className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#FFF0EE] px-4 text-sm font-medium text-[#E85F55] transition-transform active:scale-95 disabled:opacity-60"
                         >
                           {isSearchingAddress ? (
                             <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -3474,7 +3474,7 @@ export function PlannerScreen({
                       )}
 
                       {locationError && (
-                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#E6F7F0] px-3 py-2 text-xs text-[#c15b3d]">
+                        <div className="mt-3 rounded-xl border border-[#ffd9cf] bg-[#FFF0EE] px-3 py-2 text-xs text-[#c15b3d]">
                           {locationError}
                         </div>
                       )}
@@ -3770,7 +3770,7 @@ export function PlannerScreen({
                 ) : null}
 
                 {selectedRouteError ? (
-                  <div className="mt-3 rounded-2xl bg-[#E6F7F0] px-3 py-2 text-xs text-[#0CA178]">
+                  <div className="mt-3 rounded-2xl bg-[#FFF0EE] px-3 py-2 text-xs text-[#E85F55]">
                     {selectedRouteError}
                   </div>
                 ) : null}
@@ -3857,7 +3857,7 @@ export function PlannerScreen({
 	              <div className="truncate text-sm font-black text-[#16241D]">{plannerStageTitle}</div>
 	            </div>
             {onlineRoom ? (
-              <span className="shrink-0 rounded-full bg-[#E6F7F0] px-3 py-1 text-xs font-extrabold text-[#0CA178]">
+              <span className="shrink-0 rounded-full bg-[#FFF0EE] px-3 py-1 text-xs font-extrabold text-[#E85F55]">
                 {readyCount}/{Math.max(readyRequiredCount, 0)}
               </span>
             ) : null}
@@ -3875,7 +3875,7 @@ export function PlannerScreen({
             }}
             disabled={onlineRoom ? readyButtonDisabled : Boolean(drawDisabledReason)}
             className={`kok-pressable flex h-16 w-full items-center justify-center gap-2 rounded-[1.35rem] text-lg font-black tracking-normal text-white shadow-[0_12px_30px_rgba(20,35,29,0.14)] disabled:cursor-not-allowed disabled:opacity-50 ${
-              onlineRoom && isCurrentActorReady ? 'bg-[#22c55e]' : 'bg-[#16241D]'
+              onlineRoom && isCurrentActorReady ? 'bg-[#FF6B5F]' : 'bg-[#16241D]'
             }`}
           >
             {sharedCandidateStatus === 'loading' || fairnessVerificationPending || isSettingReady ? (
@@ -3935,7 +3935,7 @@ export function PlannerScreen({
                       onClick={() => handleCategorySelect(category.key)}
                       className={`min-h-12 rounded-2xl px-3 text-sm font-semibold transition-all active:scale-[0.99] ${
                         active
-                          ? 'bg-[#12B886] text-white shadow-sm'
+                          ? 'bg-[#FF6B5F] text-white shadow-sm'
                           : 'bg-[#f2f7f2] text-[#52615f]'
                       }`}
                     >
@@ -3966,7 +3966,7 @@ export function PlannerScreen({
                       <span className="text-sm font-semibold">{mode.shortLabel}</span>
                       <span
                         className={`h-3 w-3 rounded-full ${
-                          active ? 'bg-[#12B886]' : 'bg-[#dfe7e5]'
+                          active ? 'bg-[#FF6B5F]' : 'bg-[#dfe7e5]'
                         }`}
                       />
                     </button>
@@ -3992,7 +3992,7 @@ export function PlannerScreen({
                         onClick={() => handleThrillLevelSelect(preset.level)}
                         className={`flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl border px-4 text-left transition-all active:scale-[0.99] ${
                           active
-                            ? 'border-[#12B886] bg-[#E6F7F0] text-[#16241D] shadow-sm'
+                            ? 'border-[#FF6B5F] bg-[#FFF0EE] text-[#16241D] shadow-sm'
                             : 'border-[#e6ebf0] bg-white text-[#52615f]'
                         }`}
                       >
@@ -4004,7 +4004,7 @@ export function PlannerScreen({
                         </span>
                         <span
                           className={`h-3 w-3 shrink-0 rounded-full ${
-                            active ? 'bg-[#12B886]' : 'bg-[#dfe7e5]'
+                            active ? 'bg-[#FF6B5F]' : 'bg-[#dfe7e5]'
                           }`}
                         />
                       </button>

@@ -348,7 +348,7 @@ export function AuthSheet({
 
                 <div className="rounded-[24px] border border-[#E4EFE9] bg-[#F5F9F7] p-4">
                   <div className="mb-3 flex items-start gap-2">
-                    <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[#12B886]" />
+                    <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[#FF6B5F]" />
                     <div>
                       <div className="text-sm text-[#16241D]">기본 출발지</div>
                       <div className="mt-1 text-xs leading-relaxed text-[#9AA8A1]">
@@ -401,7 +401,7 @@ export function AuthSheet({
                         void handleLocationSearch();
                       }}
                       disabled={isSearchingLocation}
-                      className="inline-flex h-11 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#E6F7F0] text-[#0CA178] transition-transform active:scale-95 disabled:opacity-60"
+                      className="inline-flex h-11 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#FFF0EE] text-[#E85F55] transition-transform active:scale-95 disabled:opacity-60"
                       aria-label="기본 출발지 검색"
                     >
                       {isSearchingLocation ? (
@@ -452,7 +452,7 @@ export function AuthSheet({
           </div>
 
           {mode === 'signup' && (
-            <div className="mt-4 rounded-[22px] bg-[#E6F7F0] px-4 py-3 text-sm leading-relaxed text-[#6E7C75]">
+            <div className="mt-4 rounded-[22px] bg-[#FFF0EE] px-4 py-3 text-sm leading-relaxed text-[#6E7C75]">
               저장된 출발지는 기본값이에요. 방 안에서는 이번 약속 위치만 따로 바꿀 수 있어요.
             </div>
           )}
@@ -460,7 +460,7 @@ export function AuthSheet({
 
         <div className="border-t border-[#E4EFE9] bg-white/96 px-6 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-4 backdrop-blur-md">
           {error && (
-            <div className="mb-3 rounded-2xl border border-[#CFEBDF] bg-[#E6F7F0] px-4 py-3 text-sm text-[#0CA178]">
+            <div className="mb-3 rounded-2xl border border-[#FFD8D2] bg-[#FFF0EE] px-4 py-3 text-sm text-[#E85F55]">
               {error}
             </div>
           )}

@@ -67,7 +67,7 @@ export function InvitePage() {
       <section className="mx-auto flex min-h-screen w-full max-w-md flex-col px-6 py-8">
         <header className="flex items-center justify-between">
           <a href="/landing" className="flex items-center gap-3" aria-label="KoK 소개로 이동">
-            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-[#ffd9d9] shadow-[0_10px_24px_rgba(18,184,134,0.2)]">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-[#ffd9d9] shadow-[0_10px_24px_rgba(255, 107, 95,0.2)]">
               <MapPin className="h-6 w-6 fill-[#8d1711] text-[#8d1711]" />
             </div>
             <div className="text-2xl font-black tracking-normal">KoK</div>
@@ -122,7 +122,7 @@ export function InvitePage() {
               className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-[#E4EFE9] bg-white px-5 text-sm font-bold text-[#16241D] shadow-sm transition-transform active:scale-[0.98]"
             >
               {copied ? (
-                <CheckCircle2 className="h-4 w-4 text-[#22c55e]" />
+                <CheckCircle2 className="h-4 w-4 text-[#FF6B5F]" />
               ) : (
                 <Copy className="h-4 w-4" />
               )}
