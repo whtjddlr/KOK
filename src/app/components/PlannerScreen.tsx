@@ -4018,8 +4018,8 @@ export function PlannerScreen({
 	              ? `${activeDrawControllerName}님 진행 중`
               : undefined
           }
-          onChoice={handleDrawChoice}
-          onLadderBarsChange={handleDrawLadderBarsChange}
+          onChoice={onlineRoom ? handleDrawChoice : undefined}
+          onLadderBarsChange={onlineRoom ? handleDrawLadderBarsChange : undefined}
           onComplete={handleDrawComplete}
           onClose={closeDrawDrawer}
         />

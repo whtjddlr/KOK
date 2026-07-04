@@ -270,13 +270,17 @@ function extractSubwayLineLabels(text: string) {
   );
 }
 
-function getStationLineLabelsByName(stationName: string) {
+function getExactStationLineLabelsByName(stationName: string) {
   const normalizedStationName = normalizeStationLookupText(stationName);
-  const stationMatch = Object.entries(STATION_LINE_LABELS)
-    .sort(([left], [right]) => right.length - left.length)
-    .find(([stationKey]) => normalizedStationName.includes(normalizeStationLookupText(stationKey)));
+  const stationMatch = Object.entries(STATION_LINE_LABELS).find(
+    ([stationKey]) => normalizedStationName === normalizeStationLookupText(stationKey),
+  );
 
   return stationMatch?.[1] ?? [];
+}
+
+function isStationSignCandidate(winner: Candidate) {
+  return winner.name.trim().endsWith('역');
 }
 
 function routeStepTouchesStation(step: TravelRouteStep, stationName: string) {
@@ -310,12 +314,15 @@ function getRouteSubwayLineLabels(winner: Candidate, travelInfo: TravelInfo[]) {
 }
 
 function getStationProfile(winner: Candidate, travelInfo: TravelInfo[]) {
+  const isStation = isStationSignCandidate(winner);
+  const directLineLabels = isStation ? getExactStationLineLabelsByName(winner.name) : [];
+  const hintLineLabels = isStation ? extractSubwayLineLabels(winner.routeHint) : [];
   const routeLineLabels = getRouteSubwayLineLabels(winner, travelInfo);
-  const fallbackLineLabels = getUniqueLineLabels([
-    ...getStationLineLabelsByName(winner.name),
-    ...extractSubwayLineLabels(winner.routeHint),
+  const lineLabels = getUniqueLineLabels([
+    ...directLineLabels,
+    ...hintLineLabels,
+    ...(directLineLabels.length || hintLineLabels.length ? [] : routeLineLabels),
   ]);
-  const lineLabels = routeLineLabels.length ? routeLineLabels : fallbackLineLabels;
   const lines = lineLabels.map((lineLabel) => SUBWAY_LINE_META[lineLabel]);
 
   return {
@@ -833,8 +840,8 @@ export function ResultScreen({
     () => getStationProfile(winner, transitTravelInfo.length ? transitTravelInfo : selectedTravelInfo),
     [selectedTravelInfo, transitTravelInfo, winner],
   );
-  const stationAccent = stationProfile.primaryLine?.color ?? '#12B886';
-  const stationMarker = stationProfile.primaryLine?.marker ?? 'KoK';
+  const stationAccent = stationProfile.primaryLine?.color ?? '#FF6B5F';
+  const stationMarker = stationProfile.primaryLine?.marker;
   const stationNameLength = Array.from(winner.name.replace(/\s/g, '')).length;
   const stationNameSizeClass =
     stationNameLength >= 9
@@ -1167,9 +1174,13 @@ export function ResultScreen({
                 <div
                   className="absolute left-4 flex h-[4.8rem] w-[4.8rem] shrink-0 items-center justify-center rounded-full border-[7px] border-white text-2xl font-black text-white shadow-[0_0_0_1px_rgba(20,35,29,0.10)] sm:left-6 sm:h-24 sm:w-24 sm:text-3xl"
                   style={{ backgroundColor: stationAccent }}
-                  aria-label={stationProfile.primaryLine?.label ?? 'KoK'}
+                  aria-label={stationProfile.primaryLine?.label ?? '약속장소'}
                 >
-                  <span className="max-w-[3.3rem] leading-none">{stationMarker}</span>
+                  {stationMarker ? (
+                    <span className="max-w-[3.3rem] leading-none">{stationMarker}</span>
+                  ) : (
+                    <MapPin className="h-8 w-8 sm:h-10 sm:w-10" />
+                  )}
                 </div>
 
                 <div className="min-w-0 text-center">

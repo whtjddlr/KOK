@@ -3,6 +3,7 @@ import {
   type NearbySearchItem,
   type NaverLocalSearchSort,
 } from './naver-local-search';
+import { stationOptions } from '../data/mockData';
 
 let naverMapPromise: Promise<any> | null = null;
 
@@ -31,6 +32,26 @@ const curatedStationFallbacks: AddressSearchResult[] = [
   },
 ];
 
+const knownStationAddresses: Record<string, Pick<AddressSearchResult, 'roadAddress' | 'jibunAddress'>> = {
+  서현역: {
+    roadAddress: '경기도 성남시 분당구 성남대로 지하 601',
+    jibunAddress: '경기도 성남시 분당구 서현동',
+  },
+};
+
+const stationOptionFallbacks: AddressSearchResult[] = stationOptions.map((station) => {
+  const knownAddress = knownStationAddresses[station.name];
+
+  return {
+    title: station.name,
+    roadAddress: knownAddress?.roadAddress ?? '',
+    jibunAddress: knownAddress?.jibunAddress ?? '',
+    coordinates: station.coordinates,
+  };
+});
+
+const stationFallbacks = [...stationOptionFallbacks, ...curatedStationFallbacks];
+
 function normalizeSearchText(value: string) {
   return value
     .replace(/<[^>]*>/g, '')
@@ -46,7 +67,7 @@ function getCuratedStationResults(query: string) {
     return [] as AddressSearchResult[];
   }
 
-  return curatedStationFallbacks.filter((station) => {
+  return stationFallbacks.filter((station) => {
     const normalizedTitle = normalizeSearchText(station.title);
     const titleWithoutStationSuffix = normalizedTitle.replace(/역$/, '');
     const queryWithoutStationSuffix = normalizedQuery.replace(/역$/, '');

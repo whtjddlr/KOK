@@ -138,11 +138,11 @@ const FAIRNESS_LEVEL_DISTANCE_SCALE: Record<ThrillLevel, number> = {
   5: 1.15,
 };
 const FAIRNESS_DYNAMIC_CAP_BY_LEVEL: Record<ThrillLevel, number> = {
-  1: 42,
-  2: 50,
-  3: 58,
-  4: 66,
-  5: 76,
+  1: 18,
+  2: 24,
+  3: 32,
+  4: 44,
+  5: 58,
 };
 
 function getAdaptiveFairnessSpreadBonus(participants: Participant[] = []) {
@@ -2927,12 +2927,12 @@ export function getDrawPool(
     );
     const strictSource = verifiedFairPool.length ? verifiedFairPool : balancedPool;
 
-    if (strictSource.length >= preferredPoolSize) {
+    if (strictSource.length > 0) {
       return {
         pool: strictSource.slice(0, Math.min(targetSize, strictSource.length)),
         fallbackNotice:
           strictSource.length < Math.min(3, targetSize)
-            ? '이동시간 차이 기준을 통과한 중간 후보만 남겼어요.'
+            ? '공평 기준을 통과한 후보만 남겼어요.'
             : null,
       };
     }
@@ -3209,10 +3209,17 @@ export function buildDrawPlan(
     undefined,
     participants,
   );
+  const fallbackWinner = pool[0] ?? insights[0];
+  const winnerSource = pool.length ? pool : insights;
   const winner =
-    lockedWinner && pool.some((insight) => insight.candidate.id === lockedWinner.candidate.id)
+    lockedWinner &&
+    winnerSource.some((insight) => insight.candidate.id === lockedWinner.candidate.id)
       ? lockedWinner
-      : weightedPick(pool, selectionMode, thrillLevel, participants, drawSeed);
+      : selectionMode === 'balance'
+        ? fallbackWinner
+        : pool.length
+          ? weightedPick(pool, selectionMode, thrillLevel, participants, drawSeed)
+          : fallbackWinner;
   const runnerUps = sampleWithoutRepeat(pool, 2, [winner.candidate.id], drawSeed);
   const finalists = [winner, ...runnerUps].slice(0, Math.min(3, pool.length));
   const rapidShuffle = Array.from({ length: Math.max(12, pool.length * 3) }, (_, index) => {
