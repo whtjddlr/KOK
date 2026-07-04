@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot,
   BookmarkPlus,
   Car,
   CheckCircle2,
@@ -405,13 +404,27 @@ function getMeetingRoomSignature(room: MeetingRoom | null) {
     members: room.members ?? [],
   });
 }
-const thrillButtonLabels: Record<ThrillLevel, string> = {
-  1: 'Lv.1',
-  2: 'Lv.2',
-  3: 'Lv.3',
-  4: 'Lv.4',
-  5: 'Lv.5',
-};
+const fairnessPresetOptions: Array<{
+  level: ThrillLevel;
+  label: string;
+  description: string;
+}> = [
+  {
+    level: 1,
+    label: '가장 공평',
+    description: '시간 차이를 최대한 줄여요.',
+  },
+  {
+    level: 3,
+    label: '적당히',
+    description: '공평함과 후보 수를 같이 봐요.',
+  },
+  {
+    level: 5,
+    label: '후보 넓게',
+    description: '조금 멀어도 선택지를 더 봐요.',
+  },
+];
 
 function sortInsightsByCandidateIds(insights: CandidateInsight[], candidateIds: string[]) {
   const insightById = insights.reduce<Record<string, CandidateInsight>>((acc, insight) => {
@@ -1184,10 +1197,12 @@ export function PlannerScreen({
     selectionMode === 'neighborhood' ? 5 : 1;
   const activeThrill =
     thrillStages.find((stage) => stage.level === effectiveThrillLevel) ?? thrillStages[0];
-  const visibleThrillStages = thrillStages;
+  const activeFairnessPreset =
+    fairnessPresetOptions.find((preset) => preset.level === effectiveThrillLevel) ??
+    fairnessPresetOptions[0];
   const activeSpreadLimit = getFairnessSpreadLimit(effectiveThrillLevel, participants);
   const activeModeDetailLabel = isFairnessMode
-    ? `${activeThrill.shortLabel} · ${activeSpreadLimit}분 이하`
+    ? `${activeFairnessPreset.label} · ${activeSpreadLimit}분 이내`
     : selectionMode === 'hotplace'
       ? '핫플 후보 넓게'
       : '집앞 후보 넓게';
@@ -3006,7 +3021,7 @@ export function PlannerScreen({
 	          })}
 	        </nav>
 
-	        {activePlannerPage === 'map' && (
+	        {activePlannerPage === 'map' && !showOptionsPage && (
 	        <section className="order-1 space-y-3">
 		          <div className="flex items-end justify-between gap-3 px-1">
 		            <div>
@@ -3963,49 +3978,38 @@ export function PlannerScreen({
             {isFairnessMode && (
               <section className="rounded-[1.75rem] border border-white/80 bg-white/95 p-4 shadow-[0_10px_30px_rgba(20,35,29,0.06)]">
                 <div className="mb-3 flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-[#16241D]">이동시간 공정도</div>
+                  <div className="text-sm font-semibold text-[#16241D]">공평 기준</div>
                   <div className="text-xs text-[#6f7b79]">{activeModeDetailLabel}</div>
                 </div>
-                <div className="grid grid-cols-5 gap-1.5 rounded-2xl bg-[#f2f7f2] p-1.5">
-                  {visibleThrillStages.map((stage) => {
-                    const active = stage.level === effectiveThrillLevel;
+                <div className="space-y-2">
+                  {fairnessPresetOptions.map((preset) => {
+                    const active = preset.level === effectiveThrillLevel;
 
                     return (
                       <button
-                        key={stage.level}
+                        key={preset.level}
                         type="button"
-                        onClick={() => handleThrillLevelSelect(stage.level)}
-                        className={`h-10 rounded-xl text-sm font-semibold transition-all ${
+                        onClick={() => handleThrillLevelSelect(preset.level)}
+                        className={`flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl border px-4 text-left transition-all active:scale-[0.99] ${
                           active
-                            ? 'bg-[#12B886] text-white shadow-sm'
-                            : 'text-[#52615f]'
+                            ? 'border-[#12B886] bg-[#E6F7F0] text-[#16241D] shadow-sm'
+                            : 'border-[#e6ebf0] bg-white text-[#52615f]'
                         }`}
                       >
-                        {thrillButtonLabels[stage.level]}
+                        <span className="min-w-0">
+                          <span className="block text-sm font-extrabold">{preset.label}</span>
+                          <span className="block text-xs font-medium text-[#6f7b79]">
+                            {preset.description}
+                          </span>
+                        </span>
+                        <span
+                          className={`h-3 w-3 shrink-0 rounded-full ${
+                            active ? 'bg-[#12B886]' : 'bg-[#dfe7e5]'
+                          }`}
+                        />
                       </button>
                     );
                   })}
-                </div>
-              </section>
-            )}
-
-            {!runtimeCapabilities.ai.connected && (
-              <section className="rounded-[1.75rem] border border-white/80 bg-white/95 p-4 shadow-[0_10px_30px_rgba(20,35,29,0.06)]">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2 text-[#16241D]">
-                    <Bot className="h-4 w-4 shrink-0 text-[#33415f]" />
-                    <span className="truncate text-sm font-semibold">
-                      {runtimeAiConfig ? 'AI 연결됨' : 'AI 연결'}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsAiConfigOpen(true)}
-                    className="inline-flex h-10 items-center justify-center rounded-full bg-[#f2f7f2] px-4 text-sm text-[#16241D] shadow-sm transition-transform active:scale-95"
-                  >
-                    연결
-                  </button>
                 </div>
               </section>
             )}
