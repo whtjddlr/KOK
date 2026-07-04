@@ -4,6 +4,7 @@
 
 - Home smoke: app renders on mobile and desktop, primary buttons are visible, no horizontal overflow.
 - Guest planner: guest entry opens planner, page tabs render, no horizontal overflow.
+- Password recovery: login opens reset request, reset URL opens new password screen, no horizontal overflow.
 - Options: only simple presets are shown, `Lv.*`, `이동시간 공정도`, and `AI 연결` are not shown.
 - Accent consistency: old green accent RGB values are not used in rendered home/options UI.
 - Participant form: long typed name and long address query do not push layout outside the viewport.
@@ -28,4 +29,6 @@ npm run qa:ui:install
 - Result screen with station names: long station names do not clip the station sign.
 - Fairness mode: selecting `가장 공평`, `적당히`, and `후보 넓게` visibly changes the summary.
 - Shared room: ready CTA, redraw, and share controls remain tappable on a small iPhone viewport.
+- Auth: password reset email arrives for a real email account and the returned link opens the new password screen.
+- Account: account deletion remains available from profile settings.
 - App Store screenshots: home, map, participants, options, draw, and result screens are regenerated after visible UI changes.

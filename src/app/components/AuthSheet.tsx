@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { LocateFixed, LoaderCircle, MapPin, Search, X } from 'lucide-react';
 import {
   AuthUser,
+  requestPasswordReset,
   signIn,
   signUp,
+  updateRecoveredPassword,
   UserHomeLocation,
 } from '../lib/auth';
 import { participantGenderOptions } from '../lib/gender';
@@ -22,7 +24,7 @@ import {
   SERVICE_AREA_UNSUPPORTED_MESSAGE,
 } from '../lib/service-area';
 
-export type AuthMode = 'signup' | 'login';
+export type AuthMode = 'signup' | 'login' | 'reset-request' | 'reset-update';
 
 interface AuthSheetProps {
   open: boolean;
@@ -76,10 +78,17 @@ export function AuthSheet({
   const [locationResults, setLocationResults] = useState<AddressSearchResult[]>([]);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [isSearchingLocation, setIsSearchingLocation] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const isSignup = mode === 'signup';
+  const isLogin = mode === 'login';
+  const isResetRequest = mode === 'reset-request';
+  const isResetUpdate = mode === 'reset-update';
 
   useEffect(() => {
     if (!open) {
@@ -90,7 +99,9 @@ export function AuthSheet({
       setLocationResults([]);
       setIdentifier('');
       setPassword('');
+      setConfirmPassword('');
       setError(null);
+      setSuccess(null);
       setIsLocating(false);
       setIsSearchingLocation(false);
       setIsSubmitting(false);
@@ -101,13 +112,93 @@ export function AuthSheet({
     return null;
   }
 
+  const handleModeChange = (nextMode: AuthMode) => {
+    setError(null);
+    setSuccess(null);
+    setPassword('');
+    setConfirmPassword('');
+    onModeChange(nextMode);
+  };
+
   const handleSubmit = async () => {
-    if (mode === 'signup' && !homeLocation) {
+    if (isResetRequest) {
+      setIsSubmitting(true);
+      setError(null);
+      setSuccess(null);
+
+      try {
+        const result = await withTimeout(
+          requestPasswordReset({ identifier }),
+          8000,
+          '재설정 요청 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.',
+        );
+
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+
+        setSuccess('재설정 메일을 보냈어요.');
+      } catch (submitError) {
+        setError(
+          submitError instanceof Error
+            ? submitError.message
+            : '재설정 요청을 완료하지 못했어요.',
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
+
+      return;
+    }
+
+    if (isResetUpdate) {
+      if (password !== confirmPassword) {
+        setError('비밀번호가 서로 달라요.');
+        return;
+      }
+
+      setIsSubmitting(true);
+      setError(null);
+      setSuccess(null);
+
+      try {
+        const result = await withTimeout(
+          updateRecoveredPassword({ password }),
+          8000,
+          '비밀번호 변경 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.',
+        );
+
+        if (result.error || !result.user) {
+          setError(result.error ?? '비밀번호를 변경하지 못했어요.');
+          return;
+        }
+
+        onSuccess(result.user);
+      } catch (submitError) {
+        setError(
+          submitError instanceof Error
+            ? submitError.message
+            : '비밀번호 변경을 완료하지 못했어요.',
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
+
+      return;
+    }
+
+    if (isSignup && !identifier.trim().includes('@')) {
+      setError('비밀번호 재설정을 위해 이메일로 가입해 주세요.');
+      return;
+    }
+
+    if (isSignup && !homeLocation) {
       setError('기본 출발지를 먼저 설정해 주세요.');
       return;
     }
 
-    if (mode === 'signup' && homeLocation && !isSupportedServiceAreaLocation(homeLocation)) {
+    if (isSignup && homeLocation && !isSupportedServiceAreaLocation(homeLocation)) {
       setError(SERVICE_AREA_UNSUPPORTED_MESSAGE);
       return;
     }
@@ -117,7 +208,7 @@ export function AuthSheet({
 
     try {
       const result = await withTimeout(
-        mode === 'signup'
+        isSignup
           ? signUp({
               name,
               gender,
@@ -277,12 +368,22 @@ export function AuthSheet({
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
               <div className="text-2xl text-[#16241D]">
-                {mode === 'signup' ? '회원가입' : '로그인'}
+                {isSignup
+                  ? '회원가입'
+                  : isResetRequest
+                    ? '비밀번호 재설정'
+                    : isResetUpdate
+                      ? '새 비밀번호'
+                      : '로그인'}
               </div>
               <div className="mt-1 text-sm text-[#6E7C75]">
-                {mode === 'signup'
-                  ? '이메일 없이 아이디와 닉네임으로 가볍게 시작해요.'
-                  : '저장한 취향과 친구 목록으로 바로 이어서 시작할 수 있어요.'}
+                {isSignup
+                  ? '이메일과 닉네임으로 시작해요.'
+                  : isResetRequest
+                    ? '가입한 이메일로 링크를 보내요.'
+                    : isResetUpdate
+                      ? '새 비밀번호를 입력해 주세요.'
+                      : '저장한 취향과 친구 목록으로 이어서 시작해요.'}
               </div>
             </div>
             <button
@@ -293,29 +394,31 @@ export function AuthSheet({
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#F5F9F7] p-1">
+          {!isResetRequest && !isResetUpdate && (
+            <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#F5F9F7] p-1">
             <button
-              onClick={() => onModeChange('signup')}
+              onClick={() => handleModeChange('signup')}
               className={`h-11 rounded-[18px] text-sm transition-all ${
-                mode === 'signup' ? 'bg-white text-[#16241D] shadow-sm' : 'text-[#6E7C75]'
+                isSignup ? 'bg-white text-[#16241D] shadow-sm' : 'text-[#6E7C75]'
               }`}
             >
               회원가입
             </button>
             <button
-              onClick={() => onModeChange('login')}
+              onClick={() => handleModeChange('login')}
               className={`h-11 rounded-[18px] text-sm transition-all ${
-                mode === 'login' ? 'bg-white text-[#16241D] shadow-sm' : 'text-[#6E7C75]'
+                isLogin ? 'bg-white text-[#16241D] shadow-sm' : 'text-[#6E7C75]'
               }`}
             >
               로그인
             </button>
-          </div>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 pb-4">
           <div className="space-y-3">
-            {mode === 'signup' && (
+            {isSignup && (
               <>
                 <input
                   value={name}
@@ -436,22 +539,55 @@ export function AuthSheet({
                 </div>
               </>
             )}
-            <input
-              value={identifier}
-              onChange={(event) => setIdentifier(event.target.value)}
-              placeholder={mode === 'signup' ? '아이디' : '아이디 또는 이메일'}
-              className="h-12 w-full rounded-2xl bg-[#F5F9F7] px-4 text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:ring-2 focus:ring-[#16241D]/20"
-            />
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="비밀번호"
-              className="h-12 w-full rounded-2xl bg-[#F5F9F7] px-4 text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:ring-2 focus:ring-[#16241D]/20"
-            />
+            {!isResetUpdate && (
+              <input
+                value={identifier}
+                onChange={(event) => setIdentifier(event.target.value)}
+                placeholder={isSignup ? '이메일' : '아이디 또는 이메일'}
+                className="h-12 w-full rounded-2xl bg-[#F5F9F7] px-4 text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:ring-2 focus:ring-[#16241D]/20"
+              />
+            )}
+            {!isResetRequest && (
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder={isResetUpdate ? '새 비밀번호' : '비밀번호'}
+                className="h-12 w-full rounded-2xl bg-[#F5F9F7] px-4 text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:ring-2 focus:ring-[#16241D]/20"
+              />
+            )}
+            {isResetUpdate && (
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                placeholder="새 비밀번호 확인"
+                className="h-12 w-full rounded-2xl bg-[#F5F9F7] px-4 text-[#16241D] outline-none placeholder:text-[#9AA8A1] focus:ring-2 focus:ring-[#16241D]/20"
+              />
+            )}
           </div>
 
-          {mode === 'signup' && (
+          {isLogin && (
+            <button
+              type="button"
+              onClick={() => handleModeChange('reset-request')}
+              className="mt-3 text-sm font-semibold text-[#E85F55]"
+            >
+              비밀번호를 잊으셨나요?
+            </button>
+          )}
+
+          {(isResetRequest || isResetUpdate) && (
+            <button
+              type="button"
+              onClick={() => handleModeChange('login')}
+              className="mt-3 text-sm font-semibold text-[#6E7C75]"
+            >
+              로그인으로 돌아가기
+            </button>
+          )}
+
+          {isSignup && (
             <div className="mt-4 rounded-[22px] bg-[#FFF0EE] px-4 py-3 text-sm leading-relaxed text-[#6E7C75]">
               저장된 출발지는 기본값이에요. 방 안에서는 이번 약속 위치만 따로 바꿀 수 있어요.
             </div>
@@ -465,13 +601,25 @@ export function AuthSheet({
             </div>
           )}
 
+          {success && (
+            <div className="mb-3 rounded-2xl border border-[#FFD8D2] bg-[#FFF8F7] px-4 py-3 text-sm text-[#9F3D2F]">
+              {success}
+            </div>
+          )}
+
           <button
             onClick={handleSubmit}
             disabled={isSubmitting}
             className="kok-pressable kok-button-shine flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#16241D] text-white shadow-[0_14px_34px_rgba(20,35,29,0.16)] transition-transform active:scale-95 disabled:opacity-60"
           >
             {isSubmitting && <LoaderCircle className="h-4 w-4 animate-spin" />}
-            {mode === 'signup' ? '가입하고 시작' : '로그인하고 시작'}
+            {isSignup
+              ? '가입하고 시작'
+              : isResetRequest
+                ? '재설정 메일 받기'
+                : isResetUpdate
+                  ? '비밀번호 바꾸기'
+                  : '로그인하고 시작'}
           </button>
         </div>
       </div>

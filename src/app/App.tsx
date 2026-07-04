@@ -12,6 +12,7 @@ import {
   loadSessionUser,
   signOut,
   subscribeToAuthChanges,
+  subscribeToPasswordRecovery,
   updateProfileSettings,
 } from './lib/auth';
 import {
@@ -298,11 +299,36 @@ export default function App() {
         setCurrentUserIfChanged(user);
       }
     });
+    const unsubscribeRecovery = subscribeToPasswordRecovery(() => {
+      if (!mounted) {
+        return;
+      }
+
+      setAuthMode('reset-update');
+      setAuthOpen(true);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    });
 
     return () => {
       mounted = false;
       unsubscribe();
+      unsubscribeRecovery();
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get('reset-password') !== '1') {
+      return;
+    }
+
+    setAuthMode('reset-update');
+    setAuthOpen(true);
   }, []);
 
   const refreshOwnedRooms = async (userId = currentUser?.id ?? '') => {

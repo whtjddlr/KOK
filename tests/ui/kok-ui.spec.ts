@@ -149,6 +149,30 @@ test.describe('KoK UI regression', () => {
     await expectNoConsoleErrors(errors);
   });
 
+  test('password recovery screens are reachable and responsive', async ({ page }) => {
+    const errors = installConsoleGuard(page);
+
+    await page.goto('/');
+    await page.getByRole('button', { name: '로그인' }).click();
+    await page.getByRole('button', { name: '비밀번호를 잊으셨나요?' }).click();
+
+    await expect(page.getByText('비밀번호 재설정')).toBeVisible();
+    await page.getByPlaceholder('아이디 또는 이메일').fill('test@example.com');
+    await expect(page.getByRole('button', { name: '재설정 메일 받기' })).toBeVisible();
+    await expectNoHorizontalOverflow(page, 'password reset request');
+
+    await page.getByRole('button', { name: '로그인으로 돌아가기' }).click();
+    await expect(page.getByRole('button', { name: '로그인하고 시작' })).toBeVisible();
+
+    await page.goto('/?reset-password=1');
+    await expect(page.getByText('새 비밀번호', { exact: true })).toBeVisible();
+    await page.getByPlaceholder('새 비밀번호', { exact: true }).fill('new-password');
+    await page.getByPlaceholder('새 비밀번호 확인', { exact: true }).fill('new-password');
+    await expect(page.getByRole('button', { name: '비밀번호 바꾸기' })).toBeVisible();
+    await expectNoHorizontalOverflow(page, 'password reset update');
+    await expectNoConsoleErrors(errors);
+  });
+
   test('guest planner options stay simple and responsive', async ({ page }) => {
     const errors = installConsoleGuard(page);
 

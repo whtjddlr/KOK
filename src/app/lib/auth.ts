@@ -766,6 +766,30 @@ export function subscribeToAuthChanges(callback: (user: AuthUser | null) => void
   };
 }
 
+export function subscribeToPasswordRecovery(callback: () => void) {
+  if (!isSupabaseConfigured()) {
+    return () => {};
+  }
+
+  const supabase = getSupabaseBrowserClient();
+
+  if (!supabase) {
+    return () => {};
+  }
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'PASSWORD_RECOVERY' && session?.user) {
+      callback();
+    }
+  });
+
+  return () => {
+    subscription.unsubscribe();
+  };
+}
+
 export async function signOut() {
   if (isSupabaseConfigured()) {
     const supabase = getSupabaseBrowserClient();
@@ -1112,5 +1136,84 @@ export async function signIn(input: { identifier: string; password: string }) {
       preferences: normalizePreferences(matchedUser.preferences),
       homeLocation: normalizeHomeLocation(matchedUser.homeLocation),
     } satisfies AuthUser,
+  };
+}
+
+export async function requestPasswordReset(input: { identifier: string }) {
+  const authIdentifier = await normalizeAuthIdentifier(input.identifier);
+
+  if ('error' in authIdentifier) {
+    return { error: authIdentifier.error };
+  }
+
+  const { email } = authIdentifier;
+
+  if (email.endsWith(`@${SYNTHETIC_EMAIL_DOMAIN}`)) {
+    return {
+      error: '비밀번호 재설정은 이메일로 가입한 계정만 가능해요.',
+    };
+  }
+
+  if (!isSupabaseConfigured()) {
+    return {
+      error: '비밀번호 재설정은 온라인 계정에서만 가능해요.',
+    };
+  }
+
+  const supabase = getSupabaseBrowserClient();
+
+  if (!supabase) {
+    return { error: 'Supabase 클라이언트를 초기화하지 못했어요.' };
+  }
+
+  const redirectTo =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}${window.location.pathname}?reset-password=1`
+      : undefined;
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo,
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return {};
+}
+
+export async function updateRecoveredPassword(input: { password: string }) {
+  const password = input.password.trim();
+
+  if (password.length < 6) {
+    return { error: '비밀번호는 6자 이상으로 입력해 주세요.' };
+  }
+
+  if (!isSupabaseConfigured()) {
+    return {
+      error: '비밀번호 변경은 온라인 계정에서만 가능해요.',
+    };
+  }
+
+  const supabase = getSupabaseBrowserClient();
+
+  if (!supabase) {
+    return { error: 'Supabase 클라이언트를 초기화하지 못했어요.' };
+  }
+
+  const { data, error } = await supabase.auth.updateUser({
+    password,
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  if (!data.user) {
+    return { error: '비밀번호 변경 결과를 확인하지 못했어요.' };
+  }
+
+  return {
+    user: mapSupabaseUser(data.user) satisfies AuthUser,
   };
 }
