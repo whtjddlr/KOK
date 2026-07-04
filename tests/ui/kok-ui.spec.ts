@@ -149,6 +149,33 @@ test.describe('KoK UI regression', () => {
     await expectNoConsoleErrors(errors);
   });
 
+  test('home screen shows guest flow steps and revised auth hierarchy', async ({ page }) => {
+    const errors = installConsoleGuard(page);
+
+    await page.goto('/');
+
+    await expect(page.getByText('출발지 모으기')).toBeVisible();
+    await expect(page.getByText('이동 부담 비교')).toBeVisible();
+    await expect(page.getByText('랜덤 추첨')).toBeVisible();
+    await expect(page.getByRole('button', { name: '비회원으로 시작' })).toBeVisible();
+    await expect(page.getByText('이미 계정이 있나요?')).toBeVisible();
+    await expect(page.getByRole('button', { name: '로그인' })).toBeVisible();
+    await expectNoConsoleErrors(errors);
+  });
+
+  test('invite page without code sends users home without join or copy actions', async ({
+    page,
+  }) => {
+    const errors = installConsoleGuard(page);
+
+    await page.goto('/invite');
+
+    await expect(page.getByRole('link', { name: '홈으로 가기' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '약속방 참여하기' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '초대 링크 복사' })).toHaveCount(0);
+    await expectNoConsoleErrors(errors);
+  });
+
   test('password recovery screens are reachable and responsive', async ({ page }) => {
     const errors = installConsoleGuard(page);
 
@@ -190,6 +217,32 @@ test.describe('KoK UI regression', () => {
 
     await expectNoHorizontalOverflow(page, 'options page');
     await expectNoLegacyGreenAccent(page, 'options page');
+    await expectNoConsoleErrors(errors);
+  });
+
+  test('guest planner starts on participants tab with actionable empty guidance', async ({
+    page,
+  }) => {
+    const errors = installConsoleGuard(page);
+
+    await openGuestPlanner(page);
+
+    const participantsTab = page.getByRole('button', { name: '참여자 보기' });
+    await expect(participantsTab).toBeVisible();
+    await expect(participantsTab).toHaveClass(/bg-white/);
+    await expect(page.getByRole('button', { name: '친구 추가' })).toBeVisible();
+    await expect(page.getByText(/참여자를 2명 이상/)).toBeVisible();
+    await expectNoConsoleErrors(errors);
+  });
+
+  test('planner options screen has no apply button', async ({ page }) => {
+    const errors = installConsoleGuard(page);
+
+    await openGuestPlanner(page);
+    await page.getByRole('button', { name: '옵션 변경' }).click();
+
+    await expect(page.getByText('공평 기준')).toBeVisible();
+    await expect(page.getByRole('button', { name: '적용' })).toHaveCount(0);
     await expectNoConsoleErrors(errors);
   });
 

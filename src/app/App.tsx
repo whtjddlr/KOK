@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Download, X } from 'lucide-react';
 import { HomeScreen } from './components/HomeScreen';
-import { PlannerScreen } from './components/PlannerScreen';
-import { ResultScreen } from './components/ResultScreen';
 import { AuthMode, AuthSheet } from './components/AuthSheet';
 import { ProfileSheet } from './components/ProfileSheet';
 import {
@@ -39,6 +37,28 @@ import {
 } from './types';
 
 type Screen = 'home' | 'planner' | 'result';
+
+const PlannerScreen = lazy(() =>
+  import('./components/PlannerScreen').then((module) => ({
+    default: module.PlannerScreen,
+  })),
+);
+
+const ResultScreen = lazy(() =>
+  import('./components/ResultScreen').then((module) => ({
+    default: module.ResultScreen,
+  })),
+);
+
+function AppRouteLoader() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#f8fbf7] text-[#17233c]">
+      <div className="kok-route-loader">
+        <span />
+      </div>
+    </div>
+  );
+}
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -947,65 +967,69 @@ export default function App() {
       )}
 
       {currentScreen === 'planner' && (
-        <PlannerScreen
-          currentUserId={currentUser?.id ?? ''}
-          currentUserName={currentUser?.name ?? '게스트'}
-          currentUserAvatarUrl={currentUser?.avatarUrl ?? null}
-          currentUserGender={currentUser?.gender ?? 'unspecified'}
-          currentUserHomeLocation={currentUser?.homeLocation ?? null}
-          onlineRoom={activeRoom}
-          onOpenProfile={currentUser ? openProfile : undefined}
-          onUpdateHomeLocation={
-            currentUser
-              ? (homeLocation) =>
-                  handleProfileSave({
-                    name: currentUser.name,
-                    avatarUrl: currentUser.avatarUrl,
-                    gender: currentUser.gender,
-                    preferences: currentUser.preferences,
-                    homeLocation,
-                  })
-              : undefined
-          }
-          initialParticipants={currentParticipants}
-          selectedCategory={selectedCategory}
-          onCategoryChange={setSelectedCategory}
-          selectionMode={selectionMode}
-          onSelectionModeChange={setSelectionMode}
-          thrillLevel={thrillLevel}
-          onThrillLevelChange={setThrillLevel}
-          onBack={handleBack}
-          onComplete={handlePlannerComplete}
-        />
+        <Suspense fallback={<AppRouteLoader />}>
+          <PlannerScreen
+            currentUserId={currentUser?.id ?? ''}
+            currentUserName={currentUser?.name ?? '게스트'}
+            currentUserAvatarUrl={currentUser?.avatarUrl ?? null}
+            currentUserGender={currentUser?.gender ?? 'unspecified'}
+            currentUserHomeLocation={currentUser?.homeLocation ?? null}
+            onlineRoom={activeRoom}
+            onOpenProfile={currentUser ? openProfile : undefined}
+            onUpdateHomeLocation={
+              currentUser
+                ? (homeLocation) =>
+                    handleProfileSave({
+                      name: currentUser.name,
+                      avatarUrl: currentUser.avatarUrl,
+                      gender: currentUser.gender,
+                      preferences: currentUser.preferences,
+                      homeLocation,
+                    })
+                : undefined
+            }
+            initialParticipants={currentParticipants}
+            selectedCategory={selectedCategory}
+            onCategoryChange={setSelectedCategory}
+            selectionMode={selectionMode}
+            onSelectionModeChange={setSelectionMode}
+            thrillLevel={thrillLevel}
+            onThrillLevelChange={setThrillLevel}
+            onBack={handleBack}
+            onComplete={handlePlannerComplete}
+          />
+        </Suspense>
       )}
 
       {currentScreen === 'result' && selectedWinner && (
-        <ResultScreen
-          winner={selectedWinner}
-          participants={currentParticipants}
-          selectedCategory={selectedCategory}
-          currentUser={currentUser}
-          routeSnapshot={selectedRouteSnapshot ?? activeRoom?.selectedRouteSnapshot ?? null}
-          onlineRoomCode={activeRoom?.code ?? null}
-          redrawControl={
-            activeRoom
-              ? {
-                  isOnlineRoom: true,
-                  voteCount: redrawVoteCount,
-                  requiredVotes: redrawRequiredVotes,
-                  hasRequested: hasRequestedRedraw,
-                  hasMajority: hasRedrawMajority,
-                  canReset: hasRedrawMajority && canControlCurrentRoomDraw,
-                  isBusy: isRequestingRedraw,
-                  message: roomError,
-                  onRequest: handleRequestRedrawVote,
-                }
-              : null
-          }
-          onBack={handleBackToPlanner}
-          onNewDraw={handleBackToPlanner}
-          onHome={handleGoHome}
-        />
+        <Suspense fallback={<AppRouteLoader />}>
+          <ResultScreen
+            winner={selectedWinner}
+            participants={currentParticipants}
+            selectedCategory={selectedCategory}
+            currentUser={currentUser}
+            routeSnapshot={selectedRouteSnapshot ?? activeRoom?.selectedRouteSnapshot ?? null}
+            onlineRoomCode={activeRoom?.code ?? null}
+            redrawControl={
+              activeRoom
+                ? {
+                    isOnlineRoom: true,
+                    voteCount: redrawVoteCount,
+                    requiredVotes: redrawRequiredVotes,
+                    hasRequested: hasRequestedRedraw,
+                    hasMajority: hasRedrawMajority,
+                    canReset: hasRedrawMajority && canControlCurrentRoomDraw,
+                    isBusy: isRequestingRedraw,
+                    message: roomError,
+                    onRequest: handleRequestRedrawVote,
+                  }
+                : null
+            }
+            onBack={handleBackToPlanner}
+            onNewDraw={handleBackToPlanner}
+            onHome={handleGoHome}
+          />
+        </Suspense>
       )}
 
       <AuthSheet

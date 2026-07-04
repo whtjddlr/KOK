@@ -10,10 +10,10 @@ import {
   Smartphone,
   UsersRound,
 } from 'lucide-react';
-import homePreview from '../../../appstore-screenshots/final/01-home.png';
-import mapPreview from '../../../appstore-screenshots/final/02-map.png';
-import participantsPreview from '../../../appstore-screenshots/final/03-participants.png';
-import resultPreview from '../../../appstore-screenshots/final/06-result.png';
+import homePreview from '../../assets/landing/01-home.webp';
+import mapPreview from '../../assets/landing/02-map.webp';
+import participantsPreview from '../../assets/landing/03-participants.webp';
+import resultPreview from '../../assets/landing/06-result.webp';
 
 const flowSteps = [
   {
