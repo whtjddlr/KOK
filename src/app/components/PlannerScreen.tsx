@@ -742,7 +742,9 @@ export function PlannerScreen({
   const [runtimeAiConfig, setRuntimeAiConfig] = useState<RuntimeAiConfig | null>(null);
   const [isAiConfigOpen, setIsAiConfigOpen] = useState(false);
   const [showOptionsPage, setShowOptionsPage] = useState(false);
-  const [activePlannerPage, setActivePlannerPage] = useState<PlannerPageKey>('map');
+  const [activePlannerPage, setActivePlannerPage] = useState<PlannerPageKey>(() =>
+    initialParticipants.length ? 'map' : 'people',
+  );
   const [showAddForm, setShowAddForm] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
   const [drawSessionSnapshot, setDrawSessionSnapshot] = useState<DrawSessionSnapshot | null>(null);
@@ -1480,6 +1482,12 @@ export function PlannerScreen({
       ? '위치가 필요해요'
       : drawBlockedReason;
   const drawDisabledReason = onlineRoom ? onlineReadyBlockedReason : drawBlockedReason;
+  const participantGuideMessage =
+    participants.length === 0
+      ? '참여자를 2명 이상 추가하면 추첨할 수 있어요'
+      : participants.length === 1
+        ? '참여자를 1명 더 추가하면 추첨할 수 있어요'
+        : null;
   const readyButtonDisabled = Boolean(
     isSettingReady || (onlineReadyBlockedReason && !isCurrentActorReady),
   );
@@ -1502,16 +1510,17 @@ export function PlannerScreen({
                     ? `레디 완료 ${readyCount}/${readyRequiredCount}`
                       : `레디 ${readyCount}/${readyRequiredCount}`
     : null;
+  const onlinePlannerBlockedTitle = participantGuideMessage ?? onlineReadyBlockedReason;
   const plannerStageTitle = onlineRoom
-    ? onlineReadyBlockedReason
-      ? onlineReadyBlockedReason
+    ? onlinePlannerBlockedTitle
+      ? onlinePlannerBlockedTitle
       : isOnlineReadyComplete
         ? '준비됐어요'
         : isCurrentActorReady
           ? '레디했어요'
           : '레디해 주세요'
     : drawBlockedReason
-      ? '준비가 필요해요'
+      ? participantGuideMessage ?? '준비가 필요해요'
       : '추첨할 수 있어요';
   const plannerPages: Array<{
     key: PlannerPageKey;
@@ -3344,7 +3353,7 @@ export function PlannerScreen({
                     <button
                       type="button"
                       onClick={() => handleLocationModeChange('address')}
-                      className={`h-11 rounded-xl px-3 text-sm font-medium transition-all ${
+                      className={`h-11 rounded-xl px-3 text-sm font-medium break-keep whitespace-nowrap transition-all ${
                         locationMode === 'address'
                           ? 'bg-[#16241D] text-white shadow-sm'
                           : 'text-[#6E7C75]'
@@ -3356,7 +3365,7 @@ export function PlannerScreen({
                     <button
                       type="button"
                       onClick={() => handleLocationModeChange('current')}
-                      className={`h-11 rounded-xl px-3 text-sm font-medium transition-all ${
+                      className={`h-11 rounded-xl px-3 text-sm font-medium break-keep whitespace-nowrap transition-all ${
                         locationMode === 'current'
                           ? 'bg-[#16241D] text-white shadow-sm'
                           : 'text-[#6E7C75]'
@@ -3367,7 +3376,7 @@ export function PlannerScreen({
                     <button
                       type="button"
                       onClick={() => handleLocationModeChange('map')}
-                      className={`h-11 rounded-xl px-3 text-sm font-medium transition-all ${
+                      className={`h-11 rounded-xl px-3 text-sm font-medium break-keep whitespace-nowrap transition-all ${
                         locationMode === 'map'
                           ? 'bg-[#16241D] text-white shadow-sm'
                           : 'text-[#6E7C75]'

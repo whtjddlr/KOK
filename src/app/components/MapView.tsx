@@ -863,7 +863,7 @@ export function MapView({
         </div>
       )}
 
-      <div className="absolute right-3 bottom-3 flex flex-col gap-2 sm:right-4 sm:bottom-4">
+      <div className="absolute right-3 bottom-16 flex flex-col gap-2 sm:right-4">
         <button
           type="button"
           onClick={() => handleZoom(1)}

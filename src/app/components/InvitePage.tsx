@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, CheckCircle2, Copy, ExternalLink, MapPin, UsersRound } from 'lucide-react';
 
+const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/;
+
 function getRoomCodeFromUrl() {
   const params = new URLSearchParams(window.location.search);
   return params.get('room')?.trim().toUpperCase() ?? '';
+}
+
+function isValidRoomCode(roomCode: string) {
+  return ROOM_CODE_PATTERN.test(roomCode);
 }
 
 function getJoinUrl(roomCode: string) {
@@ -50,11 +56,12 @@ export function InvitePage() {
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<number | null>(null);
   const roomCode = useMemo(() => getRoomCodeFromUrl(), []);
+  const hasValidRoomCode = isValidRoomCode(roomCode);
   const joinUrl = useMemo(() => getJoinUrl(roomCode), [roomCode]);
 
   useEffect(() => {
-    document.title = roomCode ? `KoK 약속방 ${roomCode}` : 'KoK 약속방 초대';
-  }, [roomCode]);
+    document.title = hasValidRoomCode ? `KoK 약속방 ${roomCode}` : 'KoK 약속방 초대';
+  }, [hasValidRoomCode, roomCode]);
 
   useEffect(() => {
     return () => {
@@ -115,35 +122,47 @@ export function InvitePage() {
           <div className="mt-9 rounded-[1.75rem] border border-[#e6ece8] bg-white p-5 shadow-[0_16px_38px_rgba(20,35,29,0.08)]">
             <div className="text-sm font-semibold text-[#7a8684]">초대 코드</div>
             <div className="mt-2 rounded-2xl bg-[#f5f8f4] px-4 py-4 text-center font-mono text-3xl font-black tracking-wide text-[#16241D]">
-              {roomCode || '준비 중'}
+              {hasValidRoomCode ? roomCode : '확인 필요'}
             </div>
-            {!roomCode ? (
+            {!hasValidRoomCode ? (
               <p className="mt-3 text-sm text-[#8a9492]">
-                초대 코드가 없는 링크입니다. 홈에서 새 약속방을 만들 수 있어요.
+                초대 코드가 없거나 올바르지 않은 링크입니다. 홈에서 새 약속방을 만들 수 있어요.
               </p>
             ) : null}
           </div>
 
           <div className="mt-6 grid gap-3">
-            <a
-              href={joinUrl}
-              className="inline-flex h-14 items-center justify-center gap-2 rounded-2xl bg-[#16241D] px-5 text-base font-black text-white shadow-[0_14px_30px_rgba(20,35,29,0.18)] transition-transform active:scale-[0.98]"
-            >
-              약속방 참여하기
-              <ArrowRight className="h-5 w-5" />
-            </a>
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-[#E4EFE9] bg-white px-5 text-sm font-bold text-[#16241D] shadow-sm transition-transform active:scale-[0.98]"
-            >
-              {copied ? (
-                <CheckCircle2 className="h-4 w-4 text-[#FF6B5F]" />
-              ) : (
-                <Copy className="h-4 w-4" />
-              )}
-              {copied ? '복사됨' : '초대 링크 복사'}
-            </button>
+            {hasValidRoomCode ? (
+              <>
+                <a
+                  href={joinUrl}
+                  className="inline-flex h-14 items-center justify-center gap-2 rounded-2xl bg-[#16241D] px-5 text-base font-black text-white shadow-[0_14px_30px_rgba(20,35,29,0.18)] transition-transform active:scale-[0.98]"
+                >
+                  약속방 참여하기
+                  <ArrowRight className="h-5 w-5" />
+                </a>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-[#E4EFE9] bg-white px-5 text-sm font-bold text-[#16241D] shadow-sm transition-transform active:scale-[0.98]"
+                >
+                  {copied ? (
+                    <CheckCircle2 className="h-4 w-4 text-[#FF6B5F]" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                  {copied ? '복사됨' : '초대 링크 복사'}
+                </button>
+              </>
+            ) : (
+              <a
+                href="/"
+                className="inline-flex h-14 items-center justify-center gap-2 rounded-2xl bg-[#16241D] px-5 text-base font-black text-white shadow-[0_14px_30px_rgba(20,35,29,0.18)] transition-transform active:scale-[0.98]"
+              >
+                홈으로 가기
+                <ArrowRight className="h-5 w-5" />
+              </a>
+            )}
           </div>
         </div>
 

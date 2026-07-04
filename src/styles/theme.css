@@ -203,6 +203,7 @@
   body {
     min-height: 100dvh;
     overflow-x: hidden;
+    word-break: keep-all;
     -webkit-tap-highlight-color: transparent;
     font-family: 'Plus Jakarta Sans', Pretendard, 'Noto Sans KR', system-ui, sans-serif;
     background: linear-gradient(180deg, #FAFCFB 0%, #FFF0EE 100%);

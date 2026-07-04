@@ -603,7 +603,7 @@ export function AuthSheet({
             <button
               type="button"
               onClick={() => handleModeChange('reset-request')}
-              className="mt-3 text-sm font-semibold text-[#E85F55]"
+              className="mt-3 text-sm font-semibold text-[#6E7C75] underline underline-offset-4 transition-colors hover:text-[#16241D]"
             >
               비밀번호를 잊으셨나요?
             </button>
