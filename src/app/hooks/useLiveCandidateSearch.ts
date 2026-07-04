@@ -118,7 +118,7 @@ function getCacheKey(
   const participantKey = participants
     .map(
       (participant) =>
-        `${participant.id}:${participant.coordinates.lat.toFixed(3)}:${participant.coordinates.lng.toFixed(3)}:${participant.maxTravelTime}:${participant.gender ?? 'unspecified'}`,
+        `${participant.id}:${participant.coordinates.lat.toFixed(3)}:${participant.coordinates.lng.toFixed(3)}:${participant.maxTravelTime}:${participant.travelMode ?? 'transit'}:${participant.gender ?? 'unspecified'}`,
     )
     .join('|');
   const insightKey = insights.map((insight) => insight.candidate.id).join(',');

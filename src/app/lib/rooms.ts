@@ -273,14 +273,6 @@ function getParticipantSelectColumns() {
   return [BASE_PARTICIPANT_SELECT, ...optionalColumns].join(', ');
 }
 
-function normalizeRedrawVotes(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [] as string[];
-  }
-
-  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
-}
-
 function normalizeStringList(value: unknown) {
   if (!Array.isArray(value)) {
     return [] as string[];
@@ -343,7 +335,7 @@ function mapRoom(row: MeetingRoomRow): MeetingRoom {
     ownerId: row.owner_id,
     drawControllerId: row.draw_controller_id ?? null,
     drawReadyIds: normalizeStringList(row.draw_ready_ids),
-    redrawVotes: normalizeRedrawVotes(row.redraw_votes),
+    redrawVotes: normalizeStringList(row.redraw_votes),
     redrawRequestedAt: row.redraw_requested_at ?? null,
     selectedCategory: normalizeCategory(row.selected_category),
     selectionMode: normalizeSelectionMode(row.selected_mode),
@@ -431,10 +423,6 @@ async function attachRoomMembers(rooms: MeetingRoom[]) {
   });
 }
 
-export function isOnlineRoomsAvailable() {
-  return isSupabaseConfigured();
-}
-
 export function rememberLocalRoomParticipant(roomId: string, participantId: string) {
   if (!canUseStorage() || !roomId || !participantId) {
     return;
@@ -473,25 +461,6 @@ export function getLocalRoomParticipantIds(roomId: string) {
 
 export function getParticipantActorKey(participant: Participant) {
   return participant.createdBy || participant.id;
-}
-
-export function getPreferredDrawControllerId(
-  participants: Participant[],
-  ownerId?: string | null,
-) {
-  if (!participants.length) {
-    return null;
-  }
-
-  if (ownerId) {
-    const ownerParticipant = participants.find((participant) => participant.createdBy === ownerId);
-
-    if (ownerParticipant) {
-      return ownerId;
-    }
-  }
-
-  return getParticipantActorKey(participants[0]);
 }
 
 export function getCurrentRoomActorIds(input: {
@@ -1156,46 +1125,6 @@ export async function updateRoomPlanningCategory(input: {
   return mapRoom(data as MeetingRoomRow);
 }
 
-export async function resetRoomReadiness(input: {
-  roomId: string;
-}) {
-  if (canUseRoomControlColumns === false) {
-    return null as MeetingRoom | null;
-  }
-
-  const supabase = getClientOrThrow();
-  const { data, error } = await supabase
-    .from('meeting_rooms')
-    .update({
-      draw_controller_id: null,
-      draw_ready_ids: [],
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', input.roomId)
-    .select(getRoomSelectColumns())
-    .single();
-
-  if (error) {
-    if (isMissingRoomPlanningColumnError(error)) {
-      canUseRoomPlanningColumns = false;
-      return resetRoomReadiness(input);
-    }
-
-    if (isMissingRoomControlColumnError(error)) {
-      canUseRoomControlColumns = false;
-      return null;
-    }
-
-    throw error;
-  }
-
-  canUseRoomControlColumns = true;
-  if (canUseRoomPlanningColumns !== false) {
-    canUseRoomPlanningColumns = true;
-  }
-  return mapRoom(data as MeetingRoomRow);
-}
-
 export async function resetRoomSelection(input: {
   roomId: string;
   selectedCategory: MeetCategoryKey;
@@ -1370,21 +1299,34 @@ export async function setRoomDrawReady(input: {
     return mapRoom(rpcData as MeetingRoomRow);
   }
 
+  const getNextReadyIds = (room: MeetingRoom) => {
+    const currentReadyIds = normalizeStringList(room.drawReadyIds);
+
+    return input.ready
+      ? [...new Set([...currentReadyIds, input.actorId])]
+      : currentReadyIds.filter((readyId) => readyId !== input.actorId);
+  };
+  const updateReadyIds = (room: MeetingRoom) =>
+    supabase
+      .from('meeting_rooms')
+      .update({
+        draw_ready_ids: getNextReadyIds(room),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', input.room.id)
+      .eq('updated_at', room.updatedAt)
+      .select(getRoomSelectColumns())
+      .maybeSingle();
+
   const latestRoom =
     (await loadMeetingRoomControlStateByCode(input.room.code).catch(() => null)) ?? input.room;
-  const currentReadyIds = normalizeStringList(latestRoom.drawReadyIds);
-  const nextReadyIds = input.ready
-    ? [...new Set([...currentReadyIds, input.actorId])]
-    : currentReadyIds.filter((readyId) => readyId !== input.actorId);
-  const { data, error } = await supabase
-    .from('meeting_rooms')
-    .update({
-      draw_ready_ids: nextReadyIds,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', input.room.id)
-    .select(getRoomSelectColumns())
-    .single();
+  let { data, error } = await updateReadyIds(latestRoom);
+
+  if (!error && !data) {
+    const refreshedRoom =
+      (await loadMeetingRoomControlStateByCode(input.room.code).catch(() => null)) ?? latestRoom;
+    ({ data, error } = await updateReadyIds(refreshedRoom));
+  }
 
   if (error) {
     if (isMissingRoomPlanningColumnError(error)) {
@@ -1398,6 +1340,10 @@ export async function setRoomDrawReady(input: {
     }
 
     throw error;
+  }
+
+  if (!data) {
+    throw new Error('방 준비 상태가 방금 바뀌었어요. 다시 시도해 주세요.');
   }
 
   canUseRoomControlColumns = true;
@@ -1422,22 +1368,32 @@ export async function requestRoomRedrawVote(input: {
     return mapRoom(rpcData as MeetingRoomRow);
   }
 
+  const getNextVotes = (room: MeetingRoom) => [
+    ...new Set([...input.room.redrawVotes, ...room.redrawVotes, input.voterId]),
+  ];
+  const updateRedrawVotes = (room: MeetingRoom) =>
+    supabase
+      .from('meeting_rooms')
+      .update({
+        redraw_votes: getNextVotes(room),
+        redraw_requested_at:
+          room.redrawRequestedAt ?? input.room.redrawRequestedAt ?? new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', input.room.id)
+      .eq('updated_at', room.updatedAt)
+      .select(getRoomSelectColumns())
+      .maybeSingle();
+
   const latestRoom =
     (await loadMeetingRoomControlStateByCode(input.room.code).catch(() => null)) ?? input.room;
-  const nextVotes = [
-    ...new Set([...input.room.redrawVotes, ...latestRoom.redrawVotes, input.voterId]),
-  ];
-  const { data, error } = await supabase
-    .from('meeting_rooms')
-    .update({
-      redraw_votes: nextVotes,
-      redraw_requested_at:
-        latestRoom.redrawRequestedAt ?? input.room.redrawRequestedAt ?? new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', input.room.id)
-    .select(getRoomSelectColumns())
-    .single();
+  let { data, error } = await updateRedrawVotes(latestRoom);
+
+  if (!error && !data) {
+    const refreshedRoom =
+      (await loadMeetingRoomControlStateByCode(input.room.code).catch(() => null)) ?? latestRoom;
+    ({ data, error } = await updateRedrawVotes(refreshedRoom));
+  }
 
   if (error) {
     if (isMissingRoomPlanningColumnError(error)) {
@@ -1451,6 +1407,10 @@ export async function requestRoomRedrawVote(input: {
     }
 
     throw error;
+  }
+
+  if (!data) {
+    throw new Error('다시뽑기 투표 상태가 방금 바뀌었어요. 다시 시도해 주세요.');
   }
 
   canUseRoomControlColumns = true;

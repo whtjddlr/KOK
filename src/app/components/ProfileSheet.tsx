@@ -129,8 +129,14 @@ export function ProfileSheet({
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [isAvatarProcessing, setIsAvatarProcessing] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+
     if (!open || !currentUser) {
       setError(null);
       setIsSaving(false);
@@ -152,6 +158,15 @@ export function ProfileSheet({
     setDeleteConfirmOpen(false);
     setIsDeletingAccount(false);
   }, [currentUser, open]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+    };
+  }, []);
 
   if (!open || !currentUser) {
     return null;
@@ -218,7 +233,13 @@ export function ProfileSheet({
       }
 
       setSuccess('내 정보가 저장됐어요.');
-      window.setTimeout(onClose, 650);
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+      closeTimerRef.current = window.setTimeout(() => {
+        closeTimerRef.current = null;
+        onClose();
+      }, 650);
     } catch (saveError) {
       setError(
         saveError instanceof Error

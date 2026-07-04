@@ -66,9 +66,6 @@ export function ParticipantCard({
             )}
           </div>
 
-          <div className="hidden mt-1 text-xs text-[#9AA8A1]">
-            최대 {participant.maxTravelTime}분까지 이동 가능
-          </div>
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1">

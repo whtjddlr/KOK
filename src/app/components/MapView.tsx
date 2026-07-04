@@ -20,8 +20,6 @@ interface MapViewProps {
   colors: string[];
 }
 
-type ActiveMapDetail = { kind: 'nearby'; id: string };
-
 interface SelectedRouteOverlay {
   participant: Participant;
   route: TravelInfo;
@@ -245,12 +243,13 @@ export function MapView({
   const overlaysRef = useRef<any[]>([]);
   const mapListenersRef = useRef<any[]>([]);
   const lastViewportSignatureRef = useRef<string>('');
-  const lastWheelZoomAtRef = useRef(0);
+  const mapMountedRef = useRef(true);
+  const mapLocationRequestIdRef = useRef(0);
   const initialCenterRef = useRef(participants[0]?.coordinates ?? { lat: 37.5665, lng: 126.978 });
   const [sdkReady, setSdkReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number | null>(null);
-  const [activeDetail, setActiveDetail] = useState<ActiveMapDetail | null>(null);
+  const [activeNearbyPlaceId, setActiveNearbyPlaceId] = useState<string | null>(null);
   const [mapCenterError, setMapCenterError] = useState<string | null>(null);
   const [isLocatingMapCenter, setIsLocatingMapCenter] = useState(false);
 
@@ -324,28 +323,24 @@ export function MapView({
     [participants, candidates, selectedRoutes, nearbyPlacesWithCoordinates, pickedLocationPreview],
   );
 
-  const activeCandidateDetail = null;
-  const activeNearbyPlaceDetail =
-    activeDetail?.kind === 'nearby'
-      ? nearbyPlacesWithCoordinates.find((place) => place.id === activeDetail.id) ?? null
-      : null;
+  const activeNearbyPlaceDetail = activeNearbyPlaceId
+    ? nearbyPlacesWithCoordinates.find((place) => place.id === activeNearbyPlaceId) ?? null
+    : null;
 
   useEffect(() => {
-    if (!activeDetail) {
+    if (!activeNearbyPlaceId) {
       return;
     }
 
-    if (
-      activeDetail.kind === 'nearby' &&
-      !nearbyPlacesWithCoordinates.some((place) => place.id === activeDetail.id)
-    ) {
-      setActiveDetail(null);
+    if (!nearbyPlacesWithCoordinates.some((place) => place.id === activeNearbyPlaceId)) {
+      setActiveNearbyPlaceId(null);
     }
-  }, [activeDetail, candidates, nearbyPlacesWithCoordinates]);
+  }, [activeNearbyPlaceId, nearbyPlacesWithCoordinates]);
 
   useEffect(() => {
     let mounted = true;
     let resizeObserver: ResizeObserver | null = null;
+    let zoomChangedListener: any = null;
 
     loadNaverMapSdk()
       .then((maps) => {
@@ -387,7 +382,7 @@ export function MapView({
               disableDoubleClickZoom: false,
             });
 
-            maps.Event.addListener(mapRef.current, 'zoom_changed', () => {
+            zoomChangedListener = maps.Event.addListener(mapRef.current, 'zoom_changed', () => {
               setZoomLevel(mapRef.current?.getZoom?.() ?? null);
             });
           } else {
@@ -426,7 +421,22 @@ export function MapView({
 
     return () => {
       mounted = false;
+      if (zoomChangedListener && window.naver?.maps) {
+        window.naver.maps.Event.removeListener(zoomChangedListener);
+        zoomChangedListener = null;
+      }
       resizeObserver?.disconnect();
+      mapRef.current?.destroy?.();
+      mapRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    mapMountedRef.current = true;
+
+    return () => {
+      mapMountedRef.current = false;
+      mapLocationRequestIdRef.current += 1;
     };
   }, []);
 
@@ -491,7 +501,7 @@ export function MapView({
       if (onCandidateSelect) {
         maps.Event.addListener(marker, 'click', () => {
           onCandidateSelect(candidate.id);
-          setActiveDetail(null);
+          setActiveNearbyPlaceId(null);
           map.panTo(candidatePosition);
           if ((map.getZoom?.() ?? 0) < 12) {
             map.setZoom(12, true);
@@ -499,7 +509,7 @@ export function MapView({
         });
       } else {
         maps.Event.addListener(marker, 'click', () => {
-          setActiveDetail(null);
+          setActiveNearbyPlaceId(null);
           map.panTo(candidatePosition);
         });
       }
@@ -525,11 +535,7 @@ export function MapView({
         if ((map.getZoom?.() ?? 0) < 13) {
           map.setZoom(13, true);
         }
-        setActiveDetail((current) =>
-          current?.kind === 'nearby' && current.id === place.id
-            ? null
-            : { kind: 'nearby', id: place.id },
-        );
+        setActiveNearbyPlaceId((current) => (current === place.id ? null : place.id));
       });
 
       overlaysRef.current.push(marker);
@@ -689,45 +695,6 @@ export function MapView({
     };
   }, [locationPickerEnabled, onLocationPick, sdkReady]);
 
-  useEffect(() => {
-    const container = containerRef.current;
-
-    if (!sdkReady || !container) {
-      return;
-    }
-
-    const handleWheelZoom = (event: WheelEvent) => {
-      if (!mapRef.current) {
-        return;
-      }
-
-      event.preventDefault();
-
-      const now = window.performance.now();
-
-      if (now - lastWheelZoomAtRef.current < 120) {
-        return;
-      }
-
-      lastWheelZoomAtRef.current = now;
-      const currentZoom = mapRef.current.getZoom?.() ?? 11;
-      const nextZoom = Math.max(8, Math.min(17, currentZoom + (event.deltaY < 0 ? 1 : -1)));
-
-      if (nextZoom === currentZoom) {
-        return;
-      }
-
-      mapRef.current.setZoom(nextZoom, true);
-      setZoomLevel(nextZoom);
-    };
-
-    container.addEventListener('wheel', handleWheelZoom, { passive: false });
-
-    return () => {
-      container.removeEventListener('wheel', handleWheelZoom);
-    };
-  }, [sdkReady]);
-
   const handleZoom = (delta: number) => {
     if (!mapRef.current) {
       return;
@@ -753,8 +720,15 @@ export function MapView({
     setIsLocatingMapCenter(true);
     setMapCenterError(null);
 
+    const requestId = mapLocationRequestIdRef.current + 1;
+    mapLocationRequestIdRef.current = requestId;
+
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        if (!mapMountedRef.current || mapLocationRequestIdRef.current !== requestId) {
+          return;
+        }
+
         if (!mapRef.current || !window.naver?.maps) {
           setIsLocatingMapCenter(false);
           return;
@@ -779,6 +753,10 @@ export function MapView({
         setIsLocatingMapCenter(false);
       },
       (locationError) => {
+        if (!mapMountedRef.current || mapLocationRequestIdRef.current !== requestId) {
+          return;
+        }
+
         setMapCenterError(getMapLocationErrorMessage(locationError));
         setIsLocatingMapCenter(false);
       },
@@ -831,16 +809,9 @@ export function MapView({
             <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="min-w-0 flex-1 overflow-hidden">
                 <div className="mb-2 flex flex-wrap gap-2">
-                  {false ? (
-                    <span className="rounded-full bg-[#FFF0EE] px-3 py-1 text-[11px] text-[#FF6B5F]">
-                      후보 지역
-                    </span>
-                  ) : null}
-                  {activeNearbyPlaceDetail ? (
-                    <span className="rounded-full bg-[#FFF0EE] px-3 py-1 text-[11px] text-[#E85F55]">
-                      {getNearbyCategoryLabel(activeNearbyPlaceDetail.category)}
-                    </span>
-                  ) : null}
+                  <span className="rounded-full bg-[#FFF0EE] px-3 py-1 text-[11px] text-[#E85F55]">
+                    {getNearbyCategoryLabel(activeNearbyPlaceDetail.category)}
+                  </span>
                 </div>
                 <div className="line-clamp-2 break-words text-base leading-snug text-[#16241D] [overflow-wrap:anywhere]">
                   {activeNearbyPlaceDetail?.name}
@@ -852,7 +823,7 @@ export function MapView({
               </div>
               <button
                 type="button"
-                onClick={() => setActiveDetail(null)}
+                onClick={() => setActiveNearbyPlaceId(null)}
                 className="flex h-9 w-9 items-center justify-center rounded-full bg-[#FFFFFF] text-[#6E7C75] transition-transform active:scale-95"
                 aria-label="상세 정보 닫기"
               >
@@ -860,62 +831,37 @@ export function MapView({
               </button>
             </div>
 
-            {activeCandidateDetail ? (
-              <>
-                <p className="mt-3 break-words text-sm leading-relaxed text-[#44505b] [overflow-wrap:anywhere]">
-                  {activeCandidateDetail.description}
-                </p>
-                <div className="mt-3 flex min-w-0 items-start gap-2 text-xs text-[#6E7C75]">
-                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF6B5F]" />
-                  <span className="min-w-0 break-words leading-snug [overflow-wrap:anywhere]">{activeCandidateDetail.routeHint}</span>
-                </div>
-              </>
-            ) : null}
-
-            {activeNearbyPlaceDetail ? (
-              <>
-                <div className="mt-3 flex min-w-0 items-start gap-2 text-xs text-[#6E7C75]">
-                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF6B5F]" />
-                  <span className="min-w-0 break-words leading-snug [overflow-wrap:anywhere]">
-                    {activeNearbyPlaceDetail.roadAddress ||
-                      activeNearbyPlaceDetail.address ||
-                      `${activeNearbyPlaceDetail.name} 근처`}
-                  </span>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <a
-                    href={
-                      buildNaverMapSearchLink(activeNearbyPlaceDetail.name)
-                    }
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#16241D] px-4 text-xs text-white transition-transform active:scale-95"
-                  >
-                    네이버 보기
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                  <a
-                    href={buildNaverMapReservationLink(activeNearbyPlaceDetail.name)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#FFFFFF] px-4 text-xs text-[#16241D] transition-transform active:scale-95"
-                  >
-                    예약 검색
-                    <Search className="h-3.5 w-3.5" />
-                  </a>
-                </div>
-              </>
-            ) : null}
+            <div className="mt-3 flex min-w-0 items-start gap-2 text-xs text-[#6E7C75]">
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF6B5F]" />
+              <span className="min-w-0 break-words leading-snug [overflow-wrap:anywhere]">
+                {activeNearbyPlaceDetail.roadAddress ||
+                  activeNearbyPlaceDetail.address ||
+                  `${activeNearbyPlaceDetail.name} 근처`}
+              </span>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <a
+                href={buildNaverMapSearchLink(activeNearbyPlaceDetail.name)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#16241D] px-4 text-xs text-white transition-transform active:scale-95"
+              >
+                네이버 보기
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+              <a
+                href={buildNaverMapReservationLink(activeNearbyPlaceDetail.name)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#FFFFFF] px-4 text-xs text-[#16241D] transition-transform active:scale-95"
+              >
+                예약 검색
+                <Search className="h-3.5 w-3.5" />
+              </a>
+            </div>
           </div>
         </div>
       )}
-      <div className="pointer-events-none hidden absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs text-[#6E7C75] shadow-sm">
-        수도권 연결 지도
-      </div>
-
-      <div className="pointer-events-none hidden absolute left-4 bottom-4 bg-[#16241D]/82 text-white text-[11px] px-3 py-2 rounded-full shadow-lg backdrop-blur-sm">
-        이동 · 확대
-      </div>
 
       <div className="absolute right-3 bottom-3 flex flex-col gap-2 sm:right-4 sm:bottom-4">
         <button

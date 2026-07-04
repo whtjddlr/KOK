@@ -1,32 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
-import { Crosshair, Layers3, MapPin, MousePointer2, ScanLine, X } from 'lucide-react';
+import { motion } from 'motion/react';
+import { X } from 'lucide-react';
 import {
   Candidate,
   CandidateInsight,
   CandidateScopeKey,
-  DrawPlan,
   DrawProof,
   Participant,
   SelectionModeKey,
   ThrillLevel,
 } from '../types';
 import { buildDrawPlan } from '../lib/meeting';
-import { loadNaverMapSdk } from '../lib/naver-map';
 
 interface RandomDrawerProps {
   candidateInsights: CandidateInsight[];
-  categoryLabel?: string;
-  modeLabel?: string;
   selectionMode?: SelectionModeKey;
   thrillLevel?: ThrillLevel;
   candidateScope?: CandidateScopeKey;
   participants?: Participant[];
   drawSeed?: string;
-  lockedWinner?: CandidateInsight | null;
   canChoose?: boolean;
-  autoChoose?: boolean;
   sharedSelectedSlotIndex?: number | null;
   sharedChoicePlayAt?: string | null;
   initialLadderBars?: LadderBar[] | null;
@@ -37,14 +31,8 @@ interface RandomDrawerProps {
   onClose: () => void;
 }
 
-type DrawPhase = 'choosing' | 'boot' | 'dropping' | 'settling' | 'impact' | 'revealed';
-type DrawVariant = 'card-shuffle' | 'shell-game' | 'ladder-game' | 'spin-wheel' | 'dart-map';
-
-type PlacedCandidate = {
-  insight: CandidateInsight;
-  x: number;
-  y: number;
-};
+type DrawPhase = 'choosing' | 'impact' | 'revealed';
+type DrawVariant = 'card-shuffle' | 'ladder-game' | 'spin-wheel';
 
 type DrawChoiceSlot = {
   id: string;
@@ -72,18 +60,14 @@ const drawVariants: DrawVariant[] = [
 
 const drawVariantAccents: Record<DrawVariant, string> = {
   'card-shuffle': '#f59e0b',
-  'shell-game': '#a78bfa',
   'ladder-game': '#FF6B5F',
   'spin-wheel': '#E85F55',
-  'dart-map': '#ef4444',
 };
 
 const drawVariantDisplayLabels: Record<DrawVariant, string> = {
   'card-shuffle': '카드 셔플',
-  'shell-game': '야바위',
   'ladder-game': '사다리타기',
   'spin-wheel': '돌림판',
-  'dart-map': '지도 사인펜',
 };
 
 function getRandomVariant(): DrawVariant {
@@ -95,10 +79,6 @@ function getSeededVariant(seed: string): DrawVariant {
 }
 
 function getChoiceDisplayLabel(variant: DrawVariant, slot: DrawChoiceSlot, index: number) {
-  if (variant === 'shell-game') {
-    return ['왼쪽', '가운데', '오른쪽'][index] ?? `${slot.label}번`;
-  }
-
   if (variant === 'card-shuffle') {
     return `카드 ${slot.label}`;
   }
@@ -109,10 +89,6 @@ function getChoiceDisplayLabel(variant: DrawVariant, slot: DrawChoiceSlot, index
 
   if (variant === 'spin-wheel') {
     return `칸 ${slot.label}`;
-  }
-
-  if (variant === 'dart-map') {
-    return `사인펜 ${slot.label}`;
   }
 
   return `${slot.label}번`;
@@ -364,11 +340,7 @@ function createChoiceSeed() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function getChoiceCount(variant: DrawVariant, sourceLength: number) {
-  if (variant === 'dart-map') {
-    return Math.min(6, Math.max(sourceLength, 1));
-  }
-
+function getChoiceCount(sourceLength: number) {
   return Math.max(sourceLength, 1);
 }
 
@@ -380,7 +352,7 @@ function buildChoiceLock(
   const seed = seedOverride ?? createChoiceSeed();
   const uniqueInsights = getUniqueInsights(insights);
   const source = uniqueInsights.length ? uniqueInsights : insights;
-  const count = getChoiceCount(variant, source.length);
+  const count = getChoiceCount(source.length);
   const shuffled = [...source].sort((a, b) => {
     const aValue = seededNumber(seed, `${a.candidate.id}:${a.candidate.name}`);
     const bValue = seededNumber(seed, `${b.candidate.id}:${b.candidate.name}`);
@@ -413,34 +385,6 @@ function buildChoiceLock(
   return { seed, code, slots };
 }
 
-function layoutCandidates(insights: CandidateInsight[]): PlacedCandidate[] {
-  if (!insights.length) {
-    return [];
-  }
-
-  const latitudes = insights.map((item) => item.candidate.coordinates.lat);
-  const longitudes = insights.map((item) => item.candidate.coordinates.lng);
-  const minLat = Math.min(...latitudes);
-  const maxLat = Math.max(...latitudes);
-  const minLng = Math.min(...longitudes);
-  const maxLng = Math.max(...longitudes);
-  const latRange = Math.max(maxLat - minLat, 0.012);
-  const lngRange = Math.max(maxLng - minLng, 0.012);
-
-  return insights.map((insight, index) => {
-    const xBase = ((insight.candidate.coordinates.lng - minLng) / lngRange) * 100;
-    const yBase = (1 - (insight.candidate.coordinates.lat - minLat) / latRange) * 100;
-    const jitterX = Math.sin(index * 1.9) * 4.2;
-    const jitterY = Math.cos(index * 1.4) * 3.6;
-
-    return {
-      insight,
-      x: clamp(13 + xBase * 0.74 + jitterX, 11, 89),
-      y: clamp(15 + yBase * 0.68 + jitterY, 14, 84),
-    };
-  });
-}
-
 function getUniqueInsights(insights: CandidateInsight[]) {
   const seen = new Set<string>();
 
@@ -452,624 +396,6 @@ function getUniqueInsights(insights: CandidateInsight[]) {
     seen.add(insight.candidate.id);
     return true;
   });
-}
-
-function getUniqueVisiblePoints(points: PlacedCandidate[]) {
-  const seen = new Set<string>();
-
-  return points.filter((point) => {
-    const key = point.insight.candidate.id;
-    if (seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
-}
-
-function getPointForInsight(points: PlacedCandidate[], insight: CandidateInsight) {
-  return points.find((point) => point.insight.candidate.id === insight.candidate.id) ?? points[0] ?? null;
-}
-
-function getPinCameraState(activePoint: PlacedCandidate | null, phase: DrawPhase) {
-  if (!activePoint) {
-    return { x: '0%', y: '0%', scale: 1 };
-  }
-
-  return {
-    x: `${(50 - activePoint.x) * 0.24}%`,
-    y: `${(50 - activePoint.y) * 0.18}%`,
-    scale: phase === 'impact' ? 1.12 : phase === 'revealed' ? 1.08 : 1.02,
-  };
-}
-
-function PinMarker({
-  active = false,
-  winner = false,
-  landed = false,
-}: {
-  active?: boolean;
-  winner?: boolean;
-  landed?: boolean;
-}) {
-  return (
-    <div className="relative flex flex-col items-center">
-      {(active || winner) && (
-        <motion.div
-          className="absolute top-8 h-10 w-10 rounded-full bg-[#FF6B5F]/24"
-          animate={{ scale: [0.55, 1.8, 1.15], opacity: [0.6, 0.04, 0.2] }}
-          transition={{
-            duration: winner ? 1.1 : 0.7,
-            repeat: winner ? 2 : 0,
-            ease: 'easeOut',
-          }}
-        />
-      )}
-      <div
-        className={`relative flex h-12 w-12 items-center justify-center rounded-full shadow-[0_14px_28px_rgba(20,35,29,0.18)] ${
-          winner
-            ? 'bg-[#FF6B5F] text-white'
-            : active
-              ? 'bg-[#16241D] text-white'
-              : landed
-                ? 'bg-white text-[#16241D]'
-                : 'bg-[#FFFFFF] text-[#6E7C75]'
-        }`}
-      >
-        <MapPin className="h-6 w-6" strokeWidth={2.4} />
-      </div>
-      <div
-        className={`mt-[-2px] h-2.5 w-2.5 rotate-45 rounded-[3px] ${
-          winner ? 'bg-[#FF6B5F]' : active ? 'bg-[#16241D]' : 'bg-white'
-        }`}
-      />
-    </div>
-  );
-}
-
-function PinDropStage({
-  phase,
-  currentInsight,
-  plan,
-  placedCandidates,
-  visiblePoints,
-  activePoint,
-  winnerPoint,
-  cameraState,
-  landedIds,
-  dropKey,
-  progress,
-}: {
-  phase: DrawPhase;
-  currentInsight: CandidateInsight;
-  plan: DrawPlan;
-  placedCandidates: PlacedCandidate[];
-  visiblePoints: PlacedCandidate[];
-  activePoint: PlacedCandidate | null;
-  winnerPoint: PlacedCandidate | null;
-  cameraState: { x: string; y: string; scale: number };
-  landedIds: Set<string>;
-  dropKey: number;
-  progress: number;
-}) {
-  return (
-    <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e7edf2] bg-[#eef3f7] shadow-inner">
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(20,35,29,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(20,35,29,0.06)_1px,transparent_1px)] bg-[size:34px_34px]" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_18%,rgba(255, 107, 95,0.12),transparent_28%),radial-gradient(circle_at_78%_72%,rgba(78,205,196,0.14),transparent_25%)]" />
-
-      <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
-        <motion.div
-          className="absolute inset-0"
-          animate={cameraState}
-          transition={{ duration: phase === 'impact' ? 0.26 : 0.38, ease: 'easeOut' }}
-        >
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
-            <path
-              d="M7 24 L20 15 L35 19 L47 13 L61 21 L76 15 L91 27 L87 43 L92 60 L80 80 L63 88 L49 82 L31 90 L15 79 L12 61 L7 45 Z"
-              fill="rgba(255,255,255,0.62)"
-              stroke="rgba(20,35,29,0.08)"
-              strokeWidth="0.8"
-            />
-            <path
-              d="M9 54 C21 45, 32 58, 45 51 S71 38, 91 48"
-              fill="none"
-              stroke="rgba(78,205,196,0.48)"
-              strokeWidth="2.6"
-              strokeLinecap="round"
-            />
-            <path
-              d="M15 34 L27 30 L40 36 L54 30 L69 36 L83 32"
-              fill="none"
-              stroke="rgba(20,35,29,0.15)"
-              strokeWidth="0.9"
-              strokeDasharray="2 3"
-            />
-            <path
-              d="M17 72 L31 64 L45 69 L59 61 L74 67 L88 60"
-              fill="none"
-              stroke="rgba(20,35,29,0.13)"
-              strokeWidth="0.9"
-              strokeDasharray="2 3"
-            />
-            <text x="43" y="49" fontSize="3.2" fill="rgba(20,35,29,0.28)">
-              RIVER
-            </text>
-          </svg>
-
-          {visiblePoints.map((point) => {
-            const isActive = point.insight.candidate.id === currentInsight.candidate.id;
-            const isWinner = point.insight.candidate.id === plan.winner.candidate.id;
-            const hasLanded = landedIds.has(point.insight.candidate.id);
-            const showWinner = phase === 'revealed' && isWinner;
-
-            return (
-              <div
-                key={`landed-${point.insight.candidate.id}`}
-                className="absolute -translate-x-1/2 -translate-y-full"
-                style={{ left: `${point.x}%`, top: `${point.y}%` }}
-              >
-                <motion.div
-                  animate={{
-                    opacity: showWinner ? 1 : hasLanded ? 0.56 : 0.18,
-                    scale: showWinner ? 1.18 : hasLanded ? 0.86 : 0.68,
-                  }}
-                  transition={{ duration: 0.22 }}
-                >
-                  <PinMarker landed={hasLanded} winner={showWinner} />
-                </motion.div>
-
-                {(isActive || showWinner) && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 5, scale: 0.94 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    className="absolute left-1/2 top-full mt-1 -translate-x-1/2 rounded-full bg-white/95 px-3 py-1.5 text-xs text-[#16241D] shadow-sm"
-                  >
-                    {point.insight.candidate.name}
-                  </motion.div>
-                )}
-              </div>
-            );
-          })}
-
-          <AnimatePresence mode="wait">
-            {activePoint && phase !== 'revealed' ? (
-              <motion.div
-                key={`falling-${currentInsight.candidate.id}-${dropKey}`}
-                className="absolute -translate-x-1/2 -translate-y-full"
-                style={{ left: `${activePoint.x}%`, top: `${activePoint.y}%` }}
-                initial={{ y: -420, scale: 0.86, opacity: 0 }}
-                animate={{ y: 0, scale: phase === 'impact' ? 1.22 : 1.02, opacity: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-                transition={{
-                  type: 'spring',
-                  stiffness: phase === 'impact' ? 320 : 250,
-                  damping: phase === 'impact' ? 15 : 19,
-                  mass: 0.72,
-                }}
-              >
-                <PinMarker active winner={phase === 'impact'} />
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
-        </motion.div>
-
-        {(phase === 'impact' || phase === 'revealed') && winnerPoint ? (
-          <motion.div
-            key={`impact-${dropKey}`}
-            initial={{ opacity: 0.7, scale: 0.22 }}
-            animate={{ opacity: 0, scale: 3 }}
-            transition={{ duration: 0.58, ease: 'easeOut' }}
-            className="absolute h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#FF6B5F] bg-[#FF6B5F]/20"
-            style={{ left: `${winnerPoint.x}%`, top: `${winnerPoint.y}%` }}
-          />
-        ) : null}
-
-        {phase === 'revealed' && (
-          <DrawStatusCard phase={phase} currentInsight={currentInsight} progress={progress} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CardShuffleStage({
-  phase,
-  currentInsight,
-  plan,
-  progress,
-}: {
-  phase: DrawPhase;
-  currentInsight: CandidateInsight;
-  plan: DrawPlan;
-  progress: number;
-}) {
-  const cards = plan.finalists.length ? plan.finalists : [plan.winner];
-  const displayCards = Array.from({ length: Math.max(5, cards.length) }, (_, index) => cards[index % cards.length]);
-  const activeCandidate = phase === 'revealed' ? plan.winner : currentInsight;
-
-  return (
-    <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e8e0d6] bg-[#171f35] shadow-inner">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(255, 107, 95,0.24),transparent_28%),radial-gradient(circle_at_78%_70%,rgba(78,205,196,0.2),transparent_24%)]" />
-      <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[size:28px_28px]" />
-
-      <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
-        <div className="absolute inset-x-6 top-6 flex items-center justify-between text-xs text-white/54">
-          <span>SHUFFLE</span>
-          <span>{displayCards.length} CARDS</span>
-        </div>
-
-        <div className="absolute inset-0 flex items-center justify-center">
-          {displayCards.map((insight, index) => {
-            const isWinner = phase === 'revealed' && insight.candidate.id === plan.winner.candidate.id;
-            const offset = index - (displayCards.length - 1) / 2;
-
-            return (
-              <motion.div
-                key={`${insight.candidate.id}-${index}`}
-                className={`absolute h-56 w-40 rounded-[1.6rem] border p-4 shadow-[0_28px_55px_rgba(0,0,0,0.28)] ${
-                  isWinner
-                    ? 'border-[#FF6B5F] bg-[#FF6B5F] text-white'
-                    : 'border-white/24 bg-white text-[#16241D]'
-                }`}
-                initial={{ x: offset * 54, y: 18, rotate: offset * 9, opacity: 0 }}
-                animate={{
-                  x:
-                    phase === 'revealed'
-                      ? isWinner
-                        ? 0
-                        : offset * 84
-                      : [offset * 64, offset * -42, offset * 58],
-                  y: phase === 'revealed' ? (isWinner ? -10 : 42) : [22, -18, 16],
-                  rotate: phase === 'revealed' ? (isWinner ? 0 : offset * 12) : [offset * 8, offset * -14, offset * 10],
-                  scale: isWinner ? 1.18 : phase === 'revealed' ? 0.82 : 0.98,
-                  opacity: phase === 'revealed' && !isWinner ? 0.32 : 1,
-                }}
-                transition={{ duration: phase === 'revealed' ? 0.42 : 0.72, ease: 'easeInOut' }}
-              >
-                <div className="mb-8 flex items-center justify-between text-xs opacity-70">
-                  <span>RANDOM</span>
-                  <Layers3 className="h-4 w-4" />
-                </div>
-                <div className="mt-10 text-center">
-                  <div className="text-2xl font-semibold tracking-[-0.04em]">
-                    {isWinner ? insight.candidate.name : '?'}
-                  </div>
-                  <div className="mt-2 text-xs opacity-70">
-                    {isWinner ? '선택 완료' : '뒤집는 중'}
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-
-        {phase !== 'revealed' && (
-          <motion.div
-            className="absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-white/12 px-5 py-2 text-sm text-white backdrop-blur-sm"
-            animate={{ scale: [1, 1.05, 1], opacity: [0.72, 1, 0.72] }}
-            transition={{ duration: 0.72, repeat: 2 }}
-          >
-            {activeCandidate.candidate.name}
-          </motion.div>
-        )}
-
-        {phase === 'revealed' && (
-          <DrawStatusCard phase={phase} currentInsight={plan.winner} progress={progress} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DartMapStage({
-  phase,
-  currentInsight,
-  plan,
-  visiblePoints,
-  activePoint,
-  winnerPoint,
-  progress,
-}: {
-  phase: DrawPhase;
-  currentInsight: CandidateInsight;
-  plan: DrawPlan;
-  visiblePoints: PlacedCandidate[];
-  activePoint: PlacedCandidate | null;
-  winnerPoint: PlacedCandidate | null;
-  progress: number;
-}) {
-  const targetPoint = phase === 'impact' || phase === 'revealed' ? winnerPoint : activePoint;
-
-  return (
-    <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e4e8ee] bg-[#edf5ef] shadow-inner">
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(20,35,29,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(20,35,29,0.06)_1px,transparent_1px)] bg-[size:32px_32px]" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_48%_48%,rgba(255,255,255,0.72),transparent_18%),radial-gradient(circle_at_20%_30%,rgba(78,205,196,0.18),transparent_25%),radial-gradient(circle_at_78%_65%,rgba(255, 107, 95,0.16),transparent_24%)]" />
-
-      <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
-          <path d="M8 30 C23 16, 36 25, 47 21 S74 8, 91 25 L88 78 C71 91, 55 77, 42 84 S20 92, 9 70 Z" fill="rgba(255,255,255,0.56)" stroke="rgba(20,35,29,0.1)" />
-          <path d="M12 62 C28 48, 36 68, 51 55 S73 42, 89 56" fill="none" stroke="rgba(78,205,196,0.5)" strokeWidth="2.2" strokeLinecap="round" />
-          <path d="M18 38 L36 33 L50 39 L66 31 L84 36" fill="none" stroke="rgba(20,35,29,0.15)" strokeWidth="1" strokeDasharray="2 3" />
-        </svg>
-
-        {visiblePoints.map((point) => {
-          const isWinner = phase === 'revealed' && point.insight.candidate.id === plan.winner.candidate.id;
-          const isActive = point.insight.candidate.id === currentInsight.candidate.id;
-
-          return (
-            <div
-              key={`dart-point-${point.insight.candidate.id}`}
-              className="absolute -translate-x-1/2 -translate-y-1/2"
-              style={{ left: `${point.x}%`, top: `${point.y}%` }}
-            >
-              <motion.div
-                className={`h-5 w-5 rounded-full border-4 shadow-sm ${
-                  isWinner
-                    ? 'border-[#FF6B5F] bg-white'
-                    : isActive
-                      ? 'border-[#16241D] bg-white'
-                      : 'border-white bg-[#16241D]/52'
-                }`}
-                animate={{ scale: isWinner ? [1, 1.55, 1.08] : isActive ? 1.2 : 1 }}
-                transition={{ duration: 0.45, repeat: isWinner ? 2 : 0 }}
-              />
-            </div>
-          );
-        })}
-
-        {targetPoint && (
-          <motion.div
-            key={`dart-${currentInsight.candidate.id}-${phase}`}
-            className="absolute -translate-x-1/2 -translate-y-1/2"
-            style={{ left: `${targetPoint.x}%`, top: `${targetPoint.y}%` }}
-            initial={{ x: -360, y: -260, rotate: -38, opacity: 0 }}
-            animate={{
-              x: 0,
-              y: 0,
-              rotate: phase === 'impact' || phase === 'revealed' ? 0 : -12,
-              opacity: 1,
-              scale: phase === 'impact' || phase === 'revealed' ? 1.12 : 0.96,
-            }}
-            transition={{ type: 'spring', stiffness: 180, damping: 16, mass: 0.7 }}
-          >
-            <div className="relative">
-              <MousePointer2 className="h-16 w-16 fill-[#FF6B5F] text-[#FF6B5F] drop-shadow-[0_14px_24px_rgba(255, 107, 95,0.28)]" />
-              <Crosshair className="absolute -bottom-2 -right-2 h-8 w-8 rounded-full bg-white p-1.5 text-[#16241D] shadow-sm" />
-            </div>
-          </motion.div>
-        )}
-
-        {(phase === 'impact' || phase === 'revealed') && winnerPoint && (
-          <motion.div
-            initial={{ opacity: 0.75, scale: 0.2 }}
-            animate={{ opacity: 0, scale: 3.4 }}
-            transition={{ duration: 0.6, ease: 'easeOut' }}
-            className="absolute h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#FF6B5F] bg-[#FF6B5F]/16"
-            style={{ left: `${winnerPoint.x}%`, top: `${winnerPoint.y}%` }}
-          />
-        )}
-
-        {phase === 'revealed' && (
-          <DrawStatusCard phase={phase} currentInsight={plan.winner} progress={progress} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function RadarStage({
-  phase,
-  currentInsight,
-  plan,
-  visiblePoints,
-  winnerPoint,
-  progress,
-}: {
-  phase: DrawPhase;
-  currentInsight: CandidateInsight;
-  plan: DrawPlan;
-  visiblePoints: PlacedCandidate[];
-  winnerPoint: PlacedCandidate | null;
-  progress: number;
-}) {
-  return (
-    <div className="relative overflow-hidden rounded-[1.75rem] border border-[#233050] bg-[#10182b] shadow-inner">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(78,205,196,0.14),transparent_58%)]" />
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:34px_34px]" />
-
-      <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
-        <div className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#E85F55]/20" />
-        <div className="absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#E85F55]/20" />
-        <div className="absolute left-1/2 top-1/2 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#E85F55]/20" />
-
-        <motion.div
-          className="absolute left-1/2 top-1/2 h-[34rem] w-1 origin-top rounded-full bg-[linear-gradient(180deg,#E85F55,transparent)]"
-          animate={{ rotate: phase === 'revealed' ? 520 : 1440 }}
-          transition={{ duration: phase === 'revealed' ? 0.6 : 3.8, ease: 'easeOut' }}
-        />
-
-        {visiblePoints.map((point) => {
-          const isActive = point.insight.candidate.id === currentInsight.candidate.id;
-          const isWinner = phase === 'revealed' && point.insight.candidate.id === plan.winner.candidate.id;
-
-          return (
-            <div
-              key={`radar-${point.insight.candidate.id}`}
-              className="absolute -translate-x-1/2 -translate-y-1/2"
-              style={{ left: `${point.x}%`, top: `${point.y}%` }}
-            >
-              <motion.div
-                className={`h-4 w-4 rounded-full ${
-                  isWinner ? 'bg-[#FF6B5F]' : isActive ? 'bg-[#E85F55]' : 'bg-white/40'
-                }`}
-                animate={{
-                  scale: isWinner ? [1, 1.9, 1.2] : isActive ? [1, 1.35, 1] : 1,
-                  opacity: isWinner ? 1 : isActive ? 0.95 : 0.48,
-                }}
-                transition={{ duration: 0.5, repeat: isWinner ? 2 : isActive ? 2 : 0 }}
-              />
-              {(isActive || isWinner) && (
-                <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded-full bg-white px-3 py-1 text-xs text-[#16241D] shadow-sm">
-                  {point.insight.candidate.name}
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {phase === 'revealed' && winnerPoint && (
-          <motion.div
-            className="absolute -translate-x-1/2 -translate-y-1/2"
-            style={{ left: `${winnerPoint.x}%`, top: `${winnerPoint.y}%` }}
-            initial={{ opacity: 0, scale: 0.7 }}
-            animate={{ opacity: 1, scale: 1 }}
-          >
-            <ScanLine className="h-20 w-20 text-[#FF6B5F] drop-shadow-[0_0_22px_rgba(255, 107, 95,0.48)]" />
-          </motion.div>
-        )}
-
-        {phase === 'revealed' && (
-          <DrawStatusCard phase={phase} currentInsight={plan.winner} progress={progress} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ShellGameStage({
-  phase,
-  currentInsight,
-  plan,
-  progress,
-  selectedLabel,
-}: {
-  phase: DrawPhase;
-  currentInsight: CandidateInsight;
-  plan: DrawPlan;
-  progress: number;
-  selectedLabel: string;
-}) {
-  const selectedIndex = Math.max(Number(selectedLabel) - 1, 0);
-
-  return (
-    <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e7ddff] bg-[#f7f2ff] shadow-inner">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_18%,rgba(167,139,250,0.22),transparent_30%),radial-gradient(circle_at_82%_72%,rgba(255, 107, 95,0.16),transparent_24%)]" />
-      <div className="relative h-[25rem] overflow-hidden sm:h-[29rem]">
-        <div className="absolute inset-x-4 top-8 grid grid-cols-3 gap-4">
-          {Array.from({ length: 3 }, (_, index) => {
-            const isPicked = index === selectedIndex;
-
-            return (
-              <motion.div
-                key={index}
-                className="relative flex flex-col items-center"
-                animate={{
-                  x: phase === 'revealed' ? 0 : index % 2 === 0 ? [0, 18, -10, 0] : [0, -18, 10, 0],
-                  y: phase === 'revealed' && isPicked ? -22 : 0,
-                }}
-                transition={{ duration: 0.7, repeat: phase === 'revealed' ? 0 : 2, repeatDelay: 0.12 }}
-              >
-                <div
-                  className={`h-36 w-full rounded-b-[4rem] rounded-t-[1.4rem] shadow-[0_24px_48px_rgba(20,35,29,0.18)] ${
-                    isPicked && phase === 'revealed' ? 'bg-[#a78bfa]' : 'bg-white'
-                  }`}
-                />
-                <div className="mt-3 rounded-full bg-[#16241D]/10 px-3 py-1 text-xs text-[#16241D]">
-                  {index + 1}
-                </div>
-                {isPicked && phase === 'revealed' && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8, scale: 0.94 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    className="absolute top-40 rounded-2xl bg-white px-4 py-3 text-center shadow-sm"
-                  >
-                    <div className="text-lg font-semibold tracking-[-0.03em] text-[#16241D]">
-                      {plan.winner.candidate.name}
-                    </div>
-                    <div className="mt-1 text-xs text-[#9AA8A1]">선택한 컵</div>
-                  </motion.div>
-                )}
-              </motion.div>
-            );
-          })}
-        </div>
-
-        {phase !== 'revealed' && (
-          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-white/86 px-5 py-2 text-sm text-[#16241D] shadow-sm">
-            {currentInsight.candidate.name}
-          </div>
-        )}
-
-        {phase === 'revealed' && (
-          <DrawStatusCard phase={phase} currentInsight={plan.winner} progress={progress} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DrawVariantIcon({
-  variant,
-  className = 'h-5 w-5',
-}: {
-  variant: DrawVariant;
-  className?: string;
-}) {
-  if (variant === 'card-shuffle') {
-    return <Layers3 className={className} />;
-  }
-
-  if (variant === 'dart-map') {
-    return <Crosshair className={className} />;
-  }
-
-  if (variant === 'ladder-game') {
-    return <ScanLine className={className} />;
-  }
-
-  if (variant === 'spin-wheel') {
-    return <Crosshair className={className} />;
-  }
-
-  return <MapPin className={className} />;
-}
-
-function CardBackGraphic({
-  label,
-  accent,
-}: {
-  label: string;
-  accent: string;
-}) {
-  return (
-    <div className="relative mx-auto h-48 w-32 [perspective:900px]">
-      <motion.div
-        className="absolute inset-0 rounded-[1.35rem] bg-white shadow-[0_24px_60px_rgba(0,0,0,0.34)] [transform-style:preserve-3d]"
-        whileHover={{ rotateY: -10, rotateX: 8, y: -10 }}
-        transition={{ type: 'spring', stiffness: 260, damping: 18 }}
-      >
-        <div
-          className="absolute inset-[0.45rem] overflow-hidden rounded-[1rem]"
-          style={{
-            background: `radial-gradient(circle at 22% 18%, rgba(255,255,255,0.5), transparent 28%), linear-gradient(145deg, ${accent}, #16241D 72%)`,
-          }}
-        >
-          <div className="absolute inset-0 opacity-35 [background:radial-gradient(circle_at_center,transparent_0_28%,rgba(255,255,255,0.9)_29%,transparent_31%),linear-gradient(45deg,rgba(255,255,255,0.18)_1px,transparent_1px)] bg-[size:26px_26px,12px_12px]" />
-          <motion.div
-            className="absolute inset-y-0 -left-1/2 w-1/2 -skew-x-12 bg-white/45"
-            animate={{ x: ['0%', '330%'], opacity: [0, 0.8, 0] }}
-            transition={{ duration: 1.2, repeat: 1, repeatDelay: 1.4 }}
-          />
-          <div className="absolute left-3 top-3 text-xs font-semibold text-white/80">{label}</div>
-          <div className="absolute bottom-3 right-3 rotate-180 text-xs font-semibold text-white/80">{label}</div>
-          <div className="absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/45 bg-white/12 text-3xl text-white">
-            ?
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  );
 }
 
 function TarotChoiceCard({
@@ -1548,34 +874,6 @@ function SpinWheelChoice({
   );
 }
 
-function CupGraphic({
-  label,
-  active = true,
-}: {
-  label: string;
-  active?: boolean;
-}) {
-  return (
-    <div className="relative mx-auto flex h-44 w-36 flex-col items-center justify-end">
-      <motion.div
-        className="relative h-32 w-32 rounded-b-[4.5rem] rounded-t-[1.4rem] shadow-[0_26px_55px_rgba(0,0,0,0.28)]"
-        style={{
-          background:
-            'linear-gradient(115deg, rgba(255,255,255,0.98), rgba(226,218,206,0.98) 42%, rgba(151,135,115,0.98))',
-          opacity: active ? 1 : 0.48,
-        }}
-        animate={active ? { x: [0, 12, -10, 0], rotate: [0, 4, -4, 0] } : { opacity: 0.48 }}
-        transition={{ duration: 1.05, repeat: active ? 2 : 0, repeatDelay: 0.16 }}
-      >
-        <div className="absolute inset-x-2 top-2 h-9 rounded-[50%] bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.96),rgba(181,166,145,0.88))] shadow-inner" />
-        <div className="absolute left-5 top-8 h-20 w-5 rounded-full bg-white/55 blur-[1px]" />
-        <div className="absolute bottom-3 left-1/2 h-5 w-20 -translate-x-1/2 rounded-[50%] bg-black/10 blur-sm" />
-      </motion.div>
-      <div className="mt-3 rounded-full bg-white/12 px-3 py-1 text-xs text-white/85">{label}</div>
-    </div>
-  );
-}
-
 function LadderBoard({
   lock,
   accent,
@@ -1788,418 +1086,10 @@ function LadderBoard({
   );
 }
 
-function DartGraphic({ compact = false }: { compact?: boolean }) {
-  return (
-    <div className={`relative ${compact ? 'h-12 w-16' : 'h-20 w-28'} rotate-[-28deg]`}>
-      <div className="absolute left-5 top-1/2 h-1.5 w-16 -translate-y-1/2 rounded-full bg-[#16241D] shadow-[0_8px_18px_rgba(0,0,0,0.24)]" />
-      <div className="absolute right-2 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[6px] border-l-[18px] border-y-transparent border-l-[#f8fafc]" />
-      <div className="absolute left-0 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[11px] border-r-[28px] border-y-transparent border-r-[#FF6B5F]" />
-      <div className="absolute left-1 top-[calc(50%-13px)] h-0 w-0 border-x-[11px] border-b-[16px] border-x-transparent border-b-[#ffd166]" />
-      <div className="absolute left-1 top-[calc(50%-3px)] h-0 w-0 border-x-[11px] border-t-[16px] border-x-transparent border-t-[#E85F55]" />
-    </div>
-  );
-}
-
-function MarkerPenGraphic({ compact = false }: { compact?: boolean }) {
-  return (
-    <div className={`relative ${compact ? 'h-12 w-28' : 'h-16 w-40'}`}>
-      <div
-        className={`absolute left-0 top-1/2 h-0 w-0 -translate-y-1/2 border-y-transparent ${
-          compact
-            ? 'border-y-[6px] border-r-[18px] border-r-[#16241D]'
-            : 'border-y-[8px] border-r-[24px] border-r-[#16241D]'
-        }`}
-      />
-      <div
-        className={`absolute top-1/2 -translate-y-1/2 rounded-r-full rounded-l-md bg-[#16241D] shadow-[0_18px_34px_rgba(20,35,29,0.24)] ${
-          compact ? 'left-4 h-5 w-20' : 'left-5 h-7 w-28'
-        }`}
-      >
-        <div className="absolute inset-y-1 left-5 right-3 rounded-full bg-white/12" />
-        <div className="absolute bottom-1.5 left-6 right-8 h-1 rounded-full bg-white/22" />
-      </div>
-      <div
-        className={`absolute top-1/2 -translate-y-1/2 rounded-r-full bg-[#FF6B5F] ${
-          compact ? 'left-[5.7rem] h-7 w-8' : 'left-[7.5rem] h-9 w-11'
-        }`}
-      />
-      <div
-        className={`absolute top-1/2 -translate-y-1/2 rounded-full border border-white/70 bg-[#f8fafc] ${
-          compact ? 'left-[6.9rem] h-6 w-4' : 'left-[9.2rem] h-8 w-5'
-        }`}
-      />
-    </div>
-  );
-}
-
-function MapSnapshotLayer({
-  points,
-  winnerId,
-  activeId,
-  showLabelLimit = 7,
-}: {
-  points: PlacedCandidate[];
-  winnerId?: string | null;
-  activeId?: string | null;
-  showLabelLimit?: number;
-}) {
-  return (
-    <div className="absolute inset-0 overflow-hidden rounded-[1.5rem] bg-[#f6f2e9]">
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
-        <path
-          d="M-8 62 C12 51, 22 69, 38 58 S62 45, 78 54 S101 47, 110 56 L110 100 L-8 100 Z"
-          fill="rgba(122,190,214,0.42)"
-        />
-        <path
-          d="M12 9 C25 3, 39 8, 43 20 C47 34, 30 43, 19 37 C8 31, 0 16, 12 9 Z"
-          fill="rgba(116,180,107,0.22)"
-        />
-        <path
-          d="M66 7 C79 5, 91 14, 93 27 C95 42, 75 46, 67 34 C60 24, 55 11, 66 7 Z"
-          fill="rgba(116,180,107,0.2)"
-        />
-        <path
-          d="M-3 33 C15 26, 29 39, 44 34 S73 18, 103 27"
-          fill="none"
-          stroke="rgba(243,167,61,0.8)"
-          strokeWidth="3.2"
-          strokeLinecap="round"
-        />
-        <path
-          d="M-3 33 C15 26, 29 39, 44 34 S73 18, 103 27"
-          fill="none"
-          stroke="rgba(255,247,230,0.92)"
-          strokeWidth="1.35"
-          strokeLinecap="round"
-        />
-        <path
-          d="M5 78 C24 68, 38 78, 53 68 S78 54, 100 62"
-          fill="none"
-          stroke="rgba(243,167,61,0.72)"
-          strokeWidth="2.6"
-          strokeLinecap="round"
-        />
-        <path
-          d="M16 -5 C21 18, 28 35, 20 58 S19 82, 31 105"
-          fill="none"
-          stroke="rgba(243,167,61,0.55)"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        <path
-          d="M58 -5 C52 18, 60 39, 55 57 S48 78, 56 105"
-          fill="none"
-          stroke="rgba(243,167,61,0.45)"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-        />
-        <path
-          d="M6 48 L19 41 L32 47 L47 39 L63 45 L79 37 L93 43"
-          fill="none"
-          stroke="rgba(20,35,29,0.14)"
-          strokeWidth="0.9"
-          strokeDasharray="2 3"
-        />
-        <path
-          d="M8 18 L22 23 L36 18 L51 25 L66 19 L84 24"
-          fill="none"
-          stroke="rgba(20,35,29,0.11)"
-          strokeWidth="0.8"
-          strokeDasharray="2 3"
-        />
-        <text x="13" y="33" fontSize="5" fontWeight="700" fill="rgba(20,35,29,0.3)">
-          은평
-        </text>
-        <text x="39" y="45" fontSize="5" fontWeight="700" fill="rgba(20,35,29,0.28)">
-          종로
-        </text>
-        <text x="65" y="52" fontSize="5" fontWeight="700" fill="rgba(20,35,29,0.28)">
-          성동
-        </text>
-        <text x="45" y="78" fontSize="5" fontWeight="700" fill="rgba(20,35,29,0.28)">
-          용산
-        </text>
-      </svg>
-
-      <div className="absolute left-3 top-3 rounded-full bg-white/86 px-3 py-1.5 text-[11px] font-semibold text-[#16241D] shadow-sm">
-        후보 지도 캡처
-      </div>
-      <div className="absolute bottom-3 left-3 rounded-full bg-white/88 px-3 py-1.5 text-xs text-[#6E7C75] shadow-sm">
-        Zoom 11
-      </div>
-
-      {points.map((point, index) => {
-        const candidateId = point.insight.candidate.id;
-        const isWinner = candidateId === winnerId;
-        const isActive = candidateId === activeId;
-        const showLabel = isWinner || isActive || index < showLabelLimit;
-
-        return (
-          <div
-            key={`snapshot-${candidateId}`}
-            className="absolute -translate-x-1/2 -translate-y-1/2"
-            style={{ left: `${point.x}%`, top: `${point.y}%` }}
-          >
-            <motion.div
-              className={`relative flex h-6 w-6 items-center justify-center rounded-full border-[3px] shadow-[0_8px_18px_rgba(20,35,29,0.16)] ${
-                isWinner
-                  ? 'border-white bg-[#FF6B5F]'
-                  : isActive
-                    ? 'border-white bg-[#16241D]'
-                    : 'border-white bg-[#4f7cff]'
-              }`}
-              animate={{
-                scale: isWinner ? [1, 1.34, 1.08] : isActive ? [1, 1.18, 1] : 1,
-              }}
-              transition={{ duration: 0.6, repeat: isWinner ? 2 : 0 }}
-            >
-              <span className="text-[10px] font-bold text-white">{index + 1}</span>
-              {isWinner && (
-                <motion.span
-                  className="absolute inset-[-12px] rounded-full border-2 border-[#FF6B5F]"
-                  initial={{ scale: 0.3, opacity: 0.65 }}
-                  animate={{ scale: 1.9, opacity: 0 }}
-                  transition={{ duration: 0.8, repeat: 2, ease: 'easeOut' }}
-                />
-              )}
-            </motion.div>
-
-            {showLabel && (
-              <div
-                className={`absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] shadow-sm ${
-                  isWinner ? 'bg-[#FF6B5F] text-white' : 'bg-white/92 text-[#16241D]'
-                }`}
-              >
-                {point.insight.candidate.name}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function escapeMapLabel(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-function createLiveCandidateMarkerIcon(
-  name: string,
-  index: number,
-  state: 'normal' | 'active' | 'winner',
-) {
-  const isWinner = state === 'winner';
-  const isActive = state === 'active';
-  const markerColor = isWinner ? '#FF6B5F' : isActive ? '#16241D' : '#E85F55';
-  const label = escapeMapLabel(name);
-
-  return {
-    content: `
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;transform:translateY(-8px);">
-        <div style="position:relative;display:flex;align-items:center;justify-content:center;width:${isWinner ? 34 : 28}px;height:${isWinner ? 34 : 28}px;border-radius:9999px;background:${markerColor};color:white;border:3px solid rgba(255,255,255,0.96);box-shadow:0 12px 26px rgba(20,35,29,0.22);font-size:12px;font-weight:800;">
-          ${index + 1}
-          ${isWinner ? '<span style="position:absolute;inset:-12px;border:2px solid rgba(255, 107, 95,0.72);border-radius:9999px;"></span>' : ''}
-        </div>
-        <div style="max-width:124px;padding:4px 8px;border-radius:9999px;background:${isWinner ? 'rgba(255, 107, 95,0.96)' : 'rgba(255,255,255,0.94)'};color:${isWinner ? '#ffffff' : '#16241D'};font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 8px 18px rgba(20,35,29,0.12);">
-          ${label}
-        </div>
-      </div>
-    `,
-    size: new window.naver.maps.Size(140, isWinner ? 68 : 60),
-    anchor: new window.naver.maps.Point(70, isWinner ? 34 : 30),
-  };
-}
-
-function LiveCandidateMapLayer({
-  points,
-  winnerId,
-  activeId,
-}: {
-  points: PlacedCandidate[];
-  winnerId?: string | null;
-  activeId?: string | null;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<any>(null);
-  const overlaysRef = useRef<any[]>([]);
-  const [sdkError, setSdkError] = useState<string | null>(null);
-  const [sdkReady, setSdkReady] = useState(false);
-  const pointSignature = useMemo(
-    () =>
-      JSON.stringify(
-        points.map((point) => [
-          point.insight.candidate.id,
-          point.insight.candidate.coordinates.lat,
-          point.insight.candidate.coordinates.lng,
-        ]),
-      ),
-    [points],
-  );
-
-  useEffect(() => {
-    let mounted = true;
-    let resizeObserver: ResizeObserver | null = null;
-
-    loadNaverMapSdk()
-      .then((maps) => {
-        if (!mounted || !containerRef.current) {
-          return;
-        }
-
-        const initializeOrResizeMap = () => {
-          if (!containerRef.current) {
-            return false;
-          }
-
-          const rect = containerRef.current.getBoundingClientRect();
-          const width = Math.max(1, Math.round(rect.width));
-          const height = Math.max(1, Math.round(rect.height));
-
-          if (width <= 1 || height <= 1) {
-            return false;
-          }
-
-          const firstPoint = points[0]?.insight.candidate.coordinates ?? { lat: 37.5665, lng: 126.978 };
-
-          if (!mapRef.current) {
-            mapRef.current = new maps.Map(containerRef.current, {
-              center: new maps.LatLng(firstPoint.lat, firstPoint.lng),
-              zoom: 11,
-              minZoom: 8,
-              maxZoom: 17,
-              size: new maps.Size(width, height),
-              zoomControl: false,
-              mapDataControl: false,
-              scaleControl: false,
-              logoControl: false,
-              keyboardShortcuts: false,
-              scrollWheel: false,
-              draggable: false,
-              pinchZoom: false,
-              disableDoubleTapZoom: true,
-              disableDoubleClickZoom: true,
-            });
-          } else {
-            mapRef.current.setSize(new maps.Size(width, height));
-          }
-
-          setSdkReady(true);
-          return true;
-        };
-
-        if (!initializeOrResizeMap() && containerRef.current && typeof ResizeObserver !== 'undefined') {
-          resizeObserver = new ResizeObserver(() => {
-            if (initializeOrResizeMap()) {
-              resizeObserver?.disconnect();
-            }
-          });
-          resizeObserver.observe(containerRef.current);
-          return;
-        }
-
-        if (containerRef.current && typeof ResizeObserver !== 'undefined') {
-          resizeObserver = new ResizeObserver(() => {
-            initializeOrResizeMap();
-          });
-          resizeObserver.observe(containerRef.current);
-        }
-      })
-      .catch((error: Error) => {
-        if (mounted) {
-          setSdkError(error.message);
-        }
-      });
-
-    return () => {
-      mounted = false;
-      resizeObserver?.disconnect();
-      overlaysRef.current.forEach((overlay) => overlay.setMap(null));
-      overlaysRef.current = [];
-    };
-  }, [pointSignature, points]);
-
-  useEffect(() => {
-    if (!sdkReady || !mapRef.current || !window.naver?.maps || !points.length) {
-      return;
-    }
-
-    const map = mapRef.current;
-    const maps = window.naver.maps;
-
-    overlaysRef.current.forEach((overlay) => overlay.setMap(null));
-    overlaysRef.current = [];
-
-    const bounds = new maps.LatLngBounds();
-
-    points.forEach((point, index) => {
-      const candidate = point.insight.candidate;
-      const position = new maps.LatLng(candidate.coordinates.lat, candidate.coordinates.lng);
-      const state =
-        candidate.id === winnerId
-          ? 'winner'
-          : candidate.id === activeId
-            ? 'active'
-            : 'normal';
-
-      bounds.extend(position);
-
-      const marker = new maps.Marker({
-        map,
-        position,
-        title: candidate.name,
-        icon: createLiveCandidateMarkerIcon(candidate.name, index, state),
-      });
-
-      overlaysRef.current.push(marker);
-    });
-
-    if (points.length > 1) {
-      map.fitBounds(bounds, {
-        top: 46,
-        right: 34,
-        bottom: 64,
-        left: 34,
-      });
-    } else {
-      const only = points[0].insight.candidate.coordinates;
-      map.setCenter(new maps.LatLng(only.lat, only.lng));
-      map.setZoom(12);
-    }
-
-    return () => {
-      overlaysRef.current.forEach((overlay) => overlay.setMap(null));
-      overlaysRef.current = [];
-    };
-  }, [activeId, pointSignature, points, sdkReady, winnerId]);
-
-  if (sdkError) {
-    return <MapSnapshotLayer points={points} winnerId={winnerId} activeId={activeId} />;
-  }
-
-  return (
-    <div className="absolute inset-0 overflow-hidden rounded-[1.5rem] bg-[#eef3f7]">
-      <div ref={containerRef} className="absolute inset-0" />
-      {!sdkReady && (
-        <MapSnapshotLayer points={points} winnerId={winnerId} activeId={activeId} />
-      )}
-      <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-[#16241D] shadow-sm">
-        실시간 후보 지도
-      </div>
-    </div>
-  );
-}
-
 function DrawChoiceStage({
   variant,
   lock,
   ladderBars,
-  candidatePoints = [],
   onLadderBarsChange,
   onChoose,
   waitingMessage,
@@ -2207,31 +1097,13 @@ function DrawChoiceStage({
   variant: DrawVariant;
   lock: DrawChoiceLock;
   ladderBars: LadderBar[];
-  candidatePoints?: PlacedCandidate[];
   onLadderBarsChange?: (bars: LadderBar[]) => void;
   onChoose?: (index: number) => void;
   waitingMessage?: string;
 }) {
   const accent = drawVariantAccents[variant];
-  const isMapChoice = variant === 'dart-map';
   const isLadder = variant === 'ladder-game';
-  const fallbackMapPoints: PlacedCandidate[] = lock.slots.map((slot) => ({
-    insight: slot.insight,
-    x: slot.x,
-    y: slot.y,
-  }));
-  const mapPoints = candidatePoints.length ? candidatePoints : fallbackMapPoints;
   const canChoose = Boolean(onChoose);
-  const action =
-    variant === 'card-shuffle'
-      ? '이 카드 뽑기'
-      : variant === 'shell-game'
-        ? '이 컵 열기'
-        : variant === 'ladder-game'
-          ? '이 사다리 타기'
-          : variant === 'spin-wheel'
-            ? '돌림판 돌리기'
-            : '사인펜 찍기';
 
   return (
     <div className="relative overflow-visible">
@@ -2244,28 +1116,7 @@ function DrawChoiceStage({
               : 'relative px-1 py-2 sm:px-2'
         }
       >
-        {isMapChoice ? (
-          <div className="relative h-[19rem] overflow-hidden rounded-[1.5rem] border border-white/70 bg-[#dfe8df] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.42)]">
-            <LiveCandidateMapLayer points={mapPoints} />
-            <motion.div
-              className="pointer-events-none absolute right-6 top-5 origin-left"
-              animate={{ x: [0, -12, 0], y: [0, 7, 0], rotate: [-26, -18, -26] }}
-              transition={{ duration: 1.6, repeat: 2, ease: 'easeInOut' }}
-            >
-              <MarkerPenGraphic compact />
-            </motion.div>
-
-            <button
-              type="button"
-              onClick={() => onChoose?.(Math.floor(Math.random() * lock.slots.length))}
-              disabled={!canChoose}
-              className="absolute bottom-4 left-1/2 inline-flex h-12 -translate-x-1/2 items-center justify-center gap-2 rounded-full bg-[#16241D] px-5 text-sm font-semibold text-white shadow-[0_18px_34px_rgba(20,35,29,0.22)] transition-transform active:scale-95 disabled:opacity-50"
-            >
-              <Crosshair className="h-4 w-4" />
-              {action}
-            </button>
-          </div>
-        ) : variant === 'card-shuffle' ? (
+        {variant === 'card-shuffle' ? (
           <TarotCardGrid lock={lock} accent={accent} onChoose={onChoose} />
         ) : variant === 'ladder-game' ? (
           <LadderBoard
@@ -2277,56 +1128,7 @@ function DrawChoiceStage({
           />
         ) : variant === 'spin-wheel' ? (
           <SpinWheelChoice lock={lock} accent={accent} onChoose={onChoose} />
-        ) : (
-          <div
-            className={`grid gap-3 ${
-              variant === 'shell-game' ? 'sm:grid-cols-3' : 'sm:grid-cols-5'
-            }`}
-          >
-            {lock.slots.map((slot, index) => {
-              const choiceLabel = getChoiceDisplayLabel(variant, slot, index);
-
-              return (
-                <motion.button
-                  key={slot.id}
-                  type="button"
-                  onClick={() => onChoose?.(index)}
-                  disabled={!canChoose}
-                  className={`group relative min-h-[10rem] overflow-hidden border p-4 text-left transition-transform active:scale-95 ${
-                    variant === 'shell-game'
-                      ? 'rounded-[1.4rem] border-white/0 bg-transparent shadow-none'
-                      : variant === 'card-shuffle'
-                        ? 'rounded-[1.4rem] border-white/0 bg-transparent shadow-none'
-                        : 'rounded-[1.4rem] border-white/20 bg-white shadow-[0_18px_42px_rgba(0,0,0,0.22)]'
-                  }`}
-                  initial={{ opacity: 0, y: 22, rotate: variant === 'shell-game' ? 0 : index % 2 === 0 ? -2 : 2 }}
-                  animate={{
-                    opacity: 1,
-                    y: variant === 'shell-game' ? [0, -10, 0] : 0,
-                    x: variant === 'shell-game' ? [0, index % 2 === 0 ? 10 : -10, 0] : 0,
-                    rotate: variant === 'card-shuffle' ? (index % 2 === 0 ? -2 : 2) : 0,
-                  }}
-                  whileHover={canChoose ? { y: -8, rotate: 0 } : undefined}
-                  transition={{
-                    delay: index * 0.06,
-                    duration: variant === 'shell-game' ? 1.05 : 0.34,
-                    repeat: variant === 'shell-game' ? 2 : 0,
-                    repeatDelay: 0.15,
-                  }}
-                  aria-label={`${action} ${choiceLabel}`}
-                >
-                  {variant === 'card-shuffle' ? (
-                    <CardBackGraphic label={choiceLabel} accent={accent} />
-                  ) : variant === 'shell-game' ? (
-                    <CupGraphic label={choiceLabel} />
-                  ) : (
-                    <DartGraphic />
-                  )}
-                </motion.button>
-              );
-            })}
-          </div>
-        )}
+        ) : null}
 
         {!canChoose && waitingMessage ? (
           <div className="absolute inset-x-4 bottom-4 z-20 rounded-2xl border border-white/80 bg-white/95 px-4 py-3 text-center text-sm font-semibold text-[#16241D] shadow-[0_18px_42px_rgba(20,35,29,0.14)]">
@@ -2340,37 +1142,19 @@ function DrawChoiceStage({
 
 function PickedChoiceStage({
   variant,
-  slot,
   selectedIndex = 0,
-  choiceLabel,
   lock,
   ladderBars,
-  plan,
-  candidatePoints = [],
-  winnerPoint,
   phase,
 }: {
   variant: DrawVariant;
-  slot: DrawChoiceSlot;
   selectedIndex?: number;
-  choiceLabel: string;
   lock: DrawChoiceLock;
   ladderBars: LadderBar[];
-  plan: DrawPlan;
-  candidatePoints?: PlacedCandidate[];
-  winnerPoint: PlacedCandidate | null;
   phase: DrawPhase;
 }) {
   const accent = drawVariantAccents[variant];
-  const candidate = variant === 'dart-map' ? plan.winner.candidate : slot.insight.candidate;
   const isRevealed = phase === 'revealed';
-  const fallbackWinnerPoint = {
-    insight: plan.winner,
-    x: slot.x,
-    y: slot.y,
-  };
-  const mapWinnerPoint = winnerPoint ?? fallbackWinnerPoint;
-  const mapPoints = candidatePoints.length ? candidatePoints : [fallbackWinnerPoint];
   const isLadder = variant === 'ladder-game';
 
   return (
@@ -2423,59 +1207,6 @@ function PickedChoiceStage({
                 revealed={isRevealed}
               />
             </div>
-          ) : variant === 'shell-game' ? (
-            <div className="grid w-full max-w-xl grid-cols-3 gap-3">
-              {Array.from({ length: 3 }, (_, index) => {
-                const active = `${index + 1}` === slot.label;
-
-                return (
-                  <motion.div
-                    key={index}
-                    className="relative flex flex-col items-center"
-                    animate={{
-                      y: active ? (isRevealed ? -34 : [-4, -18, -4]) : 0,
-                      opacity: active ? 1 : 0.36,
-                    }}
-                    transition={{ duration: 0.54, repeat: active && !isRevealed ? 1 : 0 }}
-                  >
-                    <div className="relative h-40 w-full">
-                      <div
-                        className={`absolute left-1/2 top-0 h-32 w-32 -translate-x-1/2 rounded-b-[4.5rem] rounded-t-[1.4rem] shadow-[0_26px_55px_rgba(0,0,0,0.3)] ${
-                          active && isRevealed ? 'opacity-100' : active ? 'opacity-95' : 'opacity-45'
-                        }`}
-                        style={{
-                          background:
-                            'linear-gradient(115deg, rgba(255,255,255,0.98), rgba(226,218,206,0.98) 42%, rgba(151,135,115,0.98))',
-                        }}
-                      >
-                        <div className="absolute inset-x-2 top-2 h-9 rounded-[50%] bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.96),rgba(181,166,145,0.88))] shadow-inner" />
-                        <div className="absolute left-5 top-8 h-20 w-5 rounded-full bg-white/55 blur-[1px]" />
-                      </div>
-                      {active && isRevealed ? (
-                        <motion.div
-                          className="absolute bottom-1 left-1/2 h-8 w-8 -translate-x-1/2 rounded-full"
-                          style={{ backgroundColor: accent }}
-                          initial={{ scale: 0.2, opacity: 0 }}
-                          animate={{ scale: [0.2, 1.35, 1], opacity: 1 }}
-                          transition={{ duration: 0.38 }}
-                        />
-                      ) : null}
-                    </div>
-                    {active && isRevealed ? (
-                      <motion.div
-                        initial={{ opacity: 0, y: 18, scale: 0.86 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        transition={{ type: 'spring', stiffness: 380, damping: 18 }}
-                        className="absolute top-36 rounded-2xl px-4 py-3 text-center text-white shadow-[0_18px_42px_rgba(0,0,0,0.22)]"
-                        style={{ backgroundColor: accent }}
-                      >
-                        {candidate.name}
-                      </motion.div>
-                    ) : null}
-                  </motion.div>
-                );
-              })}
-            </div>
           ) : variant === 'ladder-game' ? (
             <div className="w-full">
               <LadderBoard
@@ -2497,150 +1228,7 @@ function PickedChoiceStage({
                 dragStrength={1}
               />
             </div>
-          ) : variant === 'dart-map' ? (
-            <div className="relative h-[20rem] w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-white/70 bg-[#dfe8df] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.42)]">
-              <motion.div
-                className="absolute inset-3 origin-center overflow-hidden rounded-[1.5rem]"
-                initial={{ rotate: -4, scale: 0.96 }}
-                animate={
-                  isRevealed
-                    ? { rotate: -1.5, x: 0, y: 0, scale: 1 }
-                    : {
-                        rotate: [-6, 18, -21, 15, -8, 3, -1.5],
-                        x: [0, -10, 9, -7, 5, -2, 0],
-                        y: [0, 6, -6, 4, -3, 1, 0],
-                        scale: [0.96, 1.01, 0.97, 1.01, 0.99, 1],
-                      }
-                }
-                transition={{ duration: isRevealed ? 0.38 : 2.05, ease: 'easeInOut' }}
-              >
-                <LiveCandidateMapLayer
-                  points={mapPoints}
-                  winnerId={isRevealed ? plan.winner.candidate.id : null}
-                  activeId={!isRevealed ? plan.winner.candidate.id : null}
-                />
-              </motion.div>
-
-              <motion.div
-                className="absolute z-20 origin-left"
-                style={{ transformOrigin: '0% 50%' }}
-                initial={{
-                  left: '58%',
-                  top: '-10%',
-                  rotate: -34,
-                  scale: 1.18,
-                  opacity: 0,
-                }}
-                animate={
-                  isRevealed
-                    ? {
-                        left: `${mapWinnerPoint.x}%`,
-                        top: `${mapWinnerPoint.y}%`,
-                        rotate: -24,
-                        scale: 0.92,
-                        opacity: 1,
-                      }
-                    : {
-                        left: ['58%', '42%', '70%', '34%', `${mapWinnerPoint.x}%`],
-                        top: ['-10%', '34%', '22%', '62%', `${mapWinnerPoint.y}%`],
-                        rotate: [-34, 12, -28, 18, -24],
-                        scale: [1.18, 1.05, 1.12, 1.02, 0.94],
-                        opacity: [0, 1, 1, 1, 1],
-                      }
-                }
-                transition={{ duration: isRevealed ? 0.34 : 2.05, ease: [0.16, 1, 0.3, 1] }}
-              >
-                <MarkerPenGraphic />
-              </motion.div>
-
-              {(phase === 'impact' || isRevealed) && (
-                <motion.div
-                  className="absolute z-10 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#FF6B5F] bg-[#FF6B5F]/18"
-                  style={{ left: `${mapWinnerPoint.x}%`, top: `${mapWinnerPoint.y}%` }}
-                  initial={{ opacity: 0.8, scale: 0.18 }}
-                  animate={{ opacity: 0, scale: 2.8 }}
-                  transition={{ duration: 0.68, ease: 'easeOut' }}
-                />
-              )}
-
-              {isRevealed ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 18, scale: 0.96 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  className="absolute bottom-4 left-4 right-4 z-30 rounded-2xl bg-white/94 px-4 py-3 text-center text-[#16241D] shadow-sm backdrop-blur-sm"
-                >
-                  <div className="text-xs font-semibold text-[#FF6B5F]">사인펜이 찍은 곳</div>
-                  <div className="mt-1 text-xl font-bold tracking-[-0.04em]">{candidate.name}</div>
-                </motion.div>
-              ) : null}
-            </div>
-          ) : (
-            <motion.div
-              className="relative w-full max-w-sm overflow-hidden rounded-[1.6rem] bg-white p-5 text-center shadow-[0_28px_70px_rgba(0,0,0,0.26)] [transform-style:preserve-3d]"
-              initial={{ y: 18, rotate: variant === 'card-shuffle' ? -4 : 0 }}
-              animate={{
-                y: isRevealed ? 0 : [0, -16, 0],
-                rotate: variant === 'card-shuffle' ? (isRevealed ? 0 : [-4, 4, 0]) : 0,
-                rotateY: variant === 'card-shuffle' && isRevealed ? [180, 0] : 0,
-              }}
-              transition={{ duration: 0.58 }}
-            >
-              <motion.div
-                className="absolute inset-y-0 -left-1/2 w-1/2 -skew-x-12 bg-white/70"
-                animate={{ x: ['0%', '330%'], opacity: [0, 0.8, 0] }}
-                transition={{ duration: 0.78, repeat: isRevealed ? 0 : 1, repeatDelay: 0.4 }}
-              />
-              <div
-                className="absolute inset-0"
-                style={{
-                  background:
-                    variant === 'card-shuffle'
-                      ? `radial-gradient(circle at 20% 18%, rgba(255,255,255,0.62), transparent 26%), linear-gradient(145deg, #ffffff, ${accent}20)`
-                      : `linear-gradient(135deg, transparent, ${accent}18)`,
-                }}
-              />
-              {variant === 'card-shuffle' ? (
-                <div className="absolute inset-3 rounded-[1.2rem] border border-[#16241D]/10" />
-              ) : null}
-              <div className="text-xs text-[#9AA8A1]">{choiceLabel}</div>
-              <div className="relative mt-8 text-5xl font-semibold tracking-[-0.05em] text-[#16241D]">
-                {isRevealed ? candidate.name : '?'}
-              </div>
-            </motion.div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DrawStatusCard({
-  phase,
-  currentInsight,
-  progress,
-}: {
-  phase: DrawPhase;
-  currentInsight: CandidateInsight;
-  progress: number;
-}) {
-  return (
-    <div className="absolute bottom-4 left-4 right-4">
-      <div className="rounded-2xl bg-white/88 px-4 py-3 shadow-sm backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-lg text-[#16241D]">
-              {currentInsight.candidate.name}
-            </div>
-          </div>
-        </div>
-        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#e7ded2]">
-          <motion.div
-            className="h-full rounded-full bg-[linear-gradient(90deg,#16241D,#FF6B5F)]"
-            animate={{
-              width: `${phase === 'revealed' ? 100 : Math.max(progress * 100, 4)}%`,
-            }}
-            transition={{ duration: 0.16 }}
-          />
+          ) : null}
         </div>
       </div>
     </div>
@@ -2654,9 +1242,7 @@ export function RandomDrawer({
   candidateScope = 'standard',
   participants = [],
   drawSeed,
-  lockedWinner = null,
   canChoose = true,
-  autoChoose = false,
   sharedSelectedSlotIndex = null,
   sharedChoicePlayAt = null,
   initialLadderBars = null,
@@ -2678,13 +1264,6 @@ export function RandomDrawer({
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
   const [pendingSelectedSlotIndex, setPendingSelectedSlotIndex] = useState<number | null>(null);
   const pendingChoiceTimerRef = useRef<number | null>(null);
-  const autoChoiceIndex = useMemo(
-    () =>
-      choiceLock.slots.length
-        ? Math.floor(seededNumber(choiceLock.seed, 'auto-choice') * choiceLock.slots.length)
-        : 0,
-    [choiceLock],
-  );
   const selectedStartSlot =
     selectedSlotIndex === null ? null : choiceLock.slots[selectedSlotIndex] ?? null;
   const selectedChoice =
@@ -2696,11 +1275,8 @@ export function RandomDrawer({
   const selectedChoiceLabel =
     selectedSlotIndex === null || selectedStartSlot === null
       ? '-'
-      : variant === 'dart-map'
-        ? '지도판 사인펜'
-        : getChoiceDisplayLabel(variant, selectedStartSlot, selectedSlotIndex);
-  const lockedChoiceInsight =
-    lockedWinner ?? (variant === 'dart-map' ? null : selectedChoice?.insight ?? null);
+      : getChoiceDisplayLabel(variant, selectedStartSlot, selectedSlotIndex);
+  const lockedChoiceInsight = selectedChoice?.insight ?? null;
   const plan = useMemo(
     () =>
       buildDrawPlan(
@@ -2723,12 +1299,6 @@ export function RandomDrawer({
     ],
   );
   const [phase, setPhase] = useState<DrawPhase>('choosing');
-  const [currentInsight, setCurrentInsight] = useState<CandidateInsight>(
-    plan.sequence[0] ?? plan.winner,
-  );
-  const [stepIndex, setStepIndex] = useState(-1);
-  const [dropKey, setDropKey] = useState(0);
-  const [landedIds, setLandedIds] = useState<Set<string>>(() => new Set());
   const autoCompleteRef = useRef(false);
   const completePayloadRef = useRef({
     lockCode: choiceLock.code,
@@ -2739,19 +1309,38 @@ export function RandomDrawer({
     winner: plan.winner.candidate,
   });
 
-  const placedCandidates = useMemo(() => layoutCandidates(candidateInsights), [candidateInsights]);
-  const visiblePoints = useMemo(() => getUniqueVisiblePoints(placedCandidates), [placedCandidates]);
-  const activePoint = getPointForInsight(placedCandidates, currentInsight);
-  const winnerPoint = getPointForInsight(placedCandidates, plan.winner);
-  const cameraState = useMemo(() => getPinCameraState(activePoint, phase), [activePoint, phase]);
-  const progress = plan.sequence.length ? (stepIndex + 1) / plan.sequence.length : 0;
-  const variantLabel = variant ? drawVariantDisplayLabels[variant] : '게임 선택';
-  const winnerCandidateId = plan.winner.candidate.id;
+  const variantLabel = drawVariantDisplayLabels[variant];
   const isLadderVariant = variant === 'ladder-game';
+  const canChooseSlot = canChoose && pendingSelectedSlotIndex === null;
   const clearPendingChoiceTimer = () => {
     if (pendingChoiceTimerRef.current !== null) {
       window.clearTimeout(pendingChoiceTimerRef.current);
       pendingChoiceTimerRef.current = null;
+    }
+  };
+  const completeRevealedDraw = () => {
+    if (autoCompleteRef.current) {
+      return;
+    }
+
+    autoCompleteRef.current = true;
+    const payload = completePayloadRef.current;
+
+    payload.onComplete(payload.winner, {
+      variantLabel: payload.variantLabel,
+      choiceLabel: payload.selectedChoiceLabel,
+      lockCode: payload.lockCode,
+    });
+  };
+  const handleClose = () => {
+    if (phase === 'revealed') {
+      completeRevealedDraw();
+      onClose();
+      return;
+    }
+
+    if (phase === 'choosing') {
+      onClose();
     }
   };
   const scheduleSlotSelection = (index: number, playAt?: string | null) => {
@@ -2839,20 +1428,6 @@ export function RandomDrawer({
   }, [choiceLock.slots.length, sharedChoicePlayAt, sharedSelectedSlotIndex]);
 
   useEffect(() => {
-    if (!autoChoose || selectedSlotIndex !== null || !choiceLock.slots.length) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      chooseSlot(autoChoiceIndex);
-    }, 850);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [autoChoiceIndex, autoChoose, choiceLock.slots.length, selectedSlotIndex]);
-
-  useEffect(() => {
     if (selectedSlotIndex === null) {
       setPhase('choosing');
       return;
@@ -2862,42 +1437,7 @@ export function RandomDrawer({
     const timeoutIds: number[] = [];
     autoCompleteRef.current = false;
 
-    setPhase(variant === 'dart-map' ? 'boot' : 'impact');
-    setStepIndex(0);
-    setCurrentInsight(plan.winner);
-    setDropKey((current) => current + 1);
-    setLandedIds(new Set([plan.winner.candidate.id]));
-
-    if (variant === 'dart-map') {
-      timeoutIds.push(
-        window.setTimeout(() => {
-          if (!cancelled) {
-            setPhase('dropping');
-          }
-        }, 140),
-        window.setTimeout(() => {
-          if (!cancelled) {
-            setPhase('settling');
-          }
-        }, 1120),
-        window.setTimeout(() => {
-          if (!cancelled) {
-            setPhase('impact');
-          }
-        }, 1880),
-        window.setTimeout(() => {
-          if (!cancelled) {
-            setPhase('revealed');
-          }
-        }, 2520),
-      );
-
-      return () => {
-        cancelled = true;
-        timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
-      };
-    }
-
+    setPhase('impact');
     timeoutIds.push(window.setTimeout(() => {
       if (!cancelled) {
         setPhase('revealed');
@@ -2908,23 +1448,16 @@ export function RandomDrawer({
       cancelled = true;
       timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
     };
-  }, [selectedSlotIndex, variant, winnerCandidateId]);
+  }, [selectedSlotIndex, variant]);
 
   useEffect(() => {
     if (phase !== 'revealed' || autoCompleteRef.current) {
       return;
     }
 
-    autoCompleteRef.current = true;
     const timeoutId = window.setTimeout(() => {
-      const payload = completePayloadRef.current;
-
-      payload.onComplete(payload.winner, {
-        variantLabel: payload.variantLabel,
-        choiceLabel: payload.selectedChoiceLabel,
-        lockCode: payload.lockCode,
-      });
-    }, variant === 'dart-map' ? 1400 : variant === 'ladder-game' ? 2300 : variant === 'spin-wheel' ? 900 : 1900);
+      completeRevealedDraw();
+    }, variant === 'ladder-game' ? 2300 : variant === 'spin-wheel' ? 900 : 1900);
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -2940,7 +1473,7 @@ export function RandomDrawer({
     >
       <div
         className="absolute inset-0 bg-[#F5F9F7]"
-        onClick={phase === 'choosing' || phase === 'revealed' ? onClose : undefined}
+        onClick={phase === 'choosing' || phase === 'revealed' ? handleClose : undefined}
       />
 
       <motion.div
@@ -2950,7 +1483,7 @@ export function RandomDrawer({
       >
         <button
           type="button"
-          onClick={phase === 'choosing' || phase === 'revealed' ? onClose : undefined}
+          onClick={phase === 'choosing' || phase === 'revealed' ? handleClose : undefined}
           className={`fixed right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full border shadow-sm transition-colors ${
             phase === 'choosing' || phase === 'revealed'
               ? 'border-[#E4EFE9] bg-white text-[#16241D]'
@@ -2963,50 +1496,28 @@ export function RandomDrawer({
 
         <div>
           <div className={isLadderVariant ? 'p-1.5 sm:p-2' : 'p-2 sm:p-3'}>
-            {phase === 'choosing' ? (
+            {phase === 'choosing' || !selectedChoice ? (
               <DrawChoiceStage
                 variant={variant}
                 lock={choiceLock}
                 ladderBars={ladderBars}
-                candidatePoints={visiblePoints}
-                onLadderBarsChange={canChoose && !autoChoose ? updateLadderBars : undefined}
+                onLadderBarsChange={canChooseSlot ? updateLadderBars : undefined}
                 onChoose={
-                  canChoose && !autoChoose && pendingSelectedSlotIndex === null
+                  canChooseSlot
                     ? (index) => {
                         chooseSlot(index);
                       }
                     : undefined
                 }
                 waitingMessage={waitingMessage}
-              />
-            ) : selectedChoice ? (
-              <PickedChoiceStage
-                variant={variant}
-                slot={selectedChoice}
-                selectedIndex={selectedSlotIndex ?? 0}
-                choiceLabel={selectedChoiceLabel}
-                lock={choiceLock}
-                ladderBars={ladderBars}
-                plan={plan}
-                candidatePoints={visiblePoints}
-                winnerPoint={winnerPoint}
-                phase={phase}
               />
             ) : (
-              <DrawChoiceStage
+              <PickedChoiceStage
                 variant={variant}
+                selectedIndex={selectedSlotIndex ?? 0}
                 lock={choiceLock}
                 ladderBars={ladderBars}
-                candidatePoints={visiblePoints}
-                onLadderBarsChange={canChoose && !autoChoose ? updateLadderBars : undefined}
-                onChoose={
-                  canChoose && !autoChoose && pendingSelectedSlotIndex === null
-                    ? (index) => {
-                        chooseSlot(index);
-                      }
-                    : undefined
-                }
-                waitingMessage={waitingMessage}
+                phase={phase}
               />
             )}
 

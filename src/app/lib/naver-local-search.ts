@@ -79,10 +79,14 @@ async function fetchNearbySearchResultsOnce(
   requestUrl.searchParams.set('sort', sort);
 
   const response = await fetch(requestUrl.toString());
-  const data = (await response.json()) as NaverLocalSearchResponse;
+  const data = (await response.json().catch(() => null)) as NaverLocalSearchResponse | null;
 
   if (!response.ok) {
-    throw new Error(data.message ?? '근처 정보를 가져오지 못했습니다.');
+    throw new Error(data?.message ?? '근처 정보를 가져오지 못했습니다.');
+  }
+
+  if (!data) {
+    throw new Error('근처 정보를 가져오지 못했습니다.');
   }
 
   return (data.items ?? []).map<NearbySearchItem>((item) => {
@@ -128,7 +132,9 @@ export async function fetchNearbySearchResults(
         return await fetchNearbySearchResultsOnce(query, display, sort);
       } catch (error) {
         lastError = error;
-        await wait(450 * (attempt + 1));
+        if (attempt < 2) {
+          await wait(450 * (attempt + 1));
+        }
       }
     }
 

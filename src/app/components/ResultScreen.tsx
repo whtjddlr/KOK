@@ -38,7 +38,6 @@ import {
   NearbyPlace,
   NearbyPlaceCategory,
   Participant,
-  SelectionModeKey,
   TravelInfo,
   TravelMode,
   TravelRouteStep,
@@ -55,7 +54,6 @@ interface ResultScreenProps {
   winner: Candidate;
   participants: Participant[];
   selectedCategory: MeetCategoryKey;
-  selectionMode: SelectionModeKey;
   currentUser?: AuthUser | null;
   routeSnapshot?: WinnerRouteSnapshot | null;
   onlineRoomCode?: string | null;
@@ -476,9 +474,7 @@ function getTravelSummary(travelInfo: TravelInfo[]) {
   if (!travelInfo.length) {
     return {
       averageDuration: 0,
-      averageDistance: 0,
       spreadDuration: 0,
-      maxDuration: 0,
     };
   }
 
@@ -486,20 +482,18 @@ function getTravelSummary(travelInfo: TravelInfo[]) {
   const averageDuration = Math.round(
     durations.reduce((sum, duration) => sum + duration, 0) / travelInfo.length,
   );
-  const averageDistance =
-    Math.round(
-      (travelInfo.reduce((sum, item) => sum + item.distance, 0) / travelInfo.length) * 10,
-    ) / 10;
 
   return {
     averageDuration,
-    averageDistance,
     spreadDuration: Math.max(...durations) - Math.min(...durations),
-    maxDuration: Math.max(...durations),
   };
 }
 
 function getTravelSourceLabel(mode: TravelMode, travelInfo: TravelInfo[]) {
+  if (!travelInfo.length) {
+    return '경로 확인 중';
+  }
+
   if (mode === 'transit') {
     return travelInfo.every((item) => item.source === 'transit') ? '실제 경로' : '예상 포함';
   }
@@ -631,7 +625,6 @@ export function ResultScreen({
   winner,
   participants,
   selectedCategory,
-  selectionMode: _selectionMode,
   currentUser = null,
   routeSnapshot = null,
   onlineRoomCode = null,
@@ -653,6 +646,10 @@ export function ResultScreen({
   const [nearbyFiltersOpen, setNearbyFiltersOpen] = useState(false);
   const nearbyContentRef = useRef<HTMLElement | null>(null);
   const recommendationListRef = useRef<HTMLDivElement | null>(null);
+  const scrollTimeoutIdsRef = useRef<number[]>([]);
+  const copiedPlaceShareTimerRef = useRef<number | null>(null);
+  const calendarSavedTimerRef = useRef<number | null>(null);
+  const copiedRecommendationShareTimerRef = useRef<number | null>(null);
   const [contentCategory, setContentCategory] = useState<ContentCategoryKey>(initialCategory);
   const [detailQuery, setDetailQuery] = useState(() =>
     getInitialDetail(initialCategory, selectedCategory, groupGenderContext, currentUser),
@@ -747,8 +744,51 @@ export function ResultScreen({
     redrawControl.onRequest();
   };
 
+  const clearTimer = (timerRef: { current: number | null }) => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+  const clearScrollTimeouts = () => {
+    scrollTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    scrollTimeoutIdsRef.current = [];
+  };
+  const scheduleScrollTimeout = (callback: () => void, delay = 80) => {
+    const timeoutId = window.setTimeout(() => {
+      scrollTimeoutIdsRef.current = scrollTimeoutIdsRef.current.filter((id) => id !== timeoutId);
+      callback();
+    }, delay);
+
+    scrollTimeoutIdsRef.current.push(timeoutId);
+  };
+  const scheduleToastTimeout = (
+    timerRef: { current: number | null },
+    callback: () => void,
+    delay: number,
+  ) => {
+    clearTimer(timerRef);
+    const timeoutId = window.setTimeout(() => {
+      if (timerRef.current === timeoutId) {
+        timerRef.current = null;
+      }
+      callback();
+    }, delay);
+
+    timerRef.current = timeoutId;
+  };
+
+  useEffect(() => {
+    return () => {
+      clearScrollTimeouts();
+      clearTimer(copiedPlaceShareTimerRef);
+      clearTimer(calendarSavedTimerRef);
+      clearTimer(copiedRecommendationShareTimerRef);
+    };
+  }, []);
+
   const scrollElementIntoView = (element: HTMLElement | null | undefined, delay = 80) => {
-    window.setTimeout(() => {
+    scheduleScrollTimeout(() => {
       if (!element) {
         return;
       }
@@ -766,7 +806,7 @@ export function ResultScreen({
   };
 
   const scrollToRecommendationIndex = (index: number) => {
-    window.setTimeout(() => {
+    scheduleScrollTimeout(() => {
       const nextCard = recommendationListRef.current?.querySelector<HTMLElement>(
         `[data-recommendation-index="${index}"]`,
       );
@@ -783,7 +823,7 @@ export function ResultScreen({
       setNearbyFiltersOpen(false);
       scrollToNearbyContent();
     } else {
-      window.setTimeout(() => {
+      scheduleScrollTimeout(() => {
         window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
       }, 0);
     }
@@ -864,7 +904,7 @@ export function ResultScreen({
       current.includes(routeKey) ? current : [...current, routeKey],
     );
     setIsConfirmed(false);
-    window.setTimeout(() => {
+    scheduleScrollTimeout(() => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }, 0);
   };
@@ -931,6 +971,10 @@ export function ResultScreen({
       const collected: NearbySearchItem[] = [];
 
       for (const searchQuery of getParkingSearchQueries(winner)) {
+        if (cancelled) {
+          return;
+        }
+
         try {
           const results = await fetchNearbySearchResults(searchQuery, 6, 'comment');
           collected.push(...results);
@@ -1033,12 +1077,12 @@ export function ResultScreen({
       }
 
       setCopiedPlaceShare(true);
-      window.setTimeout(() => setCopiedPlaceShare(false), 1600);
+      scheduleToastTimeout(copiedPlaceShareTimerRef, () => setCopiedPlaceShare(false), 1600);
     } catch {
       try {
         await navigator.clipboard.writeText(`${shareText}\n${placeUrl}`);
         setCopiedPlaceShare(true);
-        window.setTimeout(() => setCopiedPlaceShare(false), 1600);
+        scheduleToastTimeout(copiedPlaceShareTimerRef, () => setCopiedPlaceShare(false), 1600);
       } catch {
         // 공유 실패는 사용 흐름을 막지 않는다.
       }
@@ -1089,7 +1133,7 @@ export function ResultScreen({
 
     downloadTextFile(`KoK-${safeWinnerName}.ics`, ics, 'text/calendar;charset=utf-8');
     setCalendarSaved(true);
-    window.setTimeout(() => setCalendarSaved(false), 1800);
+    scheduleToastTimeout(calendarSavedTimerRef, () => setCalendarSaved(false), 1800);
   };
 
   const handleShareRecommendationPlace = async (place: ContentRecommendationItem) => {
@@ -1115,12 +1159,20 @@ export function ResultScreen({
       }
 
       setCopiedRecommendationShareId(place.id);
-      window.setTimeout(() => setCopiedRecommendationShareId(null), 1600);
+      scheduleToastTimeout(
+        copiedRecommendationShareTimerRef,
+        () => setCopiedRecommendationShareId(null),
+        1600,
+      );
     } catch {
       try {
         await navigator.clipboard.writeText(`${shareText}\n${placeUrl}`);
         setCopiedRecommendationShareId(place.id);
-        window.setTimeout(() => setCopiedRecommendationShareId(null), 1600);
+        scheduleToastTimeout(
+          copiedRecommendationShareTimerRef,
+          () => setCopiedRecommendationShareId(null),
+          1600,
+        );
       } catch {
         // 공유 실패는 추천 흐름을 막지 않는다.
       }

@@ -1,4 +1,4 @@
-import { Candidate, MeetCategory, Participant, SelectionMode, ThrillStage } from '../types';
+import { Candidate, MeetCategory, SelectionMode, ThrillStage } from '../types';
 
 export const stationOptions = [
   { name: '강남역', coordinates: { lat: 37.4979, lng: 127.0276 } },
@@ -51,33 +51,6 @@ export const stationOptions = [
   { name: '서현역', coordinates: { lat: 37.3852, lng: 127.1236 } },
   { name: '인천대입구역', coordinates: { lat: 37.386, lng: 126.6395 } },
   { name: '김포공항역', coordinates: { lat: 37.5623, lng: 126.8019 } },
-];
-
-export const initialParticipants: Participant[] = [
-  {
-    id: '1',
-    name: '지우',
-    location: '강남역',
-    coordinates: { lat: 37.4979, lng: 127.0276 },
-    maxTravelTime: 40,
-    locationSource: 'station',
-  },
-  {
-    id: '2',
-    name: '민서',
-    location: '홍대입구역',
-    coordinates: { lat: 37.5572, lng: 126.9245 },
-    maxTravelTime: 38,
-    locationSource: 'station',
-  },
-  {
-    id: '3',
-    name: '수연',
-    location: '부천시청역',
-    coordinates: { lat: 37.504, lng: 126.7667 },
-    maxTravelTime: 50,
-    locationSource: 'station',
-  },
 ];
 
 export const meetCategories: MeetCategory[] = [
@@ -679,5 +652,3 @@ export const mockCandidates: Candidate[] = [
     categories: ['dining', 'drink', 'activity'],
   },
 ];
-
-export const seoulStations = stationOptions.map((station) => station.name);

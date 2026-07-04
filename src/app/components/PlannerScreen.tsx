@@ -99,7 +99,6 @@ import {
   updateRoomPlanningCategory,
   updateRoomSelection,
 } from '../lib/rooms';
-import { NearbyPlacesPanel } from './NearbyPlacesPanel';
 import type { UserHomeLocation } from '../lib/auth';
 import {
   buildGroupGenderContext,
@@ -735,6 +734,7 @@ export function PlannerScreen({
   const showDrawerRef = useRef(false);
   const isCurrentDrawControllerRef = useRef(false);
   const delayedDecidedRoomTimerRef = useRef<number | null>(null);
+  const copiedRoomLinkTimerRef = useRef<number | null>(null);
 
   const [participants, setParticipants] = useState<Participant[]>(initialParticipants);
   const [savedFriends, setSavedFriends] = useState<SavedFriend[]>([]);
@@ -757,7 +757,6 @@ export function PlannerScreen({
   const [newCoordinates, setNewCoordinates] = useState<Coordinates | null>(null);
   const [newTravelMode, setNewTravelMode] = useState<TravelMode>('transit');
   const [newGender, setNewGender] = useState<ParticipantGender>('unspecified');
-  const newTravelTime = DEFAULT_MAX_TRAVEL_TIME;
   const [editingSelfParticipantId, setEditingSelfParticipantId] = useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
@@ -999,16 +998,16 @@ export function PlannerScreen({
       finishDecidedRoom();
     };
 
-    const applyParticipants = (nextParticipants: Participant[]) => {
+    const applyParticipants = (nextParticipants: Participant[], forceEmpty = false) => {
       if (!active) {
         return;
       }
 
-      if (!nextParticipants.length && latestParticipants.length) {
+      if (!forceEmpty && !nextParticipants.length && latestParticipants.length) {
         if (emptyParticipantsSyncTimerRef.current === null) {
           emptyParticipantsSyncTimerRef.current = window.setTimeout(() => {
             emptyParticipantsSyncTimerRef.current = null;
-            applyParticipants([]);
+            applyParticipants([], true);
           }, 650);
         }
         return;
@@ -1124,6 +1123,15 @@ export function PlannerScreen({
       window.clearInterval(roomIntervalId);
     };
   }, [onlineRoom?.code, onlineRoom?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (copiedRoomLinkTimerRef.current !== null) {
+        window.clearTimeout(copiedRoomLinkTimerRef.current);
+        copiedRoomLinkTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -1769,11 +1777,10 @@ export function PlannerScreen({
     : -1;
   const selectedRouteParticipant =
     selectedRouteParticipantIndex >= 0 ? participants[selectedRouteParticipantIndex] : null;
-  const rawSelectedRouteDetail = selectedRouteParticipant
+  const selectedRouteDetail = selectedRouteParticipant
     ? selectedCandidateRoutes.find((route) => route.participantId === selectedRouteParticipant.id) ??
       null
     : null;
-  const selectedRouteDetail = rawSelectedRouteDetail;
 	  const selectedRouteDetailKey =
 	    selectedInsight && selectedRouteParticipant
 	      ? getRouteSelectionKey(selectedInsight.candidate.id, selectedRouteParticipant.id)
@@ -2028,12 +2035,33 @@ export function PlannerScreen({
       }
 
       setCopiedRoomLink(true);
-      window.setTimeout(() => setCopiedRoomLink(false), 1600);
-    } catch {
+      if (copiedRoomLinkTimerRef.current !== null) {
+        window.clearTimeout(copiedRoomLinkTimerRef.current);
+      }
+      copiedRoomLinkTimerRef.current = window.setTimeout(() => {
+        copiedRoomLinkTimerRef.current = null;
+        setCopiedRoomLink(false);
+      }, 1600);
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'name' in error &&
+        error.name === 'AbortError'
+      ) {
+        return;
+      }
+
       try {
         await navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
         setCopiedRoomLink(true);
-        window.setTimeout(() => setCopiedRoomLink(false), 1600);
+        if (copiedRoomLinkTimerRef.current !== null) {
+          window.clearTimeout(copiedRoomLinkTimerRef.current);
+        }
+        copiedRoomLinkTimerRef.current = window.setTimeout(() => {
+          copiedRoomLinkTimerRef.current = null;
+          setCopiedRoomLink(false);
+        }, 1600);
       } catch {
         setRoomMessage(shareUrl);
       }
@@ -3506,16 +3534,6 @@ export function PlannerScreen({
                   </div>
                 </div>
 
-                <select
-                  value={newTravelTime}
-                  onChange={() => undefined}
-                  className="hidden h-12 w-full rounded-xl bg-[#F5F9F7] px-4 text-[#16241D] outline-none focus:ring-2 focus:ring-[#16241D]/20 sm:col-span-3"
-                >
-                  <option value={30}>최대 이동 30분</option>
-                  <option value={40}>최대 이동 40분</option>
-                  <option value={50}>최대 이동 50분</option>
-                  <option value={60}>최대 이동 60분</option>
-                </select>
               </div>
 
               {!isGuestMode && !isEditingSelfLocation && (
@@ -4021,19 +4039,12 @@ export function PlannerScreen({
         <RandomDrawer
           key={activeDrawSession.seed ?? 'manual-draw'}
           candidateInsights={activeDrawSession.candidateInsights}
-          categoryLabel={activeCategory.label}
-          modeLabel={
-            isFairnessMode
-              ? `${activeMode.shortLabel} · ${activeThrill.shortLabel}`
-              : activeMode.shortLabel
-          }
           selectionMode={selectionMode}
           thrillLevel={effectiveThrillLevel}
           candidateScope={candidateScope}
           participants={activeDrawSession.participants}
           drawSeed={activeDrawSession.seed}
           canChoose={isCurrentDrawController}
-          autoChoose={false}
           sharedSelectedSlotIndex={sharedSelectedSlotIndex}
           sharedChoicePlayAt={sharedChoicePlayAt}
           initialLadderBars={activeDrawSession.ladderBars ?? null}

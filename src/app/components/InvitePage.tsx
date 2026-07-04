@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, CheckCircle2, Copy, ExternalLink, MapPin, UsersRound } from 'lucide-react';
 
 function getRoomCodeFromUrl() {
@@ -48,6 +48,7 @@ async function copyText(text: string) {
 
 export function InvitePage() {
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<number | null>(null);
   const roomCode = useMemo(() => getRoomCodeFromUrl(), []);
   const joinUrl = useMemo(() => getJoinUrl(roomCode), [roomCode]);
 
@@ -55,10 +56,25 @@ export function InvitePage() {
     document.title = roomCode ? `KoK 약속방 ${roomCode}` : 'KoK 약속방 초대';
   }, [roomCode]);
 
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
+        copiedTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const handleCopy = async () => {
     if (await copyText(window.location.href)) {
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+      copiedTimerRef.current = window.setTimeout(() => {
+        copiedTimerRef.current = null;
+        setCopied(false);
+      }, 1500);
     }
   };
 
@@ -67,7 +83,7 @@ export function InvitePage() {
       <section className="mx-auto flex min-h-screen w-full max-w-md flex-col px-6 py-8">
         <header className="flex items-center justify-between">
           <a href="/landing" className="flex items-center gap-3" aria-label="KoK 소개로 이동">
-            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-[#ffd9d9] shadow-[0_10px_24px_rgba(255, 107, 95,0.2)]">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-[#ffd9d9] shadow-[0_10px_24px_rgba(255,107,95,0.2)]">
               <MapPin className="h-6 w-6 fill-[#8d1711] text-[#8d1711]" />
             </div>
             <div className="text-2xl font-black tracking-normal">KoK</div>

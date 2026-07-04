@@ -140,21 +140,6 @@ const SYNTHETIC_EMAIL_DOMAIN = 'drop.local';
 
 let canPersistProfileHomeLocation: boolean | null = null;
 
-function withProfileTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = 2500) {
-  return new Promise<T>((resolve) => {
-    const timeoutId = setTimeout(() => {
-      resolve(fallback);
-    }, timeoutMs);
-
-    promise
-      .then(resolve)
-      .catch(() => resolve(fallback))
-      .finally(() => {
-        clearTimeout(timeoutId);
-      });
-  });
-}
-
 function getDefaultPreferences(): UserPreferences {
   return {
     favoriteCategories: ['restaurant', 'cafe'],
@@ -435,13 +420,7 @@ function clearStoredUserArtifacts(userId: string) {
 }
 
 async function hashPassword(password: string) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-
-  return Array.from(new Uint8Array(digest))
-    .map((value) => value.toString(16).padStart(2, '0'))
-    .join('');
+  return hashStableText(password);
 }
 
 function getNameFromMetadata(user: User) {
@@ -553,46 +532,6 @@ function mapSupabaseUser(user: User, profile?: ProfileRow | null): AuthUser {
   };
 }
 
-async function loadProfile(userId: string) {
-  const supabase = getSupabaseBrowserClient();
-
-  if (!supabase) {
-    return null as ProfileRow | null;
-  }
-
-  const { data: baseProfile, error: baseError } = await supabase
-    .from('profiles')
-    .select(PROFILE_BASE_SELECT)
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (baseError || !baseProfile) {
-    return null as ProfileRow | null;
-  }
-
-  if (canPersistProfileHomeLocation === false) {
-    return baseProfile as ProfileRow;
-  }
-
-  const { data: homeProfile, error: homeError } = await supabase
-    .from('profiles')
-    .select(PROFILE_HOME_SELECT)
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (homeError) {
-    canPersistProfileHomeLocation = false;
-    return baseProfile as ProfileRow;
-  }
-
-  canPersistProfileHomeLocation = true;
-
-  return {
-    ...(baseProfile as ProfileRow),
-    ...(homeProfile as Partial<ProfileRow> | null),
-  } as ProfileRow;
-}
-
 async function upsertProfile(
   user: User,
   name: string,
@@ -654,21 +593,6 @@ async function upsertProfile(
     ...(baseProfile as ProfileRow),
     ...(homeProfile as Partial<ProfileRow> | null),
   } as ProfileRow;
-}
-
-async function ensureProfile(user: User) {
-  const existingProfile = await loadProfile(user.id);
-
-  if (existingProfile) {
-    return existingProfile;
-  }
-
-  return upsertProfile(
-    user,
-    getNameFromMetadata(user),
-    getPreferencesFromMetadata(user),
-    getHomeLocationFromMetadata(user),
-  );
 }
 
 async function clearStaleSupabaseSession() {

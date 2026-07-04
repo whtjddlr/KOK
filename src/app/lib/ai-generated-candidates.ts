@@ -44,10 +44,14 @@ export async function fetchAiGeneratedCandidates({
       runtimeAiConfig,
     }),
   });
-  const data = (await response.json()) as AiGeneratedCandidateResponse;
+  const data = (await response.json().catch(() => null)) as AiGeneratedCandidateResponse | null;
 
   if (!response.ok) {
-    throw new Error(data.message ?? 'AI 생성 후보를 가져오지 못했습니다.');
+    throw new Error(data?.message ?? 'AI 생성 후보를 가져오지 못했습니다.');
+  }
+
+  if (!data) {
+    throw new Error('AI 생성 후보를 가져오지 못했습니다.');
   }
 
   return {

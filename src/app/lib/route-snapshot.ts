@@ -26,7 +26,7 @@ function getReasonMessage(reason: unknown) {
   return null;
 }
 
-function getFirstRouteError(results: PromiseSettledResult<TravelInfo>[]) {
+export function getFirstRouteError(results: PromiseSettledResult<TravelInfo>[]) {
   for (const result of results) {
     if (result.status === 'rejected') {
       const message = getReasonMessage(result.reason);
@@ -40,30 +40,53 @@ function getFirstRouteError(results: PromiseSettledResult<TravelInfo>[]) {
   return null;
 }
 
-function getTransitFallbackMessage(message: string | null, partial: boolean) {
-  const hasOdsayNoRoute =
-    message?.includes('ODsay 대중교통 경로를 찾지 못했습니다') ||
+function isTransitNoRouteMessage(message: string | null) {
+  return Boolean(
     message?.includes('대중교통 경로를 찾지 못했습니다') ||
-    message?.includes('ODsay 대중교통 경로 응답에 추천 경로가 없습니다') ||
-    message?.includes('대중교통 경로 응답에 추천 경로가 없습니다');
+      message?.includes('대중교통 경로 응답에 추천 경로가 없습니다'),
+  );
+}
 
-  if (hasOdsayNoRoute) {
+function getFallbackMessage(
+  message: string | null,
+  partial: boolean,
+  fallbackLabel: string,
+  fullErrorLabel?: string,
+) {
+  if (message) {
+    return partial ? '일부 경로는 예상이에요.' : (fullErrorLabel ?? message);
+  }
+
+  return partial ? '일부 경로는 예상이에요.' : fallbackLabel;
+}
+
+export function getTransitFallbackMessage(
+  message: string | null,
+  partial: boolean,
+  exposeFullError = true,
+) {
+  if (isTransitNoRouteMessage(message)) {
     return partial ? '일부 경로는 예상이에요.' : '대중교통은 예상이에요.';
   }
 
-  if (message) {
-    return partial ? '일부 경로는 예상이에요.' : message;
+  return getFallbackMessage(
+    message,
+    partial,
+    '대중교통은 예상이에요.',
+    exposeFullError ? undefined : '대중교통은 예상이에요.',
+  );
+}
+
+export function getEstimatedRouteFallbackMessage(message: string | null, partial: boolean) {
+  if (isTransitNoRouteMessage(message)) {
+    return partial ? '일부 경로는 예상이에요.' : '대중교통은 예상이에요.';
   }
 
-  return partial ? '일부 경로는 예상이에요.' : '대중교통은 예상이에요.';
+  return getFallbackMessage(message, partial, '예상 경로예요.', '예상 경로예요.');
 }
 
 function getCarFallbackMessage(message: string | null, partial: boolean) {
-  if (message) {
-    return partial ? '일부 경로는 예상이에요.' : message;
-  }
-
-  return partial ? '일부 경로는 예상이에요.' : '자동차는 예상이에요.';
+  return getFallbackMessage(message, partial, '자동차는 예상이에요.');
 }
 
 function getSnapshotStatus(liveCount: number, totalCount: number): RouteSnapshotStatus {

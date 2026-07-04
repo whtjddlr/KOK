@@ -26,7 +26,6 @@ interface HomeScreenProps {
   deletingRoomIds?: string[];
   onRefreshRooms?: () => void | Promise<void>;
   onOpenExistingRoom?: (room: MeetingRoom) => void | Promise<void>;
-  onDeleteExistingRoom?: (room: MeetingRoom) => void | Promise<void>;
   onDeleteExistingRooms?: (rooms: MeetingRoom[]) => void | Promise<void>;
   onJoinRoom: (code: string) => void | Promise<void>;
   onStartGuest: () => void;

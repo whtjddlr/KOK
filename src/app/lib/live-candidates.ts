@@ -55,10 +55,14 @@ export async function fetchLiveCandidates({
     }),
   });
 
-  const data = (await response.json()) as LiveCandidateResponse;
+  const data = (await response.json().catch(() => null)) as LiveCandidateResponse | null;
 
   if (!response.ok) {
-    throw new Error(data.message ?? '실시간 후보를 가져오지 못했습니다.');
+    throw new Error(data?.message ?? '실시간 후보를 가져오지 못했습니다.');
+  }
+
+  if (!data) {
+    throw new Error('실시간 후보를 가져오지 못했습니다.');
   }
 
   return data;

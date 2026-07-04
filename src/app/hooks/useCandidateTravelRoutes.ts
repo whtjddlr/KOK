@@ -3,6 +3,10 @@ import { Candidate, Participant, TravelInfo } from '../types';
 import { getCarTravelInfo, getTravelInfo } from '../lib/meeting';
 import { fetchDirectionsTravelInfo } from '../lib/naver-directions';
 import { fetchOdsayTransitTravelInfo, getTransitServicePeriodKey } from '../lib/odsay-transit';
+import {
+  getEstimatedRouteFallbackMessage,
+  getFirstRouteError,
+} from '../lib/route-snapshot';
 
 type RouteStatus = 'idle' | 'loading' | 'ready' | 'partial' | 'error';
 
@@ -42,57 +46,6 @@ function getRouteSignature(
       participant.travelMode ?? 'transit',
     ]),
   });
-}
-
-function getReasonMessage(reason: unknown) {
-  if (reason instanceof Error && reason.message) {
-    return reason.message.replace(/ODsay\s*/g, '');
-  }
-
-  if (
-    reason &&
-    typeof reason === 'object' &&
-    'message' in reason &&
-    typeof (reason as { message?: unknown }).message === 'string'
-  ) {
-    return (reason as { message: string }).message.replace(/ODsay\s*/g, '');
-  }
-
-  return null;
-}
-
-function getFirstRouteError(results: PromiseSettledResult<TravelInfo>[]) {
-  for (const result of results) {
-    if (result.status === 'rejected') {
-      const message = getReasonMessage(result.reason);
-
-      if (message) {
-        return message;
-      }
-    }
-  }
-
-  return null;
-}
-
-function getRouteFallbackMessage(message: string | null, partial: boolean) {
-  const hasOdsayNoRoute =
-    message?.includes('ODsay 대중교통 경로를 찾지 못했습니다') ||
-    message?.includes('대중교통 경로를 찾지 못했습니다') ||
-    message?.includes('ODsay 대중교통 경로 응답에 추천 경로가 없습니다') ||
-    message?.includes('대중교통 경로 응답에 추천 경로가 없습니다');
-
-  if (hasOdsayNoRoute) {
-    return partial
-      ? '일부 경로는 예상이에요.'
-      : '대중교통은 예상이에요.';
-  }
-
-  if (message) {
-    return partial ? '일부 경로는 예상이에요.' : '예상 경로예요.';
-  }
-
-  return partial ? '일부 경로는 예상이에요.' : '예상 경로예요.';
 }
 
 function mergeStableRoutes(currentRoutes: TravelInfo[], fallbackRoutes: TravelInfo[]) {
@@ -185,7 +138,7 @@ export function useCandidateTravelRoutes(
 
         if (!liveCount) {
           setStatus('error');
-          setError(getRouteFallbackMessage(firstRouteError, false));
+          setError(getEstimatedRouteFallbackMessage(firstRouteError, false));
           return;
         }
 
@@ -193,7 +146,7 @@ export function useCandidateTravelRoutes(
         setError(
           liveCount === merged.length
             ? null
-            : getRouteFallbackMessage(firstRouteError, true),
+            : getEstimatedRouteFallbackMessage(firstRouteError, true),
         );
       })
       .catch((error) => {

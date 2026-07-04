@@ -51,10 +51,14 @@ export async function fetchAiPlaceRanking(
       items,
     }),
   });
-  const data = (await response.json()) as AiPlaceRankingResponse;
+  const data = (await response.json().catch(() => null)) as AiPlaceRankingResponse | null;
 
   if (!response.ok) {
-    throw new Error(data.message ?? 'AI 장소 추천을 불러오지 못했어요.');
+    throw new Error(data?.message ?? 'AI 장소 추천을 불러오지 못했어요.');
+  }
+
+  if (!data) {
+    throw new Error('AI 장소 추천을 불러오지 못했어요.');
   }
 
   return {

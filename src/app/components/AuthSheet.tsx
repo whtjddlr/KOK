@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LocateFixed, LoaderCircle, MapPin, Search, X } from 'lucide-react';
 import {
   AuthUser,
@@ -84,6 +84,10 @@ export function AuthSheet({
   const [isLocating, setIsLocating] = useState(false);
   const [isSearchingLocation, setIsSearchingLocation] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const openRef = useRef(open);
+  const locationRequestIdRef = useRef(0);
+
+  openRef.current = open;
 
   const isSignup = mode === 'signup';
   const isLogin = mode === 'login';
@@ -92,6 +96,7 @@ export function AuthSheet({
 
   useEffect(() => {
     if (!open) {
+      locationRequestIdRef.current += 1;
       setName('');
       setGender('unspecified');
       setHomeLocation(null);
@@ -107,6 +112,12 @@ export function AuthSheet({
       setIsSubmitting(false);
     }
   }, [open]);
+
+  useEffect(() => {
+    return () => {
+      locationRequestIdRef.current += 1;
+    };
+  }, []);
 
   if (!open) {
     return null;
@@ -253,8 +264,15 @@ export function AuthSheet({
     setError(null);
     setLocationResults([]);
 
+    const requestId = locationRequestIdRef.current + 1;
+    locationRequestIdRef.current = requestId;
+
     navigator.geolocation.getCurrentPosition(
       async (position) => {
+        if (!openRef.current || locationRequestIdRef.current !== requestId) {
+          return;
+        }
+
         const coordinates = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
@@ -262,6 +280,10 @@ export function AuthSheet({
 
         try {
           const result = await reverseGeocodeCoordinates(coordinates.lat, coordinates.lng);
+          if (!openRef.current || locationRequestIdRef.current !== requestId) {
+            return;
+          }
+
           if (!isSupportedServiceAreaLocation({ ...result, coordinates })) {
             setHomeLocation(null);
             setLocationQuery('');
@@ -277,6 +299,10 @@ export function AuthSheet({
           });
           setLocationQuery(locationLabel);
         } catch {
+          if (!openRef.current || locationRequestIdRef.current !== requestId) {
+            return;
+          }
+
           if (!isSupportedServiceAreaLocation({ coordinates })) {
             setHomeLocation(null);
             setLocationQuery('');
@@ -291,10 +317,16 @@ export function AuthSheet({
           });
           setLocationQuery('현재 위치 기준');
         } finally {
-          setIsLocating(false);
+          if (openRef.current && locationRequestIdRef.current === requestId) {
+            setIsLocating(false);
+          }
         }
       },
       (locationError) => {
+        if (!openRef.current || locationRequestIdRef.current !== requestId) {
+          return;
+        }
+
         setError(getLocationErrorMessage(locationError));
         setIsLocating(false);
       },

@@ -313,9 +313,6 @@ export function getPracticalRouteGuardedInsights(
   const bestFarthestDuration = Math.min(
     ...baselineSource.map((insight) => insight.farthestDuration),
   );
-  const bestCenterDistance = Math.min(
-    ...baselineSource.map((insight) => insight.centerDistance),
-  );
   const bestAxisDistance = Math.min(...baselineSource.map((insight) => insight.axisDistance));
 
   const guardedInsights = insights.filter((insight) => {
@@ -3078,7 +3075,7 @@ function seededRandom(seed: string | undefined, key: string | number) {
     return Math.random();
   }
 
-  return hashText(`${seed}:${key}`) / 0xffffffff;
+  return hashText(`${seed}:${key}`) / 0x100000000;
 }
 
 function weightedPick(
@@ -3209,21 +3206,26 @@ export function buildDrawPlan(
     undefined,
     participants,
   );
-  const fallbackWinner = pool[0] ?? insights[0];
-  const winnerSource = pool.length ? pool : insights;
+  const drawPool = pool.length ? pool : insights;
+  const fallbackWinner = drawPool[0];
+
+  if (!fallbackWinner) {
+    throw new Error('추첨할 후보가 없어요.');
+  }
+
   const winner =
     lockedWinner &&
-    winnerSource.some((insight) => insight.candidate.id === lockedWinner.candidate.id)
+    drawPool.some((insight) => insight.candidate.id === lockedWinner.candidate.id)
       ? lockedWinner
       : selectionMode === 'balance'
         ? fallbackWinner
-        : pool.length
-          ? weightedPick(pool, selectionMode, thrillLevel, participants, drawSeed)
+        : drawPool.length
+          ? weightedPick(drawPool, selectionMode, thrillLevel, participants, drawSeed)
           : fallbackWinner;
-  const runnerUps = sampleWithoutRepeat(pool, 2, [winner.candidate.id], drawSeed);
-  const finalists = [winner, ...runnerUps].slice(0, Math.min(3, pool.length));
-  const rapidShuffle = Array.from({ length: Math.max(12, pool.length * 3) }, (_, index) => {
-    return pool[Math.floor(seededRandom(drawSeed, `shuffle-${index}`) * pool.length)];
+  const runnerUps = sampleWithoutRepeat(drawPool, 2, [winner.candidate.id], drawSeed);
+  const finalists = [winner, ...runnerUps].slice(0, Math.min(3, drawPool.length));
+  const rapidShuffle = Array.from({ length: Math.max(12, drawPool.length * 3) }, (_, index) => {
+    return drawPool[Math.floor(seededRandom(drawSeed, `shuffle-${index}`) * drawPool.length)];
   });
   const finalStretch =
     finalists.length >= 3

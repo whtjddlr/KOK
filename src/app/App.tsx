@@ -17,7 +17,6 @@ import {
 } from './lib/auth';
 import {
   createMeetingRoom,
-  deleteOwnedMeetingRoom,
   deleteOwnedMeetingRooms,
   getCurrentRoomActorIds,
   getParticipantActorKey,
@@ -31,7 +30,6 @@ import {
 } from './lib/rooms';
 import {
   Candidate,
-  DrawProof,
   MeetingRoom,
   MeetCategoryKey,
   Participant,
@@ -255,7 +253,6 @@ export default function App() {
   const [selectedWinner, setSelectedWinner] = useState<Candidate | null>(null);
   const [selectedRouteSnapshot, setSelectedRouteSnapshot] =
     useState<WinnerRouteSnapshot | null>(null);
-  const [drawProof, setDrawProof] = useState<DrawProof | null>(null);
   const [currentParticipants, setCurrentParticipants] = useState<Participant[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<MeetCategoryKey>('dining');
   const [selectionMode, setSelectionMode] = useState<SelectionModeKey>('balance');
@@ -407,6 +404,7 @@ export default function App() {
     )
       .then(async (room) => {
         if (!room) {
+          handledInviteCodeRef.current = '';
           setRoomError('찾을 수 없는 약속방이에요.');
           setCurrentScreen('home');
           return;
@@ -426,6 +424,7 @@ export default function App() {
         setCurrentScreen('planner');
       })
       .catch((error: Error) => {
+        handledInviteCodeRef.current = '';
         setRoomError(error.message);
       })
       .finally(() => {
@@ -452,7 +451,6 @@ export default function App() {
       if (room.status === 'planning' && !room.selectedCandidate) {
         setSelectedWinner(null);
         setSelectedRouteSnapshot(null);
-        setDrawProof(null);
         setCurrentScreen('planner');
       }
 
@@ -534,7 +532,6 @@ export default function App() {
     setCurrentParticipants([]);
     setSelectedWinner(null);
     setSelectedRouteSnapshot(null);
-    setDrawProof(null);
     setActiveRoom(null);
     syncRoomUrl(null);
 
@@ -581,7 +578,6 @@ export default function App() {
     setCurrentParticipants([]);
     setSelectedWinner(null);
     setSelectedRouteSnapshot(null);
-    setDrawProof(null);
     setRoomError(null);
     syncRoomUrl(null);
     setCurrentScreen('planner');
@@ -591,66 +587,26 @@ export default function App() {
     void handleJoinRoom(room.code);
   };
 
-  const handleDeleteExistingRoom = async (room: MeetingRoom) => {
-    if (!currentUser) {
-      openAuth('login');
-      return;
-    }
-
-    const memberCount = room.memberCount ?? room.members?.length ?? 0;
-    const confirmed = window.confirm(
-      memberCount > 1
-        ? `${room.code} 방에서 나갈까요? 다른 사람이 남아 있으면 방은 유지됩니다.`
-        : `${room.code} 방을 삭제할까요? 남은 사람이 없으면 방이 삭제됩니다.`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    setDeletingRoomIds([room.id]);
-    setOwnedRoomsError(null);
-
-    try {
-      await withTimeout(
-        deleteOwnedMeetingRoom({
-          roomId: room.id,
-          ownerId: currentUser.id,
-        }),
-        7000,
-        '방 삭제 응답이 지연되고 있어요.',
-      );
-
-      setOwnedRooms((current) => current.filter((item) => item.id !== room.id));
-    } catch (error) {
-      setOwnedRoomsError(getActionErrorMessage(error, '방을 정리하지 못했어요.'));
-    } finally {
-      setDeletingRoomIds([]);
-    }
-  };
-
   const handleDeleteExistingRooms = async (rooms: MeetingRoom[]) => {
     if (!currentUser) {
       openAuth('login');
       return;
     }
 
-    const targetRooms = rooms;
-
-    if (!targetRooms.length) {
+    if (!rooms.length) {
       setOwnedRoomsError('정리할 수 있는 방이 없어요.');
       return;
     }
 
     const confirmed = window.confirm(
-      `${targetRooms.length}개 방을 정리할까요? 다른 사람이 남아 있는 방은 나가기로 처리됩니다.`,
+      `${rooms.length}개 방을 정리할까요? 다른 사람이 남아 있는 방은 나가기로 처리됩니다.`,
     );
 
     if (!confirmed) {
       return;
     }
 
-    const targetRoomIds = targetRooms.map((room) => room.id);
+    const targetRoomIds = rooms.map((room) => room.id);
     setDeletingRoomIds(targetRoomIds);
     setOwnedRoomsError(null);
 
@@ -709,7 +665,6 @@ export default function App() {
       setCurrentParticipants(roomParticipants);
       setSelectedWinner(null);
       setSelectedRouteSnapshot(null);
-      setDrawProof(null);
       setCurrentScreen('planner');
     } catch (error) {
       setRoomError(getActionErrorMessage(error, '약속방에 들어가지 못했어요.'));
@@ -722,12 +677,11 @@ export default function App() {
     winner: Candidate,
     participants: Participant[],
     category: MeetCategoryKey,
-    proof?: DrawProof | null,
+    _proof?: unknown,
     routeSnapshot?: WinnerRouteSnapshot | null,
   ) => {
     setSelectedWinner(winner);
     setSelectedRouteSnapshot(routeSnapshot ?? null);
-    setDrawProof(proof ?? null);
     setCurrentParticipants(participants);
     setSelectedCategory(category);
     setCurrentScreen('result');
@@ -751,7 +705,7 @@ export default function App() {
     ? activeRoom.redrawVotes.filter((voteId) => roomParticipantActorIds.includes(voteId)).length
     : 0;
   const isSoloOnlineResult = Boolean(
-    activeRoom && roomParticipantActorIds.length > 0 && roomParticipantActorIds.length === 1,
+    activeRoom && roomParticipantActorIds.length === 1,
   );
   const hasRedrawMajority = activeRoom
     ? isSoloOnlineResult || redrawVoteCount >= redrawRequiredVotes
@@ -846,7 +800,6 @@ export default function App() {
           setActiveRoom(room);
           setSelectedWinner(null);
           setSelectedRouteSnapshot(null);
-          setDrawProof(null);
           setCurrentScreen('planner');
         })
         .catch((error) => {
@@ -861,7 +814,6 @@ export default function App() {
 
     setSelectedWinner(null);
     setSelectedRouteSnapshot(null);
-    setDrawProof(null);
     setCurrentScreen('planner');
   };
 
@@ -882,7 +834,6 @@ export default function App() {
     setActiveRoom(null);
     setSelectedWinner(null);
     setSelectedRouteSnapshot(null);
-    setDrawProof(null);
     setCurrentParticipants([]);
     setRoomError(null);
     syncRoomUrl(null);
@@ -923,7 +874,9 @@ export default function App() {
   const handleSignOut = () => {
     void signOut();
     setCurrentUserIfChanged(null);
+    handledInviteCodeRef.current = '';
     setProfileOpen(false);
+    syncRoomUrl(null);
     setCurrentScreen('home');
   };
 
@@ -957,7 +910,7 @@ export default function App() {
     setActiveRoom(null);
     setOwnedRooms([]);
     setSelectedWinner(null);
-    setDrawProof(null);
+    setSelectedRouteSnapshot(null);
     setCurrentParticipants([]);
     setRoomError(null);
     syncRoomUrl(null);
@@ -982,7 +935,6 @@ export default function App() {
             void refreshOwnedRooms();
           }}
           onOpenExistingRoom={handleOpenExistingRoom}
-          onDeleteExistingRoom={handleDeleteExistingRoom}
           onDeleteExistingRooms={handleDeleteExistingRooms}
           onJoinRoom={handleJoinRoom}
           onStartGuest={handleStartGuest}
@@ -1032,7 +984,6 @@ export default function App() {
           winner={selectedWinner}
           participants={currentParticipants}
           selectedCategory={selectedCategory}
-          selectionMode={selectionMode}
           currentUser={currentUser}
           routeSnapshot={selectedRouteSnapshot ?? activeRoom?.selectedRouteSnapshot ?? null}
           onlineRoomCode={activeRoom?.code ?? null}
