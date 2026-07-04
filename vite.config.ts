@@ -737,6 +737,14 @@ function getServerAiProviders(
   const detectedOpenAiKey =
     detectedUpstageKey && rawOpenAiKey === detectedUpstageKey ? '' : rawOpenAiKey;
 
+  if (detectedOpenAiKey) {
+    addProvider({
+      provider: 'openai',
+      apiKey: detectedOpenAiKey,
+      model: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o',
+    });
+  }
+
   if (detectedUpstageKey) {
     addProvider({
       provider: 'upstage',
@@ -748,14 +756,6 @@ function getServerAiProviders(
           'SOLAR_API_BASE_URL',
           'VITE_UPSTAGE_API_BASE_URL',
         ]) || 'https://api.upstage.ai/v1',
-    });
-  }
-
-  if (detectedOpenAiKey) {
-    addProvider({
-      provider: 'openai',
-      apiKey: detectedOpenAiKey,
-      model: pickFirstEnv(env, ['OPENAI_MODEL', 'VITE_OPENAI_MODEL']) || 'gpt-4o',
     });
   }
 
