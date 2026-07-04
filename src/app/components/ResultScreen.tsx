@@ -1442,17 +1442,17 @@ export function ResultScreen({
                                 >
                                   {getRouteStepTypeLabel(step.type)}
                                 </span>
-                                <div className="min-w-0 flex-1">
-                                  <div className="text-xs font-semibold text-[#16241D]">
+                                <div className="min-w-0 flex-1 overflow-hidden">
+                                  <div className="break-words text-xs font-semibold leading-snug text-[#16241D] [overflow-wrap:anywhere]">
                                     {step.label}
                                   </div>
                                   {step.from || step.to ? (
-                                    <div className="mt-0.5 truncate text-[11px] text-[#9AA8A1]">
+                                    <div className="mt-0.5 line-clamp-2 break-words text-[11px] leading-snug text-[#9AA8A1] [overflow-wrap:anywhere]">
                                       {[step.from, step.to].filter(Boolean).join(' → ')}
                                     </div>
                                   ) : null}
                                   {stepMeta.length ? (
-                                    <div className="mt-1 text-[11px] text-[#9AA8A1]">
+                                    <div className="mt-1 break-words text-[11px] leading-snug text-[#9AA8A1] [overflow-wrap:anywhere]">
                                       {stepMeta.join(' · ')}
                                     </div>
                                   ) : null}
@@ -1474,9 +1474,9 @@ export function ResultScreen({
           </div>
 
           {shouldShowParkingInfo ? (
-            <div className="mt-4 rounded-[1.5rem] border border-[#eef2f6] bg-[#f8fafc] p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-sm font-bold tracking-[-0.02em] text-[#16241D]">
+            <div className="mt-4 max-w-full overflow-hidden rounded-[1.5rem] border border-[#eef2f6] bg-[#f8fafc] p-4">
+              <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
+                <div className="min-w-0 truncate text-sm font-bold tracking-[-0.02em] text-[#16241D]">
                   주차장 정보
                 </div>
                 <a
@@ -1505,27 +1505,27 @@ export function ResultScreen({
               ) : null}
 
               {parkingPlaces.length ? (
-                <div className="grid gap-2 md:grid-cols-2">
+                <div className="grid min-w-0 gap-2 md:grid-cols-2">
                   {parkingPlaces.map((place) => (
                     <a
                       key={place.id}
                       href={place.link}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex items-center gap-3 rounded-2xl bg-white px-4 py-3 shadow-[0_6px_16px_rgba(20,35,29,0.04)] transition-transform active:scale-[0.99]"
+                      className="flex min-w-0 max-w-full items-start gap-3 overflow-hidden rounded-2xl bg-white px-4 py-3 shadow-[0_6px_16px_rgba(20,35,29,0.04)] transition-transform active:scale-[0.99]"
                     >
                       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#FFF0EE] text-sm font-black text-[#ea580c]">
                         P
                       </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold text-[#16241D]">
+                      <span className="min-w-0 flex-1 overflow-hidden">
+                        <span className="line-clamp-2 break-words text-sm font-semibold leading-snug text-[#16241D] [overflow-wrap:anywhere]">
                           {place.name}
                         </span>
-                        <span className="mt-0.5 block truncate text-xs text-[#7a8491]">
+                        <span className="mt-1 line-clamp-2 break-words text-xs leading-snug text-[#7a8491] [overflow-wrap:anywhere]">
                           {place.address || place.categoryPath || `${winner.name} 근처`}
                         </span>
                       </span>
-                      <ExternalLink className="h-4 w-4 shrink-0 text-[#98a2b3]" />
+                      <ExternalLink className="mt-1 h-4 w-4 shrink-0 text-[#98a2b3]" />
                     </a>
                   ))}
                 </div>
@@ -1573,12 +1573,12 @@ export function ResultScreen({
           className="mb-6 scroll-mt-24 rounded-[1.75rem] bg-white p-5 shadow-[0_10px_30px_rgba(20,35,29,0.08)]"
         >
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <div className="text-xl font-bold tracking-[-0.04em] text-[#16241D]">
+            <div className="min-w-0">
+              <div className="break-words text-xl font-bold tracking-[-0.04em] text-[#16241D] [overflow-wrap:anywhere]">
                 {winner.name} 근처 {detailQuery}
               </div>
               {(recommendationError || recommendationStatus === 'loading') && (
-                <p className="mt-1 text-sm leading-relaxed text-[#6E7C75]">
+                <p className="mt-1 break-words text-sm leading-relaxed text-[#6E7C75] [overflow-wrap:anywhere]">
                   {recommendationError ?? `${winner.name} 근처 ${contentMeta.label}를 찾는 중이에요.`}
                 </p>
               )}
@@ -1740,24 +1740,24 @@ export function ResultScreen({
                     key={item.id}
                     onClick={() => setSelectedPlaceId(item.id)}
                     data-recommendation-index={itemIndex}
-                    className={`scroll-mt-24 rounded-[1.5rem] border p-4 text-left shadow-[0_8px_22px_rgba(20,35,29,0.04)] transition-transform active:scale-[0.99] ${
+                    className={`scroll-mt-24 overflow-hidden rounded-[1.5rem] border p-4 text-left shadow-[0_8px_22px_rgba(20,35,29,0.04)] transition-transform active:scale-[0.99] ${
                       active ? 'border-[#16241D] bg-white' : 'border-[#E4EFE9] bg-[#fbfcfd]'
                     }`}
                   >
                     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                      <div className="min-w-0">
-                        <div className="text-lg text-[#16241D]">{item.name}</div>
-                        <div className="mt-1 text-sm text-[#6E7C75]">
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <div className="line-clamp-2 break-words text-lg leading-snug text-[#16241D] [overflow-wrap:anywhere]">{item.name}</div>
+                        <div className="mt-1 line-clamp-2 break-words text-sm leading-snug text-[#6E7C75] [overflow-wrap:anywhere]">
                           {item.categoryPath || item.description}
                         </div>
 
-                        <div className="mt-3 flex items-center gap-2 text-xs text-[#6E7C75]">
-                          <MapPin className="h-3.5 w-3.5 text-[#FF6B5F]" />
-                          <span>{item.roadAddress || item.address || `${winner.name} 근처`}</span>
+                        <div className="mt-3 flex min-w-0 items-start gap-2 text-xs text-[#6E7C75]">
+                          <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF6B5F]" />
+                          <span className="min-w-0 break-words leading-snug [overflow-wrap:anywhere]">{item.roadAddress || item.address || `${winner.name} 근처`}</span>
                         </div>
                       </div>
 
-                      <div className="flex flex-wrap gap-2 md:justify-end">
+                      <div className="flex min-w-0 flex-wrap gap-2 md:shrink-0 md:justify-end">
                         <a
                           href={buildNaverMapSearchLink(getNaverMapKeyword(item))}
                           target="_blank"

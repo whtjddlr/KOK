@@ -107,12 +107,12 @@ export function NearbyPlacesPanel({
               {activeSection.items.slice(0, compact ? 3 : activeSection.items.length).map((place) => (
                 <div
                   key={place.id}
-                  className="rounded-xl border border-[#E4EFE9] bg-white p-3"
+                  className="max-w-full overflow-hidden rounded-xl border border-[#E4EFE9] bg-white p-3"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm text-[#16241D]">{place.name}</div>
-                      <div className="mt-1 text-xs text-[#6E7C75]">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 overflow-hidden">
+                      <div className="line-clamp-2 break-words text-sm leading-snug text-[#16241D] [overflow-wrap:anywhere]">{place.name}</div>
+                      <div className="mt-1 line-clamp-2 break-words text-xs leading-snug text-[#6E7C75] [overflow-wrap:anywhere]">
                         {place.categoryPath || place.description}
                       </div>
                     </div>
@@ -128,9 +128,9 @@ export function NearbyPlacesPanel({
                       </a>
                   </div>
 
-                  <div className="mt-3 flex items-center gap-2 text-xs text-[#6E7C75]">
-                    <MapPin className="h-3.5 w-3.5 text-[#FF6B5F]" />
-                    <span>{place.roadAddress || place.address || `${candidate.name} 근처`}</span>
+                  <div className="mt-3 flex min-w-0 items-start gap-2 text-xs text-[#6E7C75]">
+                    <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF6B5F]" />
+                    <span className="min-w-0 break-words leading-snug [overflow-wrap:anywhere]">{place.roadAddress || place.address || `${candidate.name} 근처`}</span>
                   </div>
                 </div>
               ))}

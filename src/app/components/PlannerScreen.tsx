@@ -3447,17 +3447,17 @@ export function PlannerScreen({
                                 key={`${result.title}-${result.coordinates.lat}-${result.coordinates.lng}`}
                                 type="button"
                                 onClick={() => handleSelectAddressResult(result)}
-                                className={`w-full rounded-2xl border px-4 py-3 text-left transition-all ${
+                                className={`w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition-all ${
                                   isSelected
                                     ? 'border-[#16241D] bg-white shadow-sm'
                                     : 'border-[#E4EFE9] bg-white/85'
                                 }`}
                               >
-                                <div className="text-sm text-[#16241D]">
+                                <div className="line-clamp-2 break-words text-sm leading-snug text-[#16241D] [overflow-wrap:anywhere]">
                                   {locationLabel}
                                 </div>
                                 {(result.roadAddress || result.jibunAddress) && (
-                                  <div className="mt-1 text-xs text-[#6E7C75]">
+                                  <div className="mt-1 line-clamp-2 break-words text-xs leading-snug text-[#6E7C75] [overflow-wrap:anywhere]">
                                     {result.roadAddress || result.jibunAddress}
                                   </div>
                                 )}
@@ -3736,17 +3736,17 @@ export function PlannerScreen({
                                   >
                                     {getRouteStepTypeLabel(step.type)}
                                   </span>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="text-xs font-semibold text-[#16241D]">
+                                  <div className="min-w-0 flex-1 overflow-hidden">
+                                    <div className="break-words text-xs font-semibold leading-snug text-[#16241D] [overflow-wrap:anywhere]">
                                       {step.label}
                                     </div>
                                     {step.from || step.to ? (
-                                      <div className="mt-0.5 truncate text-[11px] text-[#9AA8A1]">
+                                      <div className="mt-0.5 line-clamp-2 break-words text-[11px] leading-snug text-[#9AA8A1] [overflow-wrap:anywhere]">
                                         {[step.from, step.to].filter(Boolean).join(' → ')}
                                       </div>
                                     ) : null}
                                     {stepMeta.length ? (
-                                      <div className="mt-1 text-[11px] text-[#9AA8A1]">
+                                      <div className="mt-1 break-words text-[11px] leading-snug text-[#9AA8A1] [overflow-wrap:anywhere]">
                                         {stepMeta.join(' · ')}
                                       </div>
                                     ) : null}

@@ -827,9 +827,9 @@ export function MapView({
 
       {activeNearbyPlaceDetail && (
         <div className="absolute inset-x-4 bottom-16 z-10 md:right-20 md:left-4">
-          <div className="rounded-[1.75rem] border border-white/80 bg-white/96 p-4 shadow-[0_18px_40px_rgba(18,28,45,0.16)] backdrop-blur-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
+          <div className="max-w-full overflow-hidden rounded-[1.75rem] border border-white/80 bg-white/96 p-4 shadow-[0_18px_40px_rgba(18,28,45,0.16)] backdrop-blur-sm">
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0 flex-1 overflow-hidden">
                 <div className="mb-2 flex flex-wrap gap-2">
                   {false ? (
                     <span className="rounded-full bg-[#FFF0EE] px-3 py-1 text-[11px] text-[#FF6B5F]">
@@ -842,10 +842,10 @@ export function MapView({
                     </span>
                   ) : null}
                 </div>
-                <div className="truncate text-base text-[#16241D]">
+                <div className="line-clamp-2 break-words text-base leading-snug text-[#16241D] [overflow-wrap:anywhere]">
                   {activeNearbyPlaceDetail?.name}
                 </div>
-                <div className="mt-1 text-sm leading-relaxed text-[#6E7C75]">
+                <div className="mt-1 line-clamp-2 break-words text-sm leading-relaxed text-[#6E7C75] [overflow-wrap:anywhere]">
                   {activeNearbyPlaceDetail?.categoryPath ??
                     activeNearbyPlaceDetail?.description}
                 </div>
@@ -862,21 +862,21 @@ export function MapView({
 
             {activeCandidateDetail ? (
               <>
-                <p className="mt-3 text-sm leading-relaxed text-[#44505b]">
+                <p className="mt-3 break-words text-sm leading-relaxed text-[#44505b] [overflow-wrap:anywhere]">
                   {activeCandidateDetail.description}
                 </p>
-                <div className="mt-3 flex items-start gap-2 text-xs text-[#6E7C75]">
+                <div className="mt-3 flex min-w-0 items-start gap-2 text-xs text-[#6E7C75]">
                   <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF6B5F]" />
-                  <span>{activeCandidateDetail.routeHint}</span>
+                  <span className="min-w-0 break-words leading-snug [overflow-wrap:anywhere]">{activeCandidateDetail.routeHint}</span>
                 </div>
               </>
             ) : null}
 
             {activeNearbyPlaceDetail ? (
               <>
-                <div className="mt-3 flex items-start gap-2 text-xs text-[#6E7C75]">
+                <div className="mt-3 flex min-w-0 items-start gap-2 text-xs text-[#6E7C75]">
                   <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF6B5F]" />
-                  <span>
+                  <span className="min-w-0 break-words leading-snug [overflow-wrap:anywhere]">
                     {activeNearbyPlaceDetail.roadAddress ||
                       activeNearbyPlaceDetail.address ||
                       `${activeNearbyPlaceDetail.name} 근처`}
