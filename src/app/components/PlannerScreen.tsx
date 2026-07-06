@@ -46,6 +46,7 @@ import { CandidateCard } from './CandidateCard';
 import { RandomDrawer, type LadderBar } from './RandomDrawer';
 import { AiConfigSheet } from './AiConfigSheet';
 import { useAiGeneratedCandidates } from '../hooks/useAiGeneratedCandidates';
+import { useCloseRangeHotplaceCandidates } from '../hooks/useCloseRangeHotplaceCandidates';
 import { useLiveCandidateSearch } from '../hooks/useLiveCandidateSearch';
 import { useCandidateTravelRoutes } from '../hooks/useCandidateTravelRoutes';
 import { useFairnessVerifiedCandidateInsights } from '../hooks/useFairnessVerifiedCandidateInsights';
@@ -1258,9 +1259,17 @@ export function PlannerScreen({
     effectiveRuntimeAiConfig,
     aiConfigSignature,
   );
+  const { candidates: closeRangeHotplaceCandidates } = useCloseRangeHotplaceCandidates(
+    participants,
+    selectedCategory,
+    selectionMode,
+  );
   const candidateSeeds = useMemo(
-    () => (useSharedOnlineCandidatePool ? mockCandidates : [...mockCandidates, ...aiGeneratedCandidates]),
-    [aiGeneratedCandidates, useSharedOnlineCandidatePool],
+    () =>
+      useSharedOnlineCandidatePool
+        ? mockCandidates
+        : [...mockCandidates, ...aiGeneratedCandidates, ...closeRangeHotplaceCandidates],
+    [aiGeneratedCandidates, closeRangeHotplaceCandidates, useSharedOnlineCandidatePool],
   );
 
   const candidateUniverse = useMemo(
