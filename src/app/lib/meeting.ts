@@ -269,6 +269,25 @@ function getEffectiveFairnessSpread(
   return getMinorityBenefitProfile(insight, participants)?.effectiveSpread ?? insight.spreadDuration;
 }
 
+/**
+ * "치우친 곳 빼기" 옵션용 — 실제 이동시간 편차(spreadDuration, 화면에 보이는 값)가 공평 한도를
+ * 넘겼거나 한쪽으로 떨어진(detached) 후보를 하드컷한다. 자동 완화로 끼어든 극단 후보(예: 편차
+ * 40~70분)를 제거한다. 소수혜택 할인(effectiveSpread)이 아니라 raw 편차로 판정하므로,
+ * "편차 N분"으로 표시되는 값과 옵션 동작이 일치한다.
+ * 공평 후보가 하나도 없으면(모두 멀리 흩어진 경우) 빈 배열을 반환하므로 호출부에서 폴백 처리한다.
+ */
+export function filterFairDrawPool(
+  pool: CandidateInsight[],
+  thrillLevel: ThrillLevel = 1,
+  participants: Participant[] = [],
+) {
+  const limit = getFairnessSpreadLimit(thrillLevel, participants);
+
+  return pool.filter(
+    (insight) => !isDetachedFairnessTrap(insight) && insight.spreadDuration <= limit,
+  );
+}
+
 function getLongTripPenalty(insight: CandidateInsight) {
   return (
     Math.max(0, insight.averageDuration - 48) * 0.85 +

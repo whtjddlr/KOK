@@ -62,6 +62,7 @@ import {
   getDrawPool,
   getDynamicCandidateInsights,
   getFairnessSpreadLimit,
+  filterFairDrawPool,
   getPracticalRouteGuardedInsights,
 } from '../lib/meeting';
 import {
@@ -747,6 +748,7 @@ export function PlannerScreen({
     initialParticipants.length ? 'map' : 'people',
   );
   const [showAddForm, setShowAddForm] = useState(false);
+  const [strictFairness, setStrictFairness] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
   const [drawSessionSnapshot, setDrawSessionSnapshot] = useState<DrawSessionSnapshot | null>(null);
   const [sharedDrawChoice, setSharedDrawChoice] = useState<SharedDrawChoice | null>(null);
@@ -1468,9 +1470,26 @@ export function PlannerScreen({
       selectionMode,
     ],
   );
+  // "치우친 곳 빼기" 옵션: 켜지면 공평 한도를 넘긴 후보를 드로어 풀에서 제외한다.
+  // 시드/진행자 선출은 계속 필터 안 된 drawPool로 계산하므로(아래 readyDrawSessionSeed)
+  // 참여자 간 진행자 선출이 갈리지 않는다. 진행자가 필터한 풀은 기존 broadcast로 전원 공유된다.
+  const strictFairInfo = useMemo(() => {
+    if (!strictFairness || selectionMode !== 'balance') {
+      return { pool: drawPool, hiddenCount: 0, allSkewed: false };
+    }
+
+    const fairPool = filterFairDrawPool(drawPool, effectiveThrillLevel, participants);
+
+    if (!fairPool.length) {
+      return { pool: drawPool, hiddenCount: 0, allSkewed: drawPool.length > 0 };
+    }
+
+    return { pool: fairPool, hiddenCount: drawPool.length - fairPool.length, allSkewed: false };
+  }, [drawPool, effectiveThrillLevel, participants, selectionMode, strictFairness]);
+  const strictDrawPool = strictFairInfo.pool;
   const visibleCandidateInsights = useMemo(
-    () => (selectionMode === 'balance' ? drawPool : candidateInsights),
-    [candidateInsights, drawPool, selectionMode],
+    () => (selectionMode === 'balance' ? strictDrawPool : candidateInsights),
+    [candidateInsights, selectionMode, strictDrawPool],
   );
   const fairnessVerificationPending = Boolean(
     participants.length >= 2 &&
@@ -1639,7 +1658,7 @@ export function PlannerScreen({
       }
 
       setDrawSessionSnapshot({
-        candidateInsights: drawPool,
+        candidateInsights: strictDrawPool,
         participants: snapshotParticipants,
         seed: sessionSeed,
       });
@@ -2840,7 +2859,7 @@ export function PlannerScreen({
 	          : fallbackNotice ?? `후보 ${drawPool.length}곳이 있어요.`;
   const displayRoomMessage = getFriendlyRoomMessage(roomMessage);
   const activeDrawSession = drawSessionSnapshot ?? {
-    candidateInsights: drawPool,
+    candidateInsights: strictDrawPool,
     participants,
     seed: readyDrawSessionSeed ?? undefined,
     ladderBars: undefined,
@@ -4068,6 +4087,39 @@ export function PlannerScreen({
                     );
                   })}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setStrictFairness((value) => !value)}
+                  aria-pressed={strictFairness}
+                  className={`mt-3 flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition-all active:scale-[0.99] ${
+                    strictFairness ? 'border-[#FF6B5F] bg-[#FFF0EE]' : 'border-[#e6ebf0] bg-white'
+                  }`}
+                >
+                  <span className="min-w-0">
+                    <span className="block text-sm font-extrabold text-[#16241D]">치우친 곳 빼기</span>
+                    <span className="block text-xs font-medium text-[#6f7b79]">
+                      {strictFairInfo.allSkewed
+                        ? '공평한 후보가 없어 이번엔 그대로 뒀어요.'
+                        : strictFairness && strictFairInfo.hiddenCount > 0
+                          ? `이동 부담이 한쪽에 쏠린 후보 ${strictFairInfo.hiddenCount}곳을 뺐어요.`
+                          : '이동 부담이 한쪽에 크게 쏠린 후보를 추첨에서 빼요.'}
+                    </span>
+                    {onlineRoom && (
+                      <span className="mt-0.5 block text-[11px] font-medium text-[#9aa5a3]">
+                        진행자가 켜면 모두에게 적용돼요.
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 text-sm font-bold ${
+                      strictFairness
+                        ? 'border-[#FF6B5F] bg-[#FF6B5F] text-white'
+                        : 'border-[#cfd8d6] bg-white text-transparent'
+                    }`}
+                  >
+                    ✓
+                  </span>
+                </button>
               </section>
             )}
           </main>
