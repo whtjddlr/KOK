@@ -1661,8 +1661,12 @@ export function getCloseBalancedCandidateInsights(
     nearestReasonableLimit,
   );
 
+  // 생활권 안 후보가 3개 이상이면 그대로 만족한다. 4개를 채우려고
+  // 반경 밖 후보(공정하지만 불필요하게 먼 곳)로 풀을 희석하지 않는다.
+  const acceptableCloseCount = Math.min(3, minimumUsefulCount);
+
   if (
-    mergedNearestReasonableInsights.length >= minimumUsefulCount ||
+    mergedNearestReasonableInsights.length >= acceptableCloseCount ||
     mergedNearestReasonableInsights.length === insights.length
   ) {
     return mergedNearestReasonableInsights;
