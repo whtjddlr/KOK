@@ -1641,7 +1641,7 @@ export function getCloseBalancedCandidateInsights(
     relaxedLimit,
   );
 
-  if (mergedRelaxedInsights.length) {
+  if (mergedRelaxedInsights.length >= minimumUsefulCount) {
     return mergedRelaxedInsights;
   }
 
@@ -1651,14 +1651,30 @@ export function getCloseBalancedCandidateInsights(
       insight.spreadDuration <= closeContext.spreadLimitMinutes + 12,
   );
 
-  if (nearestReasonableInsights.length) {
-    return nearestReasonableInsights.slice(
-      0,
-      Math.min(8, Math.max(minimumUsefulCount, nearestReasonableInsights.length)),
-    );
+  const nearestReasonableLimit = Math.min(
+    8,
+    Math.max(minimumUsefulCount, nearestReasonableInsights.length),
+  );
+  const mergedNearestReasonableInsights = mergeUniqueInsights(
+    mergedRelaxedInsights,
+    nearestReasonableInsights,
+    nearestReasonableLimit,
+  );
+
+  if (
+    mergedNearestReasonableInsights.length >= minimumUsefulCount ||
+    mergedNearestReasonableInsights.length === insights.length
+  ) {
+    return mergedNearestReasonableInsights;
   }
 
-  return insights.slice(0, Math.min(Math.max(minimumUsefulCount, participants.length + 1), insights.length));
+  return insights.slice(
+    0,
+    Math.min(
+      Math.max(minimumUsefulCount, participants.length + 1),
+      insights.length,
+    ),
+  );
 }
 
 function getTravelSpread(travelInfo: TravelInfo[]) {
@@ -1787,7 +1803,7 @@ function buildMidpointCandidates(
       ? Math.max(5.5, Math.min(14, clusteredContext.separationKm * 0.34 + 3))
       : Math.max(3, Math.min(11, spreadKm * 0.95 + 2.6));
 
-  return stationOptions
+  const scoredStations = stationOptions
     .map((station) => {
       const centerDistance = getDistanceKm(center, station.coordinates);
       const axisDistance = getBalancedParticipantAxisDistanceKm(
@@ -1848,34 +1864,80 @@ function buildMidpointCandidates(
           bridgeCorridorPenalty,
         projectionRatio,
       };
-    })
-    .filter(
-      ({ centerDistance, axisDistance, projectionRatio }) => {
-        if (!useBridgeCorridor) {
-          return (
-            centerDistance <= searchRadiusKm ||
-            (!closeContext.isCloseGroup && axisDistance <= Math.max(1.2, searchRadiusKm * 0.28))
-          );
+    });
+  const isStrictMidpointStation = ({
+    centerDistance,
+    axisDistance,
+    projectionRatio,
+  }: (typeof scoredStations)[number]) => {
+    if (!useBridgeCorridor) {
+      return (
+        centerDistance <= searchRadiusKm ||
+        (!closeContext.isCloseGroup && axisDistance <= Math.max(1.2, searchRadiusKm * 0.28))
+      );
+    }
+
+    const middleBandLimit = closeContext.isCloseGroup
+      ? 0.42
+      : clusteredContext
+        ? 0.36
+        : 0.28;
+    const nearMiddleOfSegment = Math.abs(projectionRatio - 0.5) <= middleBandLimit;
+    const axisLimit = closeContext.isCloseGroup
+      ? closeContext.axisLimitKm + 0.4
+      : clusteredContext
+        ? Math.max(1.8, Math.min(4.6, clusteredContext.separationKm * 0.12 + 0.8))
+        : Math.max(1.4, Math.min(3.6, spreadKm * 0.22 + 0.8));
+
+    return (
+      (centerDistance <= searchRadiusKm && axisDistance <= axisLimit + 1.2) ||
+      (nearMiddleOfSegment && axisDistance <= axisLimit)
+    );
+  };
+  const minimumCloseMidpointCount = Math.min(6, scoredStations.length);
+  const strictScoredStations = scoredStations.filter(isStrictMidpointStation);
+  let midpointPool = strictScoredStations;
+
+  if (closeContext.isCloseGroup && strictScoredStations.length < minimumCloseMidpointCount) {
+    const pooledScoredStations = [...strictScoredStations];
+    const seenStationNames = new Set(
+      pooledScoredStations.map(({ station }) => station.name),
+    );
+    const appendUniqueStations = (stations: typeof scoredStations) => {
+      stations.forEach((scoredStation) => {
+        if (seenStationNames.has(scoredStation.station.name)) {
+          return;
         }
 
-        const middleBandLimit = closeContext.isCloseGroup
-          ? 0.42
-          : clusteredContext
-            ? 0.36
-            : 0.28;
-        const nearMiddleOfSegment = Math.abs(projectionRatio - 0.5) <= middleBandLimit;
-        const axisLimit = closeContext.isCloseGroup
-          ? closeContext.axisLimitKm + 0.4
-          : clusteredContext
-            ? Math.max(1.8, Math.min(4.6, clusteredContext.separationKm * 0.12 + 0.8))
-            : Math.max(1.4, Math.min(3.6, spreadKm * 0.22 + 0.8));
+        pooledScoredStations.push(scoredStation);
+        seenStationNames.add(scoredStation.station.name);
+      });
+    };
 
-        return (
-          (centerDistance <= searchRadiusKm && axisDistance <= axisLimit + 1.2) ||
-          (nearMiddleOfSegment && axisDistance <= axisLimit)
-        );
-      },
-    )
+    appendUniqueStations(
+      scoredStations.filter(
+        ({ centerDistance, axisDistance }) =>
+          centerDistance <= closeContext.candidateLimitKm + 3.2 &&
+          axisDistance <= closeContext.axisLimitKm + 1.8,
+      ),
+    );
+
+    if (pooledScoredStations.length < minimumCloseMidpointCount) {
+      appendUniqueStations(
+        [...scoredStations]
+          .filter(
+            ({ centerDistance }) =>
+              centerDistance <= closeContext.candidateLimitKm + 3.2,
+          )
+          .sort((left, right) => left.centerDistance - right.centerDistance)
+          .slice(0, minimumCloseMidpointCount),
+      );
+    }
+
+    midpointPool = pooledScoredStations;
+  }
+
+  return midpointPool
     .sort((left, right) => left.score - right.score)
     .slice(0, participants.length <= 2 ? 10 : 12)
     .map(({ station }) => ({
@@ -1941,14 +2003,32 @@ function buildCloseRangeCandidates(
     return [];
   }
 
-  const stationCandidates = stationOptions
+  const nearestStations = stationOptions
     .map((station) => ({
       station,
       centerDistance: getDistanceKm(center, station.coordinates),
     }))
+    .sort((left, right) => left.centerDistance - right.centerDistance);
+  const strictNearestStations = nearestStations
     .filter(({ centerDistance }) => centerDistance <= closeContext.candidateLimitKm)
-    .sort((left, right) => left.centerDistance - right.centerDistance)
-    .slice(0, 6)
+    .slice(0, 6);
+  const stationPool = [...strictNearestStations];
+  const seenStationNames = new Set(stationPool.map(({ station }) => station.name));
+
+  if (stationPool.length < 6) {
+    nearestStations
+      .filter(({ centerDistance }) => centerDistance <= closeContext.candidateLimitKm + 3.2)
+      .forEach((stationCandidate) => {
+        if (seenStationNames.has(stationCandidate.station.name) || stationPool.length >= 6) {
+          return;
+        }
+
+        stationPool.push(stationCandidate);
+        seenStationNames.add(stationCandidate.station.name);
+      });
+  }
+
+  const stationCandidates = stationPool
     .map(({ station }) => ({
       id: `close-range-${normalizeAnchorName(station.name)}`,
       name: station.name,
