@@ -269,6 +269,72 @@ function getEffectiveFairnessSpread(
   return getMinorityBenefitProfile(insight, participants)?.effectiveSpread ?? insight.spreadDuration;
 }
 
+/**
+ * "치우친 곳 빼기" 옵션용 — 실제 이동시간 편차(spreadDuration, 화면에 보이는 값)가 공평 한도를
+ * 넘겼거나 한쪽으로 떨어진(detached) 후보를 하드컷한다. 자동 완화로 끼어든 극단 후보(예: 편차
+ * 40~70분)를 제거한다. 소수혜택 할인(effectiveSpread)이 아니라 raw 편차로 판정하므로,
+ * "편차 N분"으로 표시되는 값과 옵션 동작이 일치한다.
+ * 공평 후보가 하나도 없으면(모두 멀리 흩어진 경우) 빈 배열을 반환하므로 호출부에서 폴백 처리한다.
+ */
+export function filterFairDrawPool(
+  pool: CandidateInsight[],
+  thrillLevel: ThrillLevel = 1,
+  participants: Participant[] = [],
+) {
+  const limit = getFairnessSpreadLimit(thrillLevel, participants);
+
+  return pool.filter(
+    (insight) => !isDetachedFairnessTrap(insight) && insight.spreadDuration <= limit,
+  );
+}
+
+export interface StrictFairDrawPoolResult {
+  pool: CandidateInsight[];
+  hiddenCount: number;
+  /** true면 한도 통과 후보가 없어 "그중 가장 공평한 후보"로 최선 추천한 상태 */
+  bestEffort: boolean;
+}
+
+/**
+ * "치우친 곳 빼기" 옵션의 풀 결정.
+ * 한도 통과 후보가 있으면 그것만 남기고, 전부 한도를 넘으면 원본을 그대로 돌려주는 대신
+ * 편차가 가장 작은 후보(최소 편차 +5분 이내, 함정 후보 제외)만 추려 상대적 최선을 추천한다.
+ * 어느 경우든 추첨이 막히지 않도록 최소 풀 크기를 보장한다.
+ */
+export function getStrictFairDrawPool(
+  pool: CandidateInsight[],
+  thrillLevel: ThrillLevel = 1,
+  participants: Participant[] = [],
+): StrictFairDrawPoolResult {
+  if (!pool.length) {
+    return { pool, hiddenCount: 0, bestEffort: false };
+  }
+
+  const fairPool = filterFairDrawPool(pool, thrillLevel, participants);
+
+  if (fairPool.length) {
+    return { pool: fairPool, hiddenCount: pool.length - fairPool.length, bestEffort: false };
+  }
+
+  const trapFreePool = pool.filter((insight) => !isDetachedFairnessTrap(insight));
+  const ranked = [...(trapFreePool.length ? trapFreePool : pool)].sort(
+    (left, right) =>
+      left.spreadDuration - right.spreadDuration ||
+      left.farthestDuration - right.farthestDuration ||
+      left.averageDuration - right.averageDuration,
+  );
+  const bestSpread = ranked[0].spreadDuration;
+  const tolerantPool = ranked.filter((insight) => insight.spreadDuration <= bestSpread + 5);
+  const minSize = Math.min(MIN_BALANCE_DRAW_POOL_SIZE, ranked.length);
+  const bestEffortPool = tolerantPool.length >= minSize ? tolerantPool : ranked.slice(0, minSize);
+
+  return {
+    pool: bestEffortPool,
+    hiddenCount: pool.length - bestEffortPool.length,
+    bestEffort: true,
+  };
+}
+
 function getLongTripPenalty(insight: CandidateInsight) {
   return (
     Math.max(0, insight.averageDuration - 48) * 0.85 +
@@ -3034,15 +3100,27 @@ export function getDrawPool(
           getEffectiveFairnessSpread(insight, participants) >
           getFairnessSpreadLimit(5, participants),
       );
+      // 공정 한도를 넘겨서 완화한 경우, 완곡어 대신 실제로 얼마나 벌어졌는지를 숫자로 고지한다.
+      const poolMaxSpread = Math.round(
+        Math.max(
+          0,
+          ...autoRelaxedPool.pool.map((insight) =>
+            getEffectiveFairnessSpread(insight, participants),
+          ),
+        ),
+      );
       const relaxedNotice =
         includesImpossibleFairnessCandidate
-          ? '거리가 멀어 가까운 중간 후보만 골랐어요.'
+          ? `모두 가깝게 모이긴 어려운 위치라, 이동시간 차이가 최대 ${poolMaxSpread}분인 후보까지 포함했어요.`
           : includesOverLimitCandidate
-          ? '조금 먼 후보까지 포함했어요.'
+          ? `일부 참여자는 설정한 이동시간을 넘겨요. 이동시간 차이는 최대 ${poolMaxSpread}분이에요.`
           : autoRelaxedPool.relaxedToLevel > thrillLevel
-          ? `범위를 Lv${autoRelaxedPool.relaxedToLevel}까지 넓혔어요.`
+          ? `공평 후보가 부족해 범위를 Lv${autoRelaxedPool.relaxedToLevel}(차이 ${getFairnessSpreadLimit(
+              autoRelaxedPool.relaxedToLevel,
+              participants,
+            )}분 이내)까지 넓혔어요.`
           : autoRelaxedPool.pool.length < preferredPoolSize
-            ? '중간 후보를 최소 3개 기준으로 압축했어요.'
+            ? '공평 후보가 적어 최소 3개 기준으로 압축했어요.'
             : null;
 
       return {
@@ -3290,22 +3368,33 @@ export function buildDrawPlan(
     undefined,
     participants,
   );
-  const drawPool = pool.length ? pool : insights;
+  // 사용자는 화면에 보이는 슬롯(입력 insights로 구성)에서 후보를 직접 고르므로,
+  // lockedWinner는 곧 "사용자가 화면에서 본 그 후보"다. 반드시 입력 insights 기준으로만
+  // 검증한다 — getDrawPool이 다시 좁힌 pool 기준으로 검증하면 슬롯보다 적은 풀 때문에
+  // 사용자가 고른 후보가 조용히 다른 후보로 바뀔 수 있다.
+  const lockedInsight =
+    (lockedWinner &&
+      insights.find((insight) => insight.candidate.id === lockedWinner.candidate.id)) ||
+    lockedWinner ||
+    null;
+  const basePool = pool.length ? pool : insights;
+  // 고른 후보가 좁혀진 풀 밖이면, 결선/연출 풀에도 포함시켜 결과와 애니메이션을 일치시킨다.
+  const drawPool =
+    lockedInsight &&
+    !basePool.some((insight) => insight.candidate.id === lockedInsight.candidate.id)
+      ? [lockedInsight, ...basePool]
+      : basePool;
   const fallbackWinner = drawPool[0];
 
   if (!fallbackWinner) {
     throw new Error('추첨할 후보가 없어요.');
   }
 
-  const winner =
-    lockedWinner &&
-    drawPool.some((insight) => insight.candidate.id === lockedWinner.candidate.id)
-      ? lockedWinner
-      : selectionMode === 'balance'
-        ? fallbackWinner
-        : drawPool.length
-          ? weightedPick(drawPool, selectionMode, thrillLevel, participants, drawSeed)
-          : fallbackWinner;
+  const winner = lockedInsight
+    ? lockedInsight
+    : selectionMode === 'balance'
+      ? fallbackWinner
+      : weightedPick(drawPool, selectionMode, thrillLevel, participants, drawSeed);
   const runnerUps = sampleWithoutRepeat(drawPool, 2, [winner.candidate.id], drawSeed);
   const finalists = [winner, ...runnerUps].slice(0, Math.min(3, drawPool.length));
   const rapidShuffle = Array.from({ length: Math.max(12, drawPool.length * 3) }, (_, index) => {
