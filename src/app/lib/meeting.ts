@@ -288,6 +288,53 @@ export function filterFairDrawPool(
   );
 }
 
+export interface StrictFairDrawPoolResult {
+  pool: CandidateInsight[];
+  hiddenCount: number;
+  /** true면 한도 통과 후보가 없어 "그중 가장 공평한 후보"로 최선 추천한 상태 */
+  bestEffort: boolean;
+}
+
+/**
+ * "치우친 곳 빼기" 옵션의 풀 결정.
+ * 한도 통과 후보가 있으면 그것만 남기고, 전부 한도를 넘으면 원본을 그대로 돌려주는 대신
+ * 편차가 가장 작은 후보(최소 편차 +5분 이내, 함정 후보 제외)만 추려 상대적 최선을 추천한다.
+ * 어느 경우든 추첨이 막히지 않도록 최소 풀 크기를 보장한다.
+ */
+export function getStrictFairDrawPool(
+  pool: CandidateInsight[],
+  thrillLevel: ThrillLevel = 1,
+  participants: Participant[] = [],
+): StrictFairDrawPoolResult {
+  if (!pool.length) {
+    return { pool, hiddenCount: 0, bestEffort: false };
+  }
+
+  const fairPool = filterFairDrawPool(pool, thrillLevel, participants);
+
+  if (fairPool.length) {
+    return { pool: fairPool, hiddenCount: pool.length - fairPool.length, bestEffort: false };
+  }
+
+  const trapFreePool = pool.filter((insight) => !isDetachedFairnessTrap(insight));
+  const ranked = [...(trapFreePool.length ? trapFreePool : pool)].sort(
+    (left, right) =>
+      left.spreadDuration - right.spreadDuration ||
+      left.farthestDuration - right.farthestDuration ||
+      left.averageDuration - right.averageDuration,
+  );
+  const bestSpread = ranked[0].spreadDuration;
+  const tolerantPool = ranked.filter((insight) => insight.spreadDuration <= bestSpread + 5);
+  const minSize = Math.min(MIN_BALANCE_DRAW_POOL_SIZE, ranked.length);
+  const bestEffortPool = tolerantPool.length >= minSize ? tolerantPool : ranked.slice(0, minSize);
+
+  return {
+    pool: bestEffortPool,
+    hiddenCount: pool.length - bestEffortPool.length,
+    bestEffort: true,
+  };
+}
+
 function getLongTripPenalty(insight: CandidateInsight) {
   return (
     Math.max(0, insight.averageDuration - 48) * 0.85 +

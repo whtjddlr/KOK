@@ -62,7 +62,7 @@ import {
   getDrawPool,
   getDynamicCandidateInsights,
   getFairnessSpreadLimit,
-  filterFairDrawPool,
+  getStrictFairDrawPool,
   getPracticalRouteGuardedInsights,
 } from '../lib/meeting';
 import {
@@ -1470,21 +1470,16 @@ export function PlannerScreen({
       selectionMode,
     ],
   );
-  // "치우친 곳 빼기" 옵션: 켜지면 공평 한도를 넘긴 후보를 드로어 풀에서 제외한다.
+  // "치우친 곳 빼기" 옵션: 켜지면 공평 한도를 넘긴 후보를 드로어 풀에서 제외하고,
+  // 전부 한도를 넘으면 그중 편차가 가장 작은 후보들로 최선(bestEffort) 추천한다.
   // 시드/진행자 선출은 계속 필터 안 된 drawPool로 계산하므로(아래 readyDrawSessionSeed)
   // 참여자 간 진행자 선출이 갈리지 않는다. 진행자가 필터한 풀은 기존 broadcast로 전원 공유된다.
   const strictFairInfo = useMemo(() => {
     if (!strictFairness || selectionMode !== 'balance') {
-      return { pool: drawPool, hiddenCount: 0, allSkewed: false };
+      return { pool: drawPool, hiddenCount: 0, bestEffort: false };
     }
 
-    const fairPool = filterFairDrawPool(drawPool, effectiveThrillLevel, participants);
-
-    if (!fairPool.length) {
-      return { pool: drawPool, hiddenCount: 0, allSkewed: drawPool.length > 0 };
-    }
-
-    return { pool: fairPool, hiddenCount: drawPool.length - fairPool.length, allSkewed: false };
+    return getStrictFairDrawPool(drawPool, effectiveThrillLevel, participants);
   }, [drawPool, effectiveThrillLevel, participants, selectionMode, strictFairness]);
   const strictDrawPool = strictFairInfo.pool;
   const visibleCandidateInsights = useMemo(
@@ -4098,8 +4093,8 @@ export function PlannerScreen({
                   <span className="min-w-0">
                     <span className="block text-sm font-extrabold text-[#16241D]">치우친 곳 빼기</span>
                     <span className="block text-xs font-medium text-[#6f7b79]">
-                      {strictFairInfo.allSkewed
-                        ? '공평한 후보가 없어 이번엔 그대로 뒀어요.'
+                      {strictFairness && strictFairInfo.bestEffort
+                        ? `모두 공평 기준을 넘어서, 그중 가장 공평한 ${strictFairInfo.pool.length}곳만 추렸어요.`
                         : strictFairness && strictFairInfo.hiddenCount > 0
                           ? `이동 부담이 한쪽에 쏠린 후보 ${strictFairInfo.hiddenCount}곳을 뺐어요.`
                           : '이동 부담이 한쪽에 크게 쏠린 후보를 추첨에서 빼요.'}

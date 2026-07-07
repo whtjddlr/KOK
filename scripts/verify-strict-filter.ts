@@ -9,6 +9,7 @@ import {
   getDrawPool,
   getFairnessSpreadLimit,
   filterFairDrawPool,
+  getStrictFairDrawPool,
 } from '../src/app/lib/meeting';
 import { mockCandidates } from '../src/app/data/mockData';
 import { Coordinates, Participant } from '../src/app/types';
@@ -27,6 +28,9 @@ let removedTotal = 0;
 let checkedPools = 0;
 let overLimitAfterFilter = 0;
 let emptyAfterFilter = 0;
+let strictEmpty = 0;
+let bestEffortCount = 0;
+let bestEffortBad = 0;
 
 for (let s = 0; s < 600; s += 1) {
   const n = 3 + (s % 3); // 3~5명
@@ -51,12 +55,27 @@ for (let s = 0; s < 600; s += 1) {
   // 필터 후 남은 후보는 모두 한도 이내여야 함
   if (filtered.some((i) => i.spreadDuration > limit)) overLimitAfterFilter += 1;
   if (filtered.length === 0) emptyAfterFilter += 1;
+
+  // getStrictFairDrawPool: 어떤 경우에도 빈 풀이 없어야 하고, best-effort는 최선 후보여야 함
+  const strict = getStrictFairDrawPool(pool, 1, parts);
+  if (!strict.pool.length) strictEmpty += 1;
+  if (strict.bestEffort) {
+    bestEffortCount += 1;
+    const minSpread = Math.min(...pool.map((i) => i.spreadDuration));
+    const maxKept = Math.max(...strict.pool.map((i) => i.spreadDuration));
+    const isSubset = strict.pool.every((i) => pool.some((o) => o.candidate.id === i.candidate.id));
+    if (!isSubset || (maxKept > minSpread + 5 && strict.pool.length > 3)) bestEffortBad += 1;
+  }
 }
 
 console.log(`검사한 풀: ${checkedPools}개 (3~5명, 1명 멀리 배치)`);
 console.log(`필터가 제거한 치우친 후보 총합: ${removedTotal}개 (풀당 평균 ${(removedTotal / checkedPools).toFixed(2)}개)`);
 console.log(`필터 후에도 한도 초과가 남은 풀: ${overLimitAfterFilter}개 ${overLimitAfterFilter === 0 ? '✅' : '❌'}`);
-console.log(`필터 후 완전히 빈 풀(모두 치우침 → 폴백 필요): ${emptyAfterFilter}개 (호출부에서 원본 폴백)`);
+console.log(`필터 후 완전히 빈 풀(모두 치우침 → 최선 추천으로 전환): ${emptyAfterFilter}개`);
+console.log(`getStrictFairDrawPool 빈 풀 발생: ${strictEmpty}개 ${strictEmpty === 0 ? '✅' : '❌'}`);
+console.log(
+  `best-effort 발동 ${bestEffortCount}회 중 규칙 위반(부분집합·최소편차+5분): ${bestEffortBad}개 ${bestEffortBad === 0 ? '✅' : '❌'}`,
+);
 
 // 구체 예시 1개
 const demo = [
@@ -72,4 +91,4 @@ console.log('\n예시 (A·B 가깝고 C 멀리):');
 console.log(`  끄기: ${dPool.length}개, 최대 편차 ${maxSpread(dPool)}분`);
 console.log(`  켜기: ${dFiltered.length}개, 최대 편차 ${maxSpread(dFiltered)}분`);
 
-process.exitCode = overLimitAfterFilter === 0 ? 0 : 1;
+process.exitCode = overLimitAfterFilter === 0 && strictEmpty === 0 && bestEffortBad === 0 ? 0 : 1;
